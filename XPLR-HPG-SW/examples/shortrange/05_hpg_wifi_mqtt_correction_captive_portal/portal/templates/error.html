@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <link rel="icon" type="image/x-ico" href="/static/img/favicon.ico" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+
+    <title>XPLR-HPG</title>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/fontawesome.min.css" rel="stylesheet">
+    <link href="/static/css/xplrHpg.css" rel="stylesheet">
+    <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/fontawesome.min.js"></script>
+</head>
+
+<body>
+
+    <div class="navbar navbar-expand-lg bg-body-tertiary" id="jsNavbar">
+        <!-- Placeholder to load navbar from xplrHpg.js -->
+    </div>
+
+    <div class="container-fluid p-1 text-white text-center " id="banner">
+        <h1>XPLR-HPG</h1>
+        <p>Error 404 - resource not found </p>
+    </div>
+
+</body>
+
+<!--   XPLR HPG Scripts   -->
+<script src="/static/js/jquery-1.7.1.min.js"></script>
+<script src="/static/js/xplrHpg.js"></script>
+
+<script>
+    const url = 'ws://' + window.location.host + '/xplrHpg';
+    let xplr = new xplrHpg(url, "error");
+
+    $(document).ready(function () {
+        xplr.showNavbar();
+    });
+
+</script>
+
+</html>

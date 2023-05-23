@@ -1,0 +1,34 @@
+menu "XPLR HPG Options"
+
+    menu "Cellular Settings"
+        config XPLR_CELL_APN
+            string "APN value of cellular provider"
+            default "internet"
+            help
+                type in the APN of your cellular provider.
+    endmenu
+
+    menu "AWS Root CA Settings"
+        config XPLR_AWS_ROOTCA_URL
+            string "AWS root ca url"
+            default "www.amazontrust.com:443"
+            help
+                Fill in the url and port used for retrieving the root ca.
+
+        config XPLR_AWS_ROOTCA_PATH
+            string "AWS root ca path"
+            default "/repository/AmazonRootCA1.pem"
+            help
+                Fill in the path to the root ca url.
+    endmenu
+
+    menu "Thingstream Zero Touch Provisioning Settings"
+
+        config XPLR_TS_PP_ZTP_TOKEN
+            string "ZTP Thingstream token"
+            default "ztp-token"
+            help
+                Type in the ZTP token from your Thingstream account.
+    endmenu
+
+endmenu

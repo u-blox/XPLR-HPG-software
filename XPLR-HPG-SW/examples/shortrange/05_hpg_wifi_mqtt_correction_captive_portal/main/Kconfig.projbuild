@@ -1,0 +1,35 @@
+menu "XPLR HPG Options"
+
+    menu "Wi-Fi Settings"
+        config XPLR_WIFI_SSID
+            string "Access Point SSID"
+            default "ssid"
+            help
+                AP SSID you wish to connect to.
+
+        config XPLR_WIFI_PASSWORD
+            string "Access Point Password"
+            default "password"
+            help
+                AP password you wish to connect to.
+
+        config XPLR_MDNS_HOSTNAME
+            string "mDNS Hostname"
+            default "xplr-hpg"
+            help
+                mDNS Hostname for example to use
+
+        config XPLR_MDNS_INSTANCE
+            string "mDNS Instance Name"
+            default "U-Blox XPLR-HPG kit"
+            help
+                mDNS Instance Name for example to use
+
+        config XPLR_MDNS_ADD_MAC_TO_HOSTNAME
+            bool "Add mac suffix to hostname"
+            default n
+            help
+                If enabled, a portion of MAC address is added to the hostname
+    endmenu
+
+endmenu

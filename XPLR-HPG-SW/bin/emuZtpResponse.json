@@ -1,0 +1,87 @@
+{
+"certificate":"
+-----BEGIN CERTIFICATE-----\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+-----END CERTIFICATE-----\n",
+"clientId":"xxxxxxxx-yyyy-zzzz-xxxx-yyyyyyyyyyyy",
+"privateKey":"
+-----BEGIN RSA PRIVATE KEY-----\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n
+-----END RSA PRIVATE KEY-----\n",
+"subscriptionsTitle":"Topics",
+"brokerHost":"pp.services.u-blox.com",
+"supportsLband":true,
+"subscriptions":[
+    {"description":"L-band + IP key distribution topic","path":"/pp/ubx/0236/Lb"},
+    {"description":"L-band + IP AssistNow topic","path":"/pp/ubx/mga"},
+    {"description":"L-band + IP correction topic for EU region","path":"/pp/Lb/eu"},
+    {"description":"L-band + IP geographic area definition topic for EU region","path":"/pp/Lb/eu/gad"},
+    {"description":"L-band + IP high-precision atmosphere correction topic for EU region","path":"/pp/Lb/eu/hpac"},
+    {"description":"L-band + IP GNSS orbit, clocks and bias topic for EU region","path":"/pp/Lb/eu/ocb"},
+    {"description":"L-band + IP GNSS clock topic for EU region","path":"/pp/Lb/eu/clk"},
+    {"path":"/pp/Lb/eu/gad;/pp/Lb/eu/hpac;/pp/Lb/eu/ocb;/pp/Lb/eu/clk"},
+    {"description":"L-band + IP correction topic for US region","path":"/pp/Lb/us"},
+    {"description":"L-band + IP geographic area definition topic for US region","path":"/pp/Lb/us/gad"},
+    {"description":"L-band + IP high-precision atmosphere correction topic for US region","path":"/pp/Lb/us/hpac"},
+    {"description":"L-band + IP GNSS orbit, clocks and bias topic for US region","path":"/pp/Lb/us/ocb"},
+    {"description":"L-band + IP GNSS clock topic for US region","path":"/pp/Lb/us/clk"},
+    {"description":"L-band + IP frequencies topic","path":"/pp/frequencies/Lb"},
+    {"path":"/pp/Lb/us/gad;/pp/Lb/us/hpac;/pp/Lb/us/ocb;/pp/Lb/us/clk;/pp/frequencies/Lb"},
+    {"description": "L-band + IP correction topic for AU region","path": "/pp/Lb/au"},
+    {"description": "L-band + IP correction topic for Japan region","path": "/pp/Lb/jp"},
+    {"description": "L-band + IP geographic area definition topic for Japan region","path": "/pp/Lb/jp/gad"},
+    {"description": "L-band + IP high-precision atmosphere correction topic for Japan region","path": "/pp/Lb/jp/hpac"},
+    {"description": "L-band + IP GNSS orbit, clocks and bias topic for Japan region","path": "/pp/Lb/jp/ocb"},
+    {"description": "L-band + IP GNSS clock topic for Japan region","path": "/pp/Lb/jp/clk"},
+    {"path": "/pp/Lb/jp/gad;/pp/Lb/jp/hpac;/pp/Lb/jp/ocb;/pp/Lb/jp/clk"}],
+"supportsMqtt":true,
+"rotatingKeyTitle":"L-band + IP Dynamic Keys",
+"dynamickeys":{
+    "next":{"duration":2505599999,
+            "start":1671235182000,
+            "value":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+    "current":{"duration":2419199999,
+                "start":1668815982000,
+                "value":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
+}

@@ -1,0 +1,41 @@
+{
+    "files.encoding": "utf8",
+    "astyle.executable": "${workspaceRoot}/bin/AStyle.exe",
+    "astyle.c.enable": true,
+    "C_Cpp.formatting": "Disabled",
+    "astyle.astylerc": "${workspaceRoot}/bin/.astylerc",
+    "editor.wordWrap": "off",
+    "editor.formatOnPaste": true,
+    "prettier.printWidth": 120,
+    //"editor.formatOnSave": true,
+    "editor.renderWhitespace": "all",
+    //"editor.insertSpaces": true,
+    //"editor.tabSize": 4,
+    //"editor.detectIndentation": true,
+    "makefile.extensionOutputFolder": "./.vscode",
+    "idf.adapterTargetName": "esp32",
+    /* Files that are not shown in vscode workspace */
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/.obj": true
+    },
+    /* Files that will not be parsed by C/CPP extension */
+    "C_Cpp.files.exclude": {
+        "**/.vscode": true,
+        "**/_build": true
+    },
+    "files.associations": {
+        "u_device.h": "c",
+        "u_device_shared.h": "c",
+        "u_cell_module_type.h": "c",
+        "ubxlib.h": "c",
+        "u_cfg_app_platform_specific.h": "c",
+        "u_runner.h": "c",
+        "u_cfg_sw.h": "c",
+        "complex": "c"
+    }
+}

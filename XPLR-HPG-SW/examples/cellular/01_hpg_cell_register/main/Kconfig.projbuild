@@ -1,0 +1,11 @@
+menu "XPLR HPG Options"
+
+    menu "Cellular Settings"
+        config XPLR_CELL_APN
+            string "APN value of cellular provider"
+            default "internet"
+            help
+                type in the APN of your cellular provider.
+    endmenu
+
+endmenu

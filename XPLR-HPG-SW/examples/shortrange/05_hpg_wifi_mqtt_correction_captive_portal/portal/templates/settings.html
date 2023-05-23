@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" type="image/x-ico" href="/static/img/favicon.ico" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+
+  <title>XPLR-HPG</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+  <link href="/static/css/fontawesome.min.css" rel="stylesheet">
+  <link href="/static/css/xplrHpg.css" rel="stylesheet">
+  <script src="/static/js/bootstrap.bundle.min.js"></script>
+  <script src="/static/js/fontawesome.min.js"></script>
+</head>
+
+<body>
+
+  <div class="navbar navbar-expand-lg bg-body-tertiary" id="jsNavbar">
+    <!-- Placeholder to load navbar from xplrHpg.js -->
+  </div>
+
+  <div class="container-fluid p-1 text-white text-center " id="banner">
+    <h1>Settings Page</h1>
+  </div>
+
+  <div class="container mt-5">
+    <div class="row">
+      <div class="col-sm-4" id="jsSsidScan">
+        <div class="mb-3">
+          <h3>Available Access Points</h3>
+          <div class="container" id="jsSsidScanResults">
+            <!-- Placeholder to load ssid scan results from xplrHpg.js -->
+          </div>
+          <div class="d-grid gap-2">
+            <a href="#" class="btn btn-secondary mt-3" id="jsDvcSettingsWifiScanBtn">Scan</a>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-4" id="jsDeviceSettings">
+        <h3>Device Config</h3>
+        <div class="mb-3">
+          <h4>Wifi</h4>
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-ssid">SSID</span>
+            <input type="text" class="form-control" name="ssid" id="ssid" onchange="validateWifiCred()">
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-pwd">Password</span>
+            <input type="password" class="form-control" name="pwd" id="password" onchange="validateWifiCred()">
+          </div>
+        </div>
+        <div id="wifiAlert"></div>
+        <div class="d-grid gap-2">
+          <button class="btn btn-secondary mb-3" id="wifiCredSetBtn" disabled>Set</button>
+          <!-- <button class="btn btn-warning" id="wifiCredEraseBtn">Erase</button> -->
+        </div>
+        <div class="mb-3">
+          <h3>Thingstream Config</h3>
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-clientId">Client ID</span>
+            <input class="form-control" type="text" onchange="validateClientId()" name="clientId" id="clientId"
+              aria-describedby="clientIdHelp">
+            <button class="btn btn-outline-secondary" id="tsClientIdSetBtn" disabled>Set</button>
+          </div>
+          <div id="clientIdAlert"></div>
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-rootCa">Root</span>
+            <input class="form-control" type="file" onchange="validateRootCa()" id="rootCaFile">
+            <button class="btn btn-outline-secondary" id="rootCaSetBtn" disabled>Set</button>
+          </div>
+          <div id="rootCaAlert"></div>
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-cert">Cert</span>
+            <input class="form-control" type="file" onchange="validateCert()" id="clientCertFile">
+            <button class="btn btn-outline-secondary" id="tsClientCertSetBtn" disabled>Set</button>
+          </div>
+          <div id="tsCertAlert"></div>
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-key">Key</span>
+            <input class="form-control" type="file" onchange="validateKey()" id="clientKeyFile">
+            <button class="btn btn-outline-secondary" id="tsClientKeySetBtn" disabled>Set</button>
+          </div>
+          <div id="tsKeyAlert"></div>
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-region">Region</span>
+            <select class="form-select form-select-sm" aria-label=".form-select-sm region" id="region"
+              onchange="validateRegion()">
+              <option selected>Choose region</option>
+              <option value="EU">EU</option>
+              <option value="US">US</option>
+            </select>
+            <button class="btn btn-outline-secondary" id="tsRegionBtn" disabled>Set</button>
+          </div>
+        </div>
+        <div class="d-grid gap-2">
+          <!-- <button class="btn btn-warning" id="tsPpCredEraseBtn">Erase</button> -->
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+
+<!--   XPLR HPG Scripts   -->
+<script src="/static/js/jquery-1.7.1.min.js"></script>
+<script src="/static/js/xplrHpg.js"></script>
+
+<script>
+  const url = 'ws://' + window.location.host + '/xplrHpg';
+  let xplr = new xplrHpg(url, "settings");
+
+  $(document).ready(function () {
+    xplr.showNavbar();
+    xplr.wsConnect();
+
+    setInterval(() => {
+      xplr.wsLoop("dvcConfig");
+    }, 1000);
+
+    $('#jsDvcSettingsWifiScanBtn').click(function () {
+      xplr.wsRequestDvcSsidScan();
+    });
+
+    $('#wifiCredSetBtn').click(function () {
+      xplr.wsUpdateWifiCreds(xplr.ssid, xplr.password);
+      if (xplr.password == '') {
+        createAlert('Warning',
+          '',
+          '<b>Password field is empty</b>!',
+          'warning',
+          false,
+          true,
+          'wifiAlert');
+      }
+      let button = document.querySelector("#wifiCredSetBtn");
+      button.style.backgroundColor = '#198754'; //bs-green
+      button.style.color = '#fff'; //bs-white
+    });
+
+    $('#wifiCredEraseBtn').click(function () {
+      xplr.wsRequestDvcEraseWifi();
+    });
+
+    $('#tsClientIdSetBtn').click(function () {
+      xplr.wsUpdateThingstreamPpId(xplr.ppId);
+      let button = document.querySelector("#tsClientIdSetBtn");
+      button.style.backgroundColor = '#198754'; //bs-green
+      button.style.color = '#fff'; //bs-white
+    });
+
+    $('#rootCaSetBtn').click(function () {
+      xplr.wsUpdateThingstreamPpRootCa(xplr.rootCa);
+      let button = document.querySelector("#rootCaSetBtn");
+      button.style.backgroundColor = '#198754'; //bs-green
+      button.style.color = '#fff'; //bs-white
+    });
+
+    $('#tsClientCertSetBtn').click(function () {
+      xplr.wsUpdateThingstreamPpCert(xplr.ppCert);
+      let button = document.querySelector("#tsClientCertSetBtn");
+      button.style.backgroundColor = '#198754'; //bs-green
+      button.style.color = '#fff'; //bs-white
+    });
+
+    $('#tsClientKeySetBtn').click(function () {
+      xplr.wsUpdateThingstreamPpKey(xplr.ppKey);
+      let button = document.querySelector("#tsClientKeySetBtn");
+      button.style.backgroundColor = '#198754'; //bs-green
+      button.style.color = '#fff'; //bs-white
+    });
+
+    $('#tsRegionBtn').click(function () {
+      xplr.wsUpdateThingstreamPpRegion(xplr.ppRegion);
+      let button = document.querySelector("#tsRegionBtn");
+      button.style.backgroundColor = '#198754'; //bs-green
+      button.style.color = '#fff'; //bs-white
+    });
+
+    $('#tsPpCredEraseBtn').click(function () {
+      xplr.wsRequestDvcEraseThingstream();
+    });
+
+  });
+
+  function validateWifiCred() {
+    //xxxxxxxx-yyyy-zzzz-xxxx-yyyyyyyyyyyy
+    var ssid = null;
+    var pwd = null;
+
+    ssid = document.getElementById("ssid").value.trim();
+    pwd = document.getElementById("password").value;
+    let button = document.querySelector("#wifiCredSetBtn");
+
+    if (ssid.length > 0) {
+      bsAlert = document.getElementById("wifiAlert");
+      bsAlert.className = null;
+      bsAlert.innerHTML = null;
+      xplr.ssid = ssid;
+      xplr.password = pwd;
+      button.disabled = false;
+    } else {
+      createAlert('Invalid SSID',
+        '',
+        'SSID field cannot be empty. Please try again',
+        'danger',
+        false,
+        true,
+        'wifiAlert');
+
+      button.disabled = true;
+      button.style.backgroundColor = '#6c757d'; //bs-secondary
+      button.style.color = '#fff'; //bs-white
+    }
+  }
+
+  function validateClientId() {
+    //xxxxxxxx-yyyy-zzzz-xxxx-yyyyyyyyyyyy
+    var id = null;
+
+    id = document.getElementById("clientId").value;
+
+    if (id.length == 36) {
+      bsAlert = document.getElementById("clientIdAlert");
+      bsAlert.className = null;
+      bsAlert.innerHTML = null;
+      xplr.ppId = id;
+      document.querySelector('#tsClientIdSetBtn').disabled = false;
+    } else {
+      createAlert('Invalid ID',
+        '',
+        'ID must be <b>36</b> characters long and have the following format:<br> <br>\
+        <b>xxxxxxxx-yyyy-zzzz-xxxx-yyyyyyyyyyyy</b>.',
+        'danger',
+        false,
+        true,
+        'clientIdAlert');
+
+      document.querySelector('#tsClientIdSetBtn').disabled = true;
+      let button = document.querySelector("#tsClientIdSetBtn");
+      button.style.backgroundColor = '#00000000'; //bs-transparent
+      button.style.borderColor = '#6c757d'; //bs-secondary
+      button.style.color = '#6c757d'; //bs-secondary
+    }
+  }
+
+  function validateRootCa() {
+    let reader = new FileReader();
+    var filename = null;
+    var fileList = null;
+    var fileData = null;
+
+    filename = document.getElementById("rootCaFile").files[0].name;
+    let button = document.querySelector("#rootCaSetBtn");
+
+    if (filename.indexOf("AmazonRootCA1.pem") == -1) {
+      createAlert('Invalid Filename',
+        '',
+        'Filename must contain <b>AmazonRootCA1.pem</b>.',
+        'danger',
+        false,
+        true,
+        'rootCaAlert');
+      button.style.backgroundColor = '#00000000'; //bs-transparent
+      button.style.borderColor = '#6c757d'; //bs-secondary
+      button.style.color = '#6c757d'; //bs-secondary
+    } else {
+      fileList = document.getElementById("rootCaFile").files;
+      file = fileList[0];
+      if ((file.size > 2048)) {
+        createAlert('Invalid Content',
+          '',
+          'File provided is not a valid certificate. Please check again.',
+          'danger',
+          false,
+          true,
+          'rootCaAlert');
+        button.style.backgroundColor = '#00000000'; //bs-transparent
+        button.style.borderColor = '#6c757d'; //bs-secondary
+        button.style.color = '#6c757d'; //bs-secondary
+      } else {
+        reader.readAsText(file);
+        reader.onload = function () {
+          xplr.rootCa = reader.result;
+          button.disabled = false;
+        };
+
+        reader.onerror = function () {
+          console.log(reader.error);
+          createAlert('Filereader error',
+            '',
+            'There was an error while reading RootCa. Please try again.',
+            'danger',
+            false,
+            true,
+            'rootCaAlert');
+          button.style.backgroundColor = '#00000000'; //bs-transparent
+          button.style.borderColor = '#6c757d'; //bs-secondary
+          button.style.color = '#6c757d'; //bs-secondary
+        };
+      }
+    }
+  }
+
+  function validateCert() {
+    let reader = new FileReader();
+    var filename = null;
+    var fileList = null;
+    var fileData = null;
+
+    filename = document.getElementById("clientCertFile").files[0].name;
+    let button = document.querySelector("#tsClientCertSetBtn");
+
+    if (filename.indexOf("pp-cert.crt") == -1) {
+      createAlert('Invalid Filename',
+        '',
+        'Filename must contain <b>pp-cert.crt</b>.',
+        'danger',
+        false,
+        true,
+        'tsCertAlert');
+      button.style.backgroundColor = '#00000000'; //bs-transparent
+      button.style.borderColor = '#6c757d'; //bs-secondary
+      button.style.color = '#6c757d'; //bs-secondary
+    } else {
+      fileList = document.getElementById("clientCertFile").files;
+      file = fileList[0];
+      if ((file.size > 2048)) {
+        createAlert('Invalid Content',
+          '',
+          'File provided is not a valid certificate. Please check again.',
+          'danger',
+          true,
+          false,
+          'tsCertAlert');
+        button.style.backgroundColor = '#00000000'; //bs-transparent
+        button.style.borderColor = '#6c757d'; //bs-secondary
+        button.style.color = '#6c757d'; //bs-secondary
+      } else {
+        reader.readAsText(file);
+        reader.onload = function () {
+          xplr.ppCert = reader.result;
+          button.disabled = false;
+        };
+
+        reader.onerror = function () {
+          console.log(reader.error);
+          createAlert('Filereader error',
+            '',
+            'There was an error while reading Client Certificate. Please try again.',
+            'danger',
+            false,
+            true,
+            'tsCertAlert');
+          button.style.backgroundColor = '#00000000'; //bs-transparent
+          button.style.borderColor = '#6c757d'; //bs-secondary
+          button.style.color = '#6c757d'; //bs-secondary
+        };
+      }
+    }
+  }
+
+  function validateKey() {
+    let reader = new FileReader();
+    var filename = null;
+    var fileList = null;
+    var fileData = null;
+
+    filename = document.getElementById("clientKeyFile").files[0].name;
+    let button = document.querySelector("#tsClientKeySetBtn");
+
+    if (filename.indexOf("pp-key.pem") == -1) {
+      createAlert('Invalid Filename',
+        '',
+        'Filename must contain <b>pp-key.pem</b>.',
+        'danger',
+        false,
+        true,
+        'tsKeyAlert');
+      button.style.backgroundColor = '#00000000'; //bs-transparent
+      button.style.borderColor = '#6c757d'; //bs-secondary
+      button.style.color = '#6c757d'; //bs-secondary
+    } else {
+      fileList = document.getElementById("clientKeyFile").files;
+      file = fileList[0];
+      if (file.size > 2048) {
+        createAlert('Invalid Content',
+          '',
+          'File provided is not a valid key certificate. Please check again.',
+          'danger',
+          false,
+          true,
+          'tsKeyAlert');
+        button.style.backgroundColor = '#00000000'; //bs-transparent
+        button.style.borderColor = '#6c757d'; //bs-secondary
+        button.style.color = '#6c757d'; //bs-secondary
+      } else {
+        reader.readAsText(file);
+        reader.onload = function () {
+          xplr.ppKey = reader.result;
+          button.disabled = false;
+        };
+
+        reader.onerror = function () {
+          console.log(reader.error);
+          createAlert('Filereader error',
+            '',
+            'There was an error while reading Client Key Certificate. Please try again.',
+            'danger',
+            false,
+            true,
+            'tsKeyAlert');
+          button.style.backgroundColor = '#00000000'; //bs-transparent
+          button.style.borderColor = '#6c757d'; //bs-secondary
+          button.style.color = '#6c757d'; //bs-secondary
+        };
+      }
+    }
+  }
+
+  function validateRegion() {
+    var region = null;
+
+    region = document.getElementById("region").value;
+
+    if ((region === 'EU') || (region === 'US')) {
+      xplr.ppRegion = region;
+      document.querySelector('#tsRegionBtn').disabled = false;
+    } else {
+      document.querySelector('#tsRegionBtn').disabled = true;
+    }
+  }
+
+  //https://codepen.io/codysechelski/pen/dYVwjb
+  //https://codepen.io/tomosewe/pen/RQNBJZ
+  function createAlert(title, summary, details, severity, dismissible, autoDismiss, appendToId) {
+    var iconMap = {
+      info: "fa fa-info-circle",
+      success: "fa fa-thumbs-up",
+      warning: "fa fa-exclamation-triangle",
+      danger: "fa ffa fa-exclamation-circle"
+    };
+
+    var iconAdded = false;
+
+    var alertClasses = ["alert", "animated", "flipInX"];
+    alertClasses.push("alert-" + severity.toLowerCase() + " d-flex flex-row" + "role=\"alert\"");
+
+    if (dismissible) {
+      alertClasses.push("alert-dismissible");
+    }
+
+    var msgIcon = $("<i />", {
+      "class": iconMap[severity] // you need to quote "class" since it's a reserved keyword
+    });
+
+    var msg = $("<div />", {
+      "class": alertClasses.join(" ") // you need to quote "class" since it's a reserved keyword
+    });
+
+    if (title) {
+      var msgTitle = $("<h4 />", {
+        html: title
+      }).appendTo(msg);
+
+      if (!iconAdded) {
+        msgTitle.prepend(msgIcon);
+        iconAdded = true;
+      }
+
+    }
+
+    if (summary) {
+      var msgSummary = $("<strong />", {
+        html: summary
+      }).appendTo(msg);
+
+      if (!iconAdded) {
+        msgSummary.prepend(msgIcon);
+        iconAdded = true;
+      }
+
+    }
+
+    if (details) {
+      var msgDetails = $("<p />", {
+        html: details
+      }).appendTo(msg);
+
+      if (!iconAdded) {
+        msgDetails.prepend(msgIcon);
+        iconAdded = true;
+      }
+
+    }
+
+    if (dismissible) {
+      var msgClose = $("<span />", {
+        "class": "close", // you need to quote "class" since it's a reserved keyword
+        "data-dismiss": "alert",
+        //html: "<a href = \"/settings.html\" class = \"close\" data-dismiss = \"alert\">&times;</a>"
+        html: "<i href = \"/templates/settings.html\" class='fa fa-times-circle'></i>"
+      }).appendTo(msg);
+    }
+    $('#' + appendToId).prepend(msg);
+
+    if (autoDismiss) {
+      setTimeout(function () {
+        msg.addClass("flipOutX");
+        setTimeout(function () {
+          msg.remove();
+        }, 1000);
+      }, 5000);
+    }
+  }
+
+</script>
+
+
+</html>

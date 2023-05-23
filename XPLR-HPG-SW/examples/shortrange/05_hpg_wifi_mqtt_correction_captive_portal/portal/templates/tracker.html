@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" type="image/x-ico" href="/static/img/favicon.ico" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+
+  <title>XPLR-HPG</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v7.3.0/ol.css">
+  <link href="/static/css/xplrHpg.css" rel="stylesheet">
+  <script src="/static/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ol@v7.3.0/dist/ol.js"></script>
+</head>
+
+<body>
+
+  <div class="navbar navbar-expand-lg bg-body-tertiary" id="jsNavbar">
+    <!-- Placeholder to load navbar from xplrHpg.js -->
+  </div>
+
+  <div class="container-fluid p-1 text-white text-center " id="banner">
+    <h1>Live Tracker</h1>
+  </div>
+
+  <div class="card text-center">
+    <div class="card-content">
+      <div class="card-body">
+        <h5 class="card-title">Monitor</h5>
+        <div class="row">
+          <div class="col">
+            <div class="card-text" id="jsDvcTracker">
+              <!-- Placeholder to load device tracker from xplrHpg.js -->
+              <div hidden id="map" class="map" style="height:40vh"></div>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div id='gnssLog' class='item'></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+
+<!--   XPLR HPG Scripts   -->
+<script src="/static/js/jquery-1.7.1.min.js"></script>
+<script src="/static/js/xplrHpg.js"></script>
+
+<script>
+  const url = 'ws://' + window.location.host + '/xplrHpg';
+  let xplr = new xplrHpg(url, "tracker");
+
+
+  $(document).ready(function () {
+    xplr.showNavbar();
+    xplr.wsConnect();
+
+    setInterval(() => {
+      xplr.wsLoop("dvcTracker");
+    }, 1000);
+
+  });
+</script>
+
+
+</html>

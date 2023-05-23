@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" type="image/x-ico" href="/static/img/favicon.ico" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+
+  <title>XPLR-HPG</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+  <link href="/static/css/fontawesome.min.css" rel="stylesheet">
+  <link href="/static/css/xplrHpg.css" rel="stylesheet">
+  <script src="/static/js/bootstrap.bundle.min.js"></script>
+  <script src="/static/js/fontawesome.min.js"></script>
+</head>
+
+<body>
+
+  <div class="navbar navbar-expand-lg bg-body-tertiary" id="jsNavbar">
+    <!-- Placeholder to load navbar from xplrHpg.js -->
+  </div>
+
+  <div class="container-fluid p-1 text-white text-center " id="banner">
+    <h1>XPLR-HPG</h1>
+    <p>web interface</p>
+  </div>
+
+  <div class="card text-start">
+    <div class="card-content">
+      <div class="card-body">
+        <h5 class="card-title">Device Status</h5>
+        <div class="row">
+          <div class="col">
+            <div class="card-text" id="jsDvcStatus">
+              <!-- Placeholder to load device status from xplrHpg.js -->
+            </div>
+          </div>
+          <div class="row">
+            <div class="card-text" id="jsDvcInfo">
+              <div class="mb-3">
+                <br>
+                <h5>Device Info</h5>
+                <table class="table table-hover">
+                  <tbody>
+                    <tr>
+                      <th scope="row">SSID</th>
+                      <td>
+                        <input class="border-0" type="text" id="jsDvcInfoSsid" disabled>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">IP</th>
+                      <td>
+                        <input class="border-0 bg-white" type="text" id="jsDvcInfoIP" disabled>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Hostname</th>
+                      <td>
+                        <input class="border-0" type="text" id="jsDvcInfoHostname" disabled>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">GNSS Accuracy</th>
+                      <td>
+                        <input class="border-0 bg-white" type="text" id="jsDvcInfoAccuracy" disabled>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">MQTT Traffic</th>
+                      <td>
+                        <input class="border-0" type="text" id="jsDvcInfoMqttTraffic" disabled>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Time to Fix</th>
+                      <td>
+                        <input class="border-0 bg-white" type="text" id="jsDvcInfoTimeToFix" disabled>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Uptime</th>
+                      <td>
+                        <input class="border-0" type="text" id="jsDvcInfoUptime" disabled>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">FW Version</th>
+                      <td>
+                        <input class="border-0 bg-white" type="text" id="jsDvcInfoFwVersion" disabled>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer text-center bg-white border-0">
+        <div class="overlay" id="factoryReset" hidden>
+          <div class="confirm-box">
+            <h2><b>Factory Reset</b></h2>
+            <p>
+              A factory reset is about to be performed. <br>
+              <b>Wi-Fi</b> and <b>Thingstream</b> credentials will be erased.<br>
+              Are you sure you want to continue?
+            </p>
+            <button onclick="factoryReset(true)">Yes</button>
+            <button onclick="factoryReset(false)">No</button>
+            <br>
+            <hr>
+          </div>
+        </div>
+        <a href="/settings.html" class="btn btn-secondary" id="jsDvcStatusConfigBtn">Config</a>
+        <a href="#" class="btn btn-warning" id="jsDvcStatusRebootBtn">Reboot</a>
+        <a href="#" class="btn btn-danger" id="jsDvcStatusEraseBtn">Erase</a>
+      </div>
+    </div>
+  </div>
+
+</body>
+
+<!--   XPLR HPG Scripts   -->
+<script src="/static/js/jquery-1.7.1.min.js"></script>
+<script src="/static/js/xplrHpg.js"></script>
+
+<script>
+  const url = 'ws://' + window.location.host + '/xplrHpg';
+  let xplr = new xplrHpg(url, "status");
+
+  $(document).ready(function () {
+    xplr.showNavbar();
+    xplr.eventDisplay('dvcStatus', null);
+    xplr.wsConnect();
+
+    setInterval(() => {
+      xplr.wsLoop("dvcStatus");
+    }, 1000);
+
+    $('#jsDvcStatusRebootBtn').click(function () {
+      xplr.wsRequestDvcReboot();
+    });
+
+    $('#jsDvcStatusEraseBtn').click(function () {
+      document.getElementById("factoryReset").hidden = false;
+    });
+
+  });
+
+  function factoryReset(val) {
+    if (val) {
+      alert("Factory reset is pending.\nDevice will reboot in AP mode");
+      xplr.wsRequestDvcErase();
+    }
+
+    document.getElementById("factoryReset").hidden = true;
+  }
+
+</script>
+
+</html>

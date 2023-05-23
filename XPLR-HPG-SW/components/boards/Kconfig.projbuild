@@ -1,0 +1,18 @@
+menu "Board Options"
+
+    choice BOARD_TARGET
+        prompt "Choose Target Board"
+            default BOARD_XPLR_HPG2_C214
+
+        config BOARD_XPLR_HPG2_C214
+            bool "XPLR HPG2 C214 (NINA-W106)"
+
+        config BOARD_XPLR_HPG1_C213
+            bool "XPLR HPG1 C213 (NORA-W106)"
+
+        config BOARD_MAZGCH_HPG_SOLUTION
+            bool "MAZGCH HPG SOLUTION (NINA-W106)"
+
+    endchoice
+
+endmenu

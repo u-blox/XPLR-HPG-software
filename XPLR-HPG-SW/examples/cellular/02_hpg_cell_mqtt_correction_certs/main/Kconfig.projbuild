@@ -1,0 +1,28 @@
+menu "XPLR HPG Options"
+
+    menu "Cellular Settings"
+        config XPLR_CELL_APN
+            string "APN value of cellular provider"
+            default "internet"
+            help
+                type in the APN of your cellular provider.
+    endmenu
+
+    menu "MQTT Settings"
+
+        config XPLR_MQTTCELL_THINGSTREAM_HOSTNAME
+            string "Broker hostname"
+            default "pp.services.u-blox.com:8883"
+            help
+                Sets the url for the MQTT Broker Address.<br>
+                Default value is recommended unless there's a change in the official docs.<br>
+
+        config XPLR_MQTTCELL_CLIENT_ID
+            string "Client ID"
+            default "Client-ID"
+            help
+                Sets the MQTT Client ID according to Thingstream Client ID value.<br>
+
+    endmenu
+
+endmenu

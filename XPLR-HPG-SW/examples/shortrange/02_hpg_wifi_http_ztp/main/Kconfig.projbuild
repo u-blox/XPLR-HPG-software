@@ -1,0 +1,38 @@
+menu "XPLR HPG Options"
+
+    menu "Thingstream Zero Touch Provisioning Settings"
+        config XPLR_TS_PP_ZTP_CREDENTIALS_URL
+            string "ZTP Thingstream credentials URL"
+            default "https://api.thingstream.io/ztp/pointperfect/credentials"
+            help
+                Sets the URL for the WEB API to fetch Poin Perfect ZTP payload.<br>
+                Default value is recommended unless there's a change in the official docs.
+
+        config XPLR_TS_PP_ZTP_TOKEN
+            string "ZTP Thingstream token"
+            default "ztp-token"
+            help
+                Type in the ZTP token from your Thingstream account.
+
+        config XPLR_TS_PP_DEVICE_NAME
+            string "ZTP device name"
+            default "device-name"
+            help
+                Type in a device name of your chosing.
+    endmenu
+
+    menu "Wi-Fi Settings"
+        config XPLR_WIFI_SSID
+            string "Access Point SSID"
+            default "ssid"
+            help
+                Fill in the AP SSID you wish to connect to.
+
+        config XPLR_WIFI_PASSWORD
+            string "Access Point Password"
+            default "password"
+            help
+                Fill in the AP SSID you wish to connect to.
+    endmenu
+
+endmenu
