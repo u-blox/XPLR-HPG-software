@@ -1,0 +1,38 @@
+#Ignore build subdirs
+**/build*
+
+#Ignore VS Code workspaces
+**/*.code-workspace
+
+#Ignore VS Code project settigns
+**/.vscode
+
+#Ignore SDKConfig, to be build using menuconfig
+**/*sdkconfig
+**/*sdkconfig.old
+
+#Ignore UBXLib stuff
+/HPG-Compact/components/ubxlib/port/platform/esp-idf/mcu/esp32/runner/build
+/HPG-Compact/components/ubxlib/port/platform/zephyr/runner/build_*
+/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/build
+/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/_build
+/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/build_*
+/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/ses/runner/Output
+/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/ses/runner/*.jlink
+/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/Debug
+/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/Release
+/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/.settings
+/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/*.launch
+/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/test_only_*
+/HPG-Compact/components/ubxlib/port/platform/static_size/build
+sdkconfig
+*.emSession
+*.pyc
+doxygen_output
+_jenkins_work
+_work
+*.state.json
+u_flags.yml
+config.yml
+_build
+/HPG-Compact/components/ubxlib/port/platform/arduino/ubxlib
