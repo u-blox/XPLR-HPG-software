@@ -1,3 +1,3 @@
-[submodule "XPLR-HPG-SW/ubxlib"]
-	path = XPLR-HPG-SW/ubxlib
-	url = https://github.com/u-blox/ubxlib
+[submodule "XPLR-HPG-SW/components/ubxlib"]
+	path = XPLR-HPG-SW/components/ubxlib
+	url = https://github.com/u-blox/ubxlib.git
