@@ -20,33 +20,39 @@ D [(25125) xplrMqttWifi|xplrMqttWifiFsm|171|: MQTT config successful!
 D [(25152) xplrMqttWifi|xplrMqttWifiFsm|180|: MQTT event register successful!
 D [(25177) xplrMqttWifi|xplrMqttWifiFsm|195|: MQTT client start successful!
 D [(27446) xplrMqttWifi|xplrMqttWifiEventHandlerCb|628|: MQTT event connected!
-D [(27453) xplrMqttWifi|xplrMqttWifiSubscribeToTopic|375|: Successfully subscribed to topic: /pp/ubx/0236/Lb with id: 15546
-D [(27578) xplrMqttWifi|xplrMqttWifiEventHandlerCb|640|: MQTT event subscribed!
-I [(27757) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [60] bytes.
-I [(27757) app|app_main|229|: Decryption keys sent successfully!
+D [(10064) xplrMqttWifi|xplrMqttWifiSubscribeToTopic|370|: Successfully subscribed to topic: /pp/ubx/0236/Lb with id: 55197
+D [(10067) xplrMqttWifi|xplrMqttWifiSubscribeToTopic|370|: Successfully subscribed to topic: /pp/frequencies/Lb with id: 16340
+D [(10361) xplrMqttWifi|xplrMqttWifiEventHandlerCb|675|: MQTT event subscribed!
+D [(10377) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|413|: Sent UBX formatted command [60] bytes.
+I [(10378) app|app_main|253|: Decryption keys sent successfully!
+D [(10562) xplrMqttWifi|xplrMqttWifiEventHandlerCb|675|: MQTT event subscribed!
+I [(10701) xplrCommonHelpers|xplrHlprLocSrvcOptionSingleValSet|291|: Set configuration value.
+D [(10701) xplrLband|xplrLbandSetFrequencyFromMqtt|341|: Set LBAND location: eu frequency: 1545260000 Hz successfully!
+I [(10710) app|app_main|264|: Frequency set successfully!
+
 ...
-I [(160075) xplrLband|xplrLbandMessageReceivedCB|486|: BYTES: 536
-I [(160089) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [536] bytes.
-I [(161784) xplrLband|xplrLbandMessageReceivedCB|486|: BYTES: 536
-I [(161798) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [536] bytes.
-I [(163477) xplrLband|xplrLbandMessageReceivedCB|486|: BYTES: 536
-I [(163491) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [536] bytes.
-I [(164567) xplrGnss|xplrGnssPrintGmapsLocation|627|: Printing GMapsLocation!
-https://maps.google.com/?q=38.048039,23.809122
-I [(164568) xplrGnss|xplrGnssPrintLocation|771|: Printing location info.
+
+D [(107548) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|413|: Sent UBX formatted command [536] bytes.
+I [(107548) xplrLband|xplrLbandMessageReceivedCB|581|: Sent LBAND correction data size [536]
+D [(109251) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|413|: Sent UBX formatted command [536] bytes.
+I [(109251) xplrLband|xplrLbandMessageReceivedCB|581|: Sent LBAND correction data size [536]
+D [(110907) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|413|: Sent UBX formatted command [536] bytes.
+I [(110907) xplrLband|xplrLbandMessageReceivedCB|581|: Sent LBAND correction data size [536]
+I [(111216) xplrGnss|xplrGnssPrintLocation|760|: Printing location info.
 ======== Location Info ========
 Location type: 1
 Location fix type: 3D\DGNSS\RTK-FIXED
 Location latitude: 38.048039 (raw: 380480386)
-Location longitude: 23.809122 (raw: 238091219)
-Location altitude: 233.957000 (m) | 233957 (mm)
-Location radius: 0.101000 (m) | 101 (mm)
-Speed: 0.003600 (km/h) | 0.001000 (m/s) | 1 (mm/s)
-Estimated horizontal accuracy: 0.1008 (m) | 100.80 (mm)
-Estimated vertical accuracy: 0.1771 (m) | 177.10 (mm)
-Satellite number: 26
-Time UTC: 1672139903
-===============================
+Location longitude: 23.809122 (raw: 238091223)
+Location altitude: 233.159000 (m) | 233159 (mm)
+Location radius: 0.099000 (m) | 99 (mm)
+Speed: 0.000000 (km/h) | 0.000000 (m/s) | 0 (mm/s)
+Estimated horizontal accuracy: 0.0992 (m) | 99.20 (mm)
+Estimated vertical accuracy: 0.1340 (m) | 134.00 (mm)
+Satellite number: 29
+Time UTC: 08:22:28
+Date UTC: 26.05.2023
+Calendar Time UTC: Fri 26.05.2023 08:22:28
 ...
 ```
 
@@ -133,13 +139,12 @@ You can change local macros as you wish inside the app.
 Name | Description 
 --- | --- 
 **`APP_SERIAL_DEBUG_ENABLED 1U`** | Switches debug printing messages ON or OFF
-**`APP_REGION_FREQUENCY`** | Frequency value to use for the LBAND module, Can be one of 2 values: **`XPLR_LBAND_FREQUENCY_EU`** or **`XPLR_LBAND_FREQUENCY_US`**
 **`APP_MQTT_PAYLOAD_BUF_SIZE (512U)`** | Definition of MQTT buffer size of 512Bytes. We are only parsing decryption keys and the buffer is more than enough to hold the MQTT payload.
 **`APP_LOCATION_PRINT_PERIOD 5`** | Period in seconds on how often we want our print location function [**`appPrintLocation(uint8_t periodSecs)`**] to execute. Can be changed as desired.
 **`XPLR_GNSS_I2C_ADDR 0x42`** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
 **`XPLR_LBAND_I2C_ADDR 0x43`** | I2C address for **[NEO-D9S](https://www.u-blox.com/en/product/neo-d9s-series)**  module.
-**`APP_KEYS_TOPIC "/pp/ubx/0236/Lb"`** | Decryption keys distribution topic. Change this according to your needs if needed.
-**`APP_CORRECTION_DATA_TOPIC "/pp/Lb/eu"`** | Correction data distribution topic. Change this according to your needs if needed.
+**`APP_KEYS_TOPIC  "/pp/ubx/0236/Lb"`** | Decryption keys distribution topic. No need to change unless otherwise noted on Thingstream.
+**`APP_FREQ_TOPIC  "/pp/frequencies/Lb"`** | Correction data distribution topic. No need to change unless otherwise noted on Thingstream.
 
 <br>
 <br>

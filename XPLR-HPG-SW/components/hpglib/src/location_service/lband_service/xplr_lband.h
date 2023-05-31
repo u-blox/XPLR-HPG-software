@@ -87,16 +87,12 @@ uDeviceHandle_t *xplrLbandGetHandler(uint8_t dvcProfile);
  * 
  * @param dvcProfile   an integer number denoting the device profile/index.
  * @param i2cAddress   I2C address of the LBAND device.
- * @param frequency    LBAND data channel frequency. Select on of the available frequencies
- *                     available according to your region:
- *                     XPLR_LBAND_FREQUENCY_EU or XPLR_LBAND_FREQUENCY_US
  * @param destHandler  GNSS destination device handler to push data to.
  * @return             zero on success or negative error code on
  *                     failure.
  */
 esp_err_t xplrLbandStartDeviceDefaultSettings(uint8_t dvcProfile, 
-                                              uint8_t i2cAddress, 
-                                              uint32_t frequency,
+                                              uint8_t i2cAddress,
                                               uDeviceHandle_t *destHandler);
 
 /**
@@ -104,16 +100,12 @@ esp_err_t xplrLbandStartDeviceDefaultSettings(uint8_t dvcProfile,
  * 
  * @param dvcProfile   an integer number denoting the device profile/index.
  * @param dvcCfg       device configuration.
- * @param frequency    LBAND data channel frequency. Select on of the available frequencies
- *                     available according to your region:
- *                     XPLR_LBAND_FREQUENCY_EU or XPLR_LBAND_FREQUENCY_US.
  * @param destHandler  GNSS destination device handler to push data to.
  * @return             zero on success or negative error code on
  *                     failure.
  */
 esp_err_t xplrLbandStartDevice(uint8_t dvcProfile, 
                                xplrLbandDeviceCfg_t *dvcCfg, 
-                               uint32_t frequency,
                                uDeviceHandle_t *destHandler);
 
 /**
@@ -221,13 +213,35 @@ esp_err_t xplrLbandOptionMultiValGet(uint8_t dvcProfile,
  * @brief Sets the frequency for correction data channel.
  * 
  * @param dvcProfile  an integer number denoting the device profile/index.
- * @param frequency   LBAND data channel frequency. Select on of the available frequencies
- *                    available according to your region:
- *                    XPLR_LBAND_FREQUENCY_EU or XPLR_LBAND_FREQUENCY_US
+ * @param frequency   LBAND data channel frequency. Taken usually from MQTT
+ *                    or can be manually passed if the values are known.
  * @return            zero on success or negative error code on
  *                    failure.
  */
 esp_err_t xplrLbandSetFrequency(uint8_t dvcProfile, uint32_t frequency);
+
+/**
+ * @brief Set frequency for LBAND directly from the received MQTT message
+ * depending on current region
+ * 
+ * @param dvcProfile   an integer number denoting the device profile/index.
+ * @param mqttPayload  MQTT payload as received from the client.
+ * @param region       geographic region we are currently in.
+ * @return             zero on success or negative error code on
+ *                     failure.
+ */
+esp_err_t xplrLbandSetFrequencyFromMqtt(uint8_t dvcProfile, 
+                                        char *mqttPayload, 
+                                        xplrLbandRegion region);
+
+/**
+ * @brief Reads configured frequency from LBAND
+ * 
+ * @param dvcProfile  an integer number denoting the device profile/index.
+ * @return            zero on success or negative error code on
+ *                    failure.
+ */
+uint32_t xplrLbandGetFrequency(uint8_t dvcProfile);
 
 /**
  * @brief 

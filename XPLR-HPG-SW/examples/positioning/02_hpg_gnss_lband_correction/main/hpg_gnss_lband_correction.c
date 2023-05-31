@@ -63,11 +63,6 @@
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
 
-/**
- * Use frequency according your region
- */
-#define APP_REGION_FREQUENCY XPLR_LBAND_FREQUENCY_EU
-
 /*
  * Simple macros used to set buffer size in bytes
  */
@@ -87,7 +82,8 @@
 /**
  * Decryption keys distribution topic
  */
-#define APP_KEYS_TOPIC    "/pp/ubx/0236/Lb"
+#define APP_KEYS_TOPIC  "/pp/ubx/0236/Lb"
+#define APP_FREQ_TOPIC  "/pp/frequencies/Lb"
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -127,6 +123,20 @@ extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
 static const char mqttClientId[] = CONFIG_XPLR_MQTTWIFI_CLIENT_ID;
 static const char mqttHost[] = CONFIG_XPLR_MQTTWIFI_THINGSTREAM_HOSTNAME;
 
+
+/**
+ * Use frequency according your region
+ * Valid Options:
+ * XPLR_LBAND_FREQUENCY_EU
+ * XPLR_LBAND_FREQUENCY_US
+ */
+static xplrLbandRegion lbandRegion = XPLR_LBAND_FREQUENCY_EU;
+
+/**
+ * Frequency read from LBAND module
+ */
+static uint32_t frequency;
+
 /**
  * Keeps time at "this" point of code execution.
  * Used to calculate elapse time.
@@ -152,7 +162,8 @@ static xplrWifiStarterOpts_t wifiOptions = {
  */
 static esp_mqtt_client_config_t mqttClientConfig;
 static xplrMqttWifiClient_t mqttClient;
-static char *topicArray[] = {APP_KEYS_TOPIC};
+static char *topicArray[] = {APP_KEYS_TOPIC,
+                             APP_FREQ_TOPIC};
 
 /**
  * A struct where we can store our received MQTT message
@@ -247,6 +258,20 @@ void app_main(void)
                         } else {
                             APP_CONSOLE(I, "Decryption keys sent successfully!");
                             keysSent = true;
+                        }
+                    }
+
+                    if (strcmp(mqttMessage.topic, APP_FREQ_TOPIC) == 0) {
+                        espRet = xplrLbandSetFrequencyFromMqtt(0, mqttMessage.data, lbandRegion);
+                        if (espRet != ESP_OK) {
+                           APP_CONSOLE(E, "Failed to set frequency!");
+                           appHaltExecution();
+                        } else {
+                            frequency = xplrLbandGetFrequency(0);
+                            if (frequency == 0) {
+                                APP_CONSOLE(I, "No LBAND frequency is set");
+                            }
+                            APP_CONSOLE(I, "Frequency %d Hz read from device successfully!", frequency);
                         }
                     }
                 }
@@ -359,9 +384,8 @@ static void appInitLocationDevices(void)
     }
 
     APP_CONSOLE(D, "Waiting for LBAND device to come online!");
-    espRet = xplrLbandStartDeviceDefaultSettings(0, 
-                                                 XPLR_LBAND_I2C_ADDR, 
-                                                 APP_REGION_FREQUENCY,
+    espRet = xplrLbandStartDeviceDefaultSettings(0,
+                                                 XPLR_LBAND_I2C_ADDR,
                                                  xplrGnssGetHandler(0));
     if (espRet != ESP_OK) {
         APP_CONSOLE(E, "Lband device config failed!");
@@ -451,3 +475,4 @@ static void appHaltExecution(void)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
+

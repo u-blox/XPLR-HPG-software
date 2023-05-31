@@ -65,6 +65,17 @@
 #endif
 
 /**
+ * These values are given as a starting point
+ * to show the functionality of xplrLbandSetFrequency
+ * These value could/will change in time so the best way to
+ * get the correct frequency values is to use MQTT
+ * You can refer to example positioning/02_hpg_gnss_lband_correction
+ * on how to do so
+ */
+#define APP_LBAND_FREQUENCY_EU     1545260000
+#define APP_LBAND_FREQUENCY_US     1556290000
+
+/**
  * I2C addresses for location devices
  */
 #define XPLR_GNSS_I2C_ADDR  0x42
@@ -116,8 +127,9 @@ static xplrGnssDeviceCfg_t gnssCfg = {
 /**
  * Data storages for reading options values
  */
-uint8_t  dataU8;
-uint16_t dataU16;
+static uint8_t  dataU8;
+static uint16_t dataU16;
+static uint32_t frequency;
 
 /**
  * Stores data from multi get configurations
@@ -173,14 +185,25 @@ void app_main(void)
     }
     APP_CONSOLE(I,"All infos OK!");
 
-     /**
+    /**
      * Sets the frequency for LBAND
-     * Calls xplrGnssOptionSingleValGet internally
+     * Calls xplrLbandOptionSingleValSet internally
      */
-    espRet = xplrLbandSetFrequency(0, XPLR_LBAND_FREQUENCY_EU);
+    espRet = xplrLbandSetFrequency(0, APP_LBAND_FREQUENCY_EU);
     if (espRet != ESP_OK) {
         APP_CONSOLE(E,"Failed to set LBAND frequency!");
         appHaltExecution();
+    }
+
+    /**
+     * Reads stored frequency in LBAND frequency
+     * Calls xplrLbandOptionSingleValGet internally
+     */
+    frequency = xplrLbandGetFrequency(0);
+    if (frequency == 0) {
+        APP_CONSOLE(W, "Frequency is not set");
+    } else {
+        APP_CONSOLE(I, "Stored frequency: %d Hz", frequency);
     }
 
     /**
@@ -323,7 +346,6 @@ static esp_err_t appInitAll(void)
     APP_CONSOLE(I,"Waiting for LBAND device to come online!");
     espRet = xplrLbandStartDeviceDefaultSettings(0, 
                                                  XPLR_LBAND_I2C_ADDR, 
-                                                 XPLR_LBAND_FREQUENCY_EU,
                                                  xplrGnssGetHandler(0));
     if (espRet != ESP_OK) {
         APP_CONSOLE(E,"LBAND device config failed!");

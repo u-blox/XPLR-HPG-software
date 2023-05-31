@@ -139,6 +139,14 @@ typedef struct xplrDynamicKeys_type {
     xplrDynamicKeyUnit_t current;   /**< current dynamic key. */
 } xplrDynamicKeys_t;
 
+/**
+ * Used to get the desired topic from the ZTP topics array
+ * returned by function xplrJsonZtpGetRequiredTopicsByRegion
+ */
+typedef enum {
+    XPLR_JSON_PARSER_REQTOPIC_KEYDISTRIB = 0,
+    XPLR_JSON_PARSER_REQTOPIC_CORRECDATA
+} xplrJsonParserReqTopicsId;
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS

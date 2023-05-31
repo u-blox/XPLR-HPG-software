@@ -114,6 +114,7 @@ typedef enum {
     XPLR_WIFISTARTER_SERVERDATA_CLIENTCERT,     /**< point perfect client certificate available in webserver. */
     XPLR_WIFISTARTER_SERVERDATA_CLIENTKEY,      /**< point perfect client key available in webserver. */
     XPLR_WIFISTARTER_SERVERDATA_CLIENTREGION,   /**< point perfect client region available in webserver. */
+    XPLR_WIFISTARTER_SERVERDATA_CLIENTPLAN,     /**< point perfect client plan available in webserver. */
     XPLR_WIFISTARTER_SERVERDATA_ROOTCA,         /**< point perfect root ca available in webserver. */
     XPLR_WIFISTARTER_SERVERDIAG_CONNECTED,      /**< webserver diagnostics connected status. */
     XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED,     /**< webserver diagnostics configured status. */
@@ -140,6 +141,7 @@ typedef struct xplrWifiStarterNvs_type {
     char        *ppClientCert;                                        /**< Thingstream's Point Perfect client Certificate */
     char        *ppClientKey;                                         /**< Thingstream's Point Perfect client key */
     char        *ppClientRegion;                                      /**< Thingstream's Point Perfect region */
+    char        *ppClientPlan;                                        /**< Thingstream's Point Perfect plan */
     bool        set;                                                  /**< Device configuration status */
 } xplrWifiStarterNvs_t;
 // *INDENT-OΝ*
@@ -270,6 +272,7 @@ xplrWifiStarterError_t xplrWifiStarterDeviceForceSaveWifi(void);
  *                                3 = certificate,
  *                                4 = key,
  *                                5 = region.
+ *                                6 = plan.
  *
  * @return  XPLR_WIFISTARTER_OK on success or XPLR_WIFISTARTER_ERROR on failure.
  */

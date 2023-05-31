@@ -114,6 +114,8 @@ You can change local macros as you wish inside the app.
 Name | Description 
 --- | --- 
 **`APP_SERIAL_DEBUG_ENABLED 1U`** | Switches debug printing messages ON or OFF
+**`APP_LBAND_FREQUENCY_EU  1545260000`** | Sample frequency for EU region
+**`APP_LBAND_FREQUENCY_US  1556290000`** | Sample frequency for US region
 **`XPLR_GNSS_I2C_ADDR  0x42`** | I2C address for ZED-F9R GNSS module.
 **`XPLR_LBAND_I2C_ADDR 0x43`** | I2C address for NEO-D9S module.
 <br>

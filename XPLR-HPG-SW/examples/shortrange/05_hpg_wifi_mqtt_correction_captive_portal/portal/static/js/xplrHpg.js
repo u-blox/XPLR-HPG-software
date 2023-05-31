@@ -238,6 +238,7 @@ class xplrHpgData {
     this.ppCert = null;
     this.ppKey = null;
     this.ppRegion = null;
+    this.ppPlan = null;
 
     this.dvcConfiguredAlert = false;
 
@@ -767,7 +768,21 @@ class xplrHpg {
       let ppRegion = '"region":' + '"' + this.data.ppRegion + '"';
       let msg = "{" + cmd + ppRegion + "}";
       const jObj = JSON.parse(msg);
-      consoleLog("[xplrHpg] Device set thingstream pp key req msg:" + JSON.stringify(jObj), "cyan");
+      consoleLog("[xplrHpg] Device set thingstream pp region req msg:" + JSON.stringify(jObj), "cyan");
+      this.data.socket.send(JSON.stringify(jObj));
+    } else {
+      consoleLog("[xplrHpg] Websocket dvcRequest failed, socket state:" + this.data.socket.readyState, "red");
+    }
+  }
+
+  wsUpdateThingstreamPpPlan(plan) {
+    this.data.ppPlan = plan;
+    if (this.data.socketStatus == 1) {
+      let cmd = '"req":"dvcThingstreamPpPlanSet",';
+      let ppPlan = '"plan":' + '"' + this.data.ppPlan + '"';
+      let msg = "{" + cmd + ppPlan + "}";
+      const jObj = JSON.parse(msg);
+      consoleLog("[xplrHpg] Device set thingstream pp plan req msg:" + JSON.stringify(jObj), "cyan");
       this.data.socket.send(JSON.stringify(jObj));
     } else {
       consoleLog("[xplrHpg] Websocket dvcRequest failed, socket state:" + this.data.socket.readyState, "red");
@@ -972,7 +987,8 @@ class xplrHpg {
       this.data.ppId != null &&
       this.data.ppCert != null &&
       this.data.ppKey != null &&
-      this.data.ppRegion != null
+      this.data.ppRegion != null &&
+      this.data.ppPlan != null
     ) {
       return true;
     } else {

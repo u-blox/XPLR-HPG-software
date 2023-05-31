@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include "string.h"
 #include "esp_task_wdt.h"
+#include "cJSON.h"
 #include "xplr_lband.h"
 #include "./../../../components/hpglib/src/common/xplr_common.h"
 
@@ -38,6 +39,9 @@
 #else
 #define XPLRLBAND_CONSOLE(message, ...) do{} while(0)
 #endif
+
+#define XPLRLBAND_FREQ_REGION_EU    "eu"
+#define XPLRLBAND_FREQ_REGION_US    "us"
 
 /* ----------------------------------------------------------------
  * STATIC TYPES
@@ -83,6 +87,11 @@ typedef struct xplrLband_type {
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
 
+static const char *freqRegions[] = {
+    XPLRLBAND_FREQ_REGION_EU,
+    XPLRLBAND_FREQ_REGION_US
+};
+
 static xplrLband_t lbandDvcs[XPLRLBAND_NUMOF_DEVICES] = {NULL};
 static int32_t ubxRet;
 static int32_t espRet;
@@ -97,6 +106,10 @@ static esp_err_t xplrLbandPrivateConfigAllDefault(uint8_t dvcProfile, uint8_t i2
 static esp_err_t xplrLbandPrivateSetDeviceConfig(uint8_t dvcProfile, uDeviceCfg_t *deviceSettings);
 static esp_err_t xplrLbandPrivateSetNetworkConfig(uint8_t dvcProfile, uNetworkCfgGnss_t *deviceNetwork);
 static int32_t   xplrLbandPrivateAsyncStopper(uint8_t dvcProfile, int32_t handler);
+static esp_err_t xplrLbandParseFrequencyFromMqtt(uint8_t dvcProfile,
+                                                 char *mqttPayload,
+                                                 xplrLbandRegion region,
+                                                 uint32_t *parsedFrequency);
 
 /* ----------------------------------------------------------------
  * STATIC CALLBACK FUNCTION PROTOTYPES
@@ -122,8 +135,7 @@ esp_err_t xplrLbandUbxlibDeinit(void)
 }
 
 esp_err_t xplrLbandStartDeviceDefaultSettings(uint8_t dvcProfile, 
-                                              uint8_t i2cAddress, 
-                                              uint32_t frequency,
+                                              uint8_t i2cAddress,
                                               uDeviceHandle_t *destHandler)
 {
     if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
@@ -150,11 +162,6 @@ esp_err_t xplrLbandStartDeviceDefaultSettings(uint8_t dvcProfile,
         return espRet;
     }
 
-    espRet = xplrLbandSetFrequency(dvcProfile, frequency);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
     if (destHandler != NULL) {
         espRet = xplrLbandSendCorrectionDataAsyncStart(dvcProfile, destHandler);
         if (espRet != ESP_OK) {
@@ -166,8 +173,7 @@ esp_err_t xplrLbandStartDeviceDefaultSettings(uint8_t dvcProfile,
 }
 
 esp_err_t xplrLbandStartDevice(uint8_t dvcProfile, 
-                               xplrLbandDeviceCfg_t *dvcCfg, 
-                               uint32_t frequency,
+                               xplrLbandDeviceCfg_t *dvcCfg,
                                uDeviceHandle_t *destHandler)
 {
     if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
@@ -195,11 +201,6 @@ esp_err_t xplrLbandStartDevice(uint8_t dvcProfile,
                                         pLbandSettings, 
                                         ELEMENTCNT(pLbandSettings),
                                         U_GNSS_CFG_VAL_LAYER_RAM);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    espRet = xplrLbandSetFrequency(dvcProfile, frequency);
     if (espRet != ESP_OK) {
         return espRet;
     }
@@ -314,15 +315,59 @@ esp_err_t xplrLbandSetFrequency(uint8_t dvcProfile, uint32_t frequency)
         return ESP_FAIL;
     }
 
-    espRet = xplrLbandOptionSingleValSet(dvcProfile, 
+    espRet = xplrLbandOptionSingleValSet(dvcProfile,
                                          U_GNSS_CFG_VAL_KEY_ID_PMP_CENTER_FREQUENCY_U4, 
-                                         frequency, 
+                                         frequency,
                                          U_GNSS_CFG_VAL_LAYER_RAM);
     if (espRet != ESP_OK) {
         return espRet;
     }
 
     return ESP_OK;
+}
+
+esp_err_t xplrLbandSetFrequencyFromMqtt(uint8_t dvcProfile, char *mqttPayload, xplrLbandRegion region)
+{
+    esp_err_t ret = ESP_OK;
+    uint32_t frequency = 0;
+    
+    ret = xplrLbandParseFrequencyFromMqtt(dvcProfile, mqttPayload, region, &frequency);
+
+    if (ret != ESP_OK || frequency == 0) {
+        XPLRLBAND_CONSOLE(E, "Could not parse frequency!");
+        ret = ESP_FAIL;
+    } else {
+        ret = xplrLbandSetFrequency(dvcProfile, frequency);
+        if (ret == ESP_OK) {
+            XPLRLBAND_CONSOLE(D, 
+                              "Set LBAND location: %s frequency: %d Hz successfully!", 
+                              freqRegions[region], 
+                              frequency);
+        } else {
+            XPLRLBAND_CONSOLE(E, "Could not set LBAND location: %s frequency: %d Hz!", frequency);
+        }
+    }
+
+    return ret;
+}
+
+uint32_t xplrLbandGetFrequency(uint8_t dvcProfile)
+{
+    uint32_t ret = 0;
+    esp_err_t espRet = ESP_OK;
+
+    espRet = xplrLbandOptionSingleValGet(dvcProfile,
+                                         U_GNSS_CFG_VAL_KEY_ID_PMP_CENTER_FREQUENCY_U4,
+                                         &ret,
+                                         sizeof(ret),
+                                         U_GNSS_CFG_VAL_LAYER_RAM);
+
+    if (espRet != ESP_OK) {
+        XPLRLBAND_CONSOLE(E, "Could not read frequency from LBAND module!");
+        ret = 0;
+    }
+
+    return ret;
 }
 
 int32_t xplrLbandSendFormattedCommand(uint8_t dvcProfile, const char *pBuffer, size_t size)
@@ -358,7 +403,7 @@ esp_err_t xplrLbandSendCorrectionDataAsyncStart(uint8_t dvcProfile, uDeviceHandl
         return ESP_FAIL;
     }
 
-    XPLRLBAND_CONSOLE(I, "Started LBAND Send Correction Data async.");
+    XPLRLBAND_CONSOLE(D, "Started LBAND Send Correction Data async.");
     return ESP_OK;
 }
 
@@ -469,6 +514,59 @@ static int32_t xplrLbandPrivateAsyncStopper(uint8_t dvcProfile, int32_t handler)
 
     XPLRLBAND_CONSOLE(I, "Successfully stoped async function.");
     return ubxRet;
+}
+
+static esp_err_t xplrLbandParseFrequencyFromMqtt(uint8_t dvcProfile,
+                                                 char *mqttPayload,
+                                                 xplrLbandRegion region,
+                                                 uint32_t *parsedFrequency)
+{
+    esp_err_t ret = ESP_OK;
+    cJSON *json, *freqs, *jregion, *current, *frequency;
+    double tmpfreq = 0;
+
+    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
+        ret = ESP_FAIL;
+    }
+
+    if (ret == ESP_OK) {
+        json = cJSON_Parse(mqttPayload);
+
+        if (cJSON_HasObjectItem(json, "frequencies")){
+            freqs = cJSON_GetObjectItem(json, "frequencies");
+            if (cJSON_HasObjectItem(freqs, freqRegions[region])) {
+                jregion = cJSON_GetObjectItem(freqs, freqRegions[region]);
+                if (cJSON_HasObjectItem(jregion, "current")) {
+                    current = cJSON_GetObjectItem(jregion, "current");
+                    if (cJSON_HasObjectItem(current, "value")) {
+                        frequency = cJSON_GetObjectItem(current, "value");
+                        sscanf(cJSON_GetStringValue(frequency), "%lf", &tmpfreq);
+                        *parsedFrequency = (uint32_t)((1e+6) * tmpfreq);
+                    } else {
+                        XPLRLBAND_CONSOLE(E, "Theres no frequency \"value\" object.");
+                        *parsedFrequency = 0;
+                        ret = ESP_FAIL;
+                    }
+                } else {
+                    XPLRLBAND_CONSOLE(E, "Theres no \"current\" object.");
+                    *parsedFrequency = 0;
+                    ret = ESP_FAIL;
+                }
+            } else {
+                XPLRLBAND_CONSOLE(E, "Theres no \"%s\" location object.", freqRegions[region]);
+                *parsedFrequency = 0;
+                ret = ESP_FAIL;
+            }
+        } else {
+            XPLRLBAND_CONSOLE(E, "Theres no \"frequencies\" object.");
+            *parsedFrequency = 0;
+            ret = ESP_FAIL;
+        }
+
+        cJSON_Delete(json);
+    }
+    
+    return ESP_OK;
 }
 
 /* ----------------------------------------------------------------

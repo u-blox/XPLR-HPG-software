@@ -71,6 +71,14 @@ typedef enum {
     XPLR_THINGSTREAM_PP_REGION_ALL              /**< IP and LBAND topics of any region available. */
 } xplr_thingstream_pp_region_t;
 
+/** Thingstream Subscription Plan types */
+typedef enum {
+    XPLR_THINGSTREAM_PP_PLAN_INVALID = -1,       /**< invalid or not supported supported. */
+    XPLR_THINGSTREAM_PP_PLAN_IP,                 /**< Point Perfect IP data stream*/
+    XPLR_THINGSTREAM_PP_PLAN_LBAND,              /**< Point Perfect L-band data stream*/
+    XPLR_THINGSTREAM_PP_PLAN_IPLBAND             /**< Point Perfect L-band + IP data streams*/
+} xplr_thingstream_pp_plan_t;
+
 /** Thingstream Location Service region types. */
 typedef enum {
     XPLR_THINGSTREAM_PP_SERVER_INVALID = -1,    /**< invalid or not supported supported. */
@@ -134,6 +142,15 @@ typedef struct xplr_thingstream_pp_dKeys_type {
     xplr_thingstream_pp_dKeyUnit_t next;      /**< next dynamic key. */
     xplr_thingstream_pp_dKeyUnit_t current;   /**< current dynamic key. */
 } xplr_thingstream_pp_dKeys_t;
+
+/**
+ * Struct to hold the User's subscription plan and region
+ * for MQTT topic provisioning
+*/
+typedef struct xplr_thingstream_pp_sub_type {
+    xplr_thingstream_pp_region_t region;      /**< thingstream location region type */
+    xplr_thingstream_pp_plan_t plan;          /**< thingstream subscription plan type*/
+} xplr_thingstream_pp_sub_t;
 
 typedef struct __attribute__((packed)) xplr_thingstream_pp_settings_type {
     char urlPath[XPLR_THINGSTREAM_URL_SIZE_MAX];        /**< url used to get the root CA. */

@@ -43,6 +43,7 @@
 #endif
 #include "xplr_wifi_starter.h"
 #include "xplr_ztp_json_parser.h"
+#include "./../../../components/hpglib/src/common/xplr_common.h"
 
 /**
  * If paths not found in VScode: 
@@ -75,6 +76,14 @@
  * TYPES
  * -------------------------------------------------------------- */
 
+/**
+ * Valid options for locations
+ */
+typedef enum {
+    APP_REGION_EU,
+    APP_REGION_US
+} appRegions;
+
 /* ----------------------------------------------------------------
  * EXTERNAL VARIABLES
  * -------------------------------------------------------------- */
@@ -90,6 +99,11 @@ extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
+
+/**
+ * Using EU as a region
+ */
+static const appRegions region = APP_REGION_EU;
 
 /**
  * Required data to make a POST request to Thingstream
@@ -181,6 +195,7 @@ static void appZtpDeallocateJSON(void);
 static void appZtpMqttSubscriptionsParse(void);
 static void appZtpMqttSupportParse(void);
 static void appZtpMqttDynamicKeysParse(void);
+static void appHaltExecution(void);
 
 void app_main(void)
 {
@@ -227,7 +242,7 @@ void app_main(void)
             case XPLR_WIFISTARTER_STATE_TIMEOUT:
             case XPLR_WIFISTARTER_STATE_ERROR:
                 APP_CONSOLE(W, "Major error encountered. Will exit!");
-                abort();
+                appHaltExecution();
                 break;
 
             default:
@@ -255,7 +270,7 @@ static void appInitBoard(void)
     ret = xplrBoardInit();
     if (ret != ESP_OK) {
         APP_CONSOLE(E, "Board initialization failed!");
-        abort();
+        appHaltExecution();
     }
 }
 
@@ -283,7 +298,7 @@ static void appZtpJsonParse(void)
     if (json == NULL) {
         APP_CONSOLE(E, "cJSON parsing failed!");
         APP_CONSOLE(E, "Seems like the JSON payload is not valid!");
-        abort();
+        appHaltExecution();
     }
 }
 
@@ -297,7 +312,7 @@ static void appZtpMqttCertificateParse(void)
         APP_CONSOLE(I, "Parsed Certificate:\n%s", charbuf);
     } else {
         APP_CONSOLE(E, "Parsing Certificate failed!");
-        abort();
+        appHaltExecution();
     }
 }
 
@@ -310,20 +325,32 @@ static void appZtpMqttClientIdParse(void)
         APP_CONSOLE(I, "Parsed MQTT client ID: %s", charbuf);
     } else {
         APP_CONSOLE(E, "Parsing MQTT client ID failed!");
-        abort();
+        appHaltExecution();
     }
 }
 
 /*
  * Fetches array with topics to subscribe
- * In this case: EU region
  */
 static void appZtpMqttSubscriptionsParse(void)
 {
+    char strLoc[3];
+
+    memset(strLoc, 0x00, ELEMENTCNT(strLoc));
+
+    if (region == APP_REGION_EU) {
+        strcpy(strLoc, XPLR_ZTP_REGION_EU);
+    } else {
+        strcpy(strLoc, XPLR_ZTP_REGION_US);
+    }
+
+    APP_CONSOLE(D, "Configured region: %s", strLoc);
+
     ztpStyleTopics.populatedCount = 0;
     if (xplrJsonZtpGetRequiredTopicsByRegion(json, &ztpStyleTopics,
-                                             XPLR_ZTP_REGION_EU) != XPLR_JSON_PARSER_OK) {
+                                             strLoc) != XPLR_JSON_PARSER_OK) {
         APP_CONSOLE(E, "Parsing required MQTT topics failed!");
+        appHaltExecution();
     }
 }
 
@@ -336,7 +363,7 @@ static void appZtpMqttSupportParse(void)
         APP_CONSOLE(I, "Is MQTT supported: %s", mqttFlag ? "true" : "false");
     } else {
         APP_CONSOLE(E, "Parsing MQTT support flag failed!");
-        abort();
+        appHaltExecution();
     }
 }
 
@@ -347,7 +374,7 @@ static void appZtpMqttDynamicKeysParse()
 {
     if (xplrJsonZtpGetDynamicKeys(json, &dynamicKeys) != XPLR_JSON_PARSER_OK) {
         APP_CONSOLE(E, "Parsing MQTT support flag failed!");
-        abort();
+        appHaltExecution();
     }
 }
 
@@ -359,5 +386,15 @@ static void appZtpDeallocateJSON(void)
     if (json != NULL) {
         APP_CONSOLE(I, "Deallocating JSON object.");
         cJSON_Delete(json);
+    }
+}
+
+/**
+ * A dummy function to pause on error
+ */
+static void appHaltExecution(void)
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

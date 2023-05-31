@@ -87,6 +87,7 @@ typedef enum {
     XPLR_WEBSERVER_WSREQ_PPCERT_SET,
     XPLR_WEBSERVER_WSREQ_PPKEY_SET,
     XPLR_WEBSERVER_WSREQ_PPREGION_SET,
+    XPLR_WEBSERVER_WSREQ_PPPLAN_SET,
     XPLR_WEBSERVER_WSREQ_LOCATION,
     XPLR_WEBSERVER_WSREQ_MESSAGE,
     XPLR_WEBSERVER_WSREQ_SUPPORTED  //number of requests supported
@@ -704,7 +705,7 @@ esp_err_t error404Handler(httpd_req_t *req, httpd_err_code_t err)
 
 static bool xplrHpgThingstreamCredsConfigured(void)
 {
-    int res[5];
+    int res[6];
     bool ret;
 
     res[0] = memcmp(webserver.wsData->pointPerfect.clientId, "n/a", strlen("n/a"));
@@ -712,8 +713,9 @@ static bool xplrHpgThingstreamCredsConfigured(void)
     res[2] = memcmp(webserver.wsData->pointPerfect.privateKey, "n/a", strlen("n/a"));
     res[3] = memcmp(webserver.wsData->pointPerfect.region, "n/a", strlen("n/a"));
     res[4] = memcmp(webserver.wsData->pointPerfect.rootCa, "n/a", strlen("n/a"));
+    res[5] = memcmp(webserver.wsData->pointPerfect.plan, "n/a", strlen("n/a"));
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         if (res[i] == 0) {
             ret = false;
             break;
@@ -916,6 +918,23 @@ static esp_err_t wsParseData(httpd_req_t *req, uint8_t *data)
                 reqType = XPLR_WEBSERVER_WSREQ_PPREGION_SET;
                 if (xplrWifiStarterWebserverisConfigured()) {
                     xplrWifiStarterDeviceForceSaveThingstream(5);
+                }
+                break;
+            }  else if (memcmp(reqValue,
+                               "dvcThingstreamPpPlanSet",
+                               strlen("dvcThingstreamPpPlanSet")) == 0) {
+                reqValue = cJSON_GetObjectItem(wsIn, "plan")->valuestring;
+                memset(webserver.wsData->pointPerfect.plan,
+                       0x00,
+                       XPLR_WIFIWEBSERVER_PPPLAN_SIZE);
+                memcpy(webserver.wsData->pointPerfect.plan, reqValue, strlen(reqValue));
+                webserver.wsData->pointPerfect.set = xplrHpgThingstreamCredsConfigured();
+                XPLRWIFIWEBSERVER_CONSOLE(I, "\nPointPerfect plan parsed:\nID: %s\nCredentials set:%d",
+                                          webserver.wsData->pointPerfect.plan,
+                                          webserver.wsData->pointPerfect.set);
+                reqType = XPLR_WEBSERVER_WSREQ_PPPLAN_SET;
+                if (xplrWifiStarterWebserverisConfigured()) {
+                    xplrWifiStarterDeviceForceSaveThingstream(6);
                 }
                 break;
             }  else if (memcmp(reqValue,
@@ -1130,6 +1149,7 @@ static esp_err_t wsServeReq(httpd_req_t *req, xplrWifiWebserverWsReqType_t type)
         case XPLR_WEBSERVER_WSREQ_PPCERT_SET:
         case XPLR_WEBSERVER_WSREQ_PPKEY_SET:
         case XPLR_WEBSERVER_WSREQ_PPREGION_SET:
+        case XPLR_WEBSERVER_WSREQ_PPPLAN_SET:
         case XPLR_WEBSERVER_WSREQ_REBOOT:
         case XPLR_WEBSERVER_WSREQ_ERASE_ALL:
         case XPLR_WEBSERVER_WSREQ_ERASE_WIFI:

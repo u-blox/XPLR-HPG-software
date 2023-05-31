@@ -96,6 +96,17 @@
             </select>
             <button class="btn btn-outline-secondary" id="tsRegionBtn" disabled>Set</button>
           </div>
+          <div class="input-group mb-3">
+            <span class="input-group-text" id="basic-addon-plan">Plan</span>
+            <select class="form-select form-select-sm" aria-label=".form-select-sm region" id="plan"
+              onchange="validatePlan()">
+              <option selected>Choose Plan</option>
+              <option value="IP">IP</option>
+              <option value="LBAND">LBAND</option>
+              <option value="IP+LBAND">IP+LBAND</option>
+            </select>
+            <button class="btn btn-outline-secondary" id="tsPlanBtn" disabled>Set</button>
+          </div>
         </div>
         <div class="d-grid gap-2">
           <!-- <button class="btn btn-warning" id="tsPpCredEraseBtn">Erase</button> -->
@@ -176,6 +187,13 @@
     $('#tsRegionBtn').click(function () {
       xplr.wsUpdateThingstreamPpRegion(xplr.ppRegion);
       let button = document.querySelector("#tsRegionBtn");
+      button.style.backgroundColor = '#198754'; //bs-green
+      button.style.color = '#fff'; //bs-white
+    });
+
+    $('#tsPlanBtn').click(function () {
+      xplr.wsUpdateThingstreamPpPlan(xplr.ppPlan);
+      let button = document.querySelector("#tsPlanBtn");
       button.style.backgroundColor = '#198754'; //bs-green
       button.style.color = '#fff'; //bs-white
     });
@@ -431,6 +449,19 @@
       document.querySelector('#tsRegionBtn').disabled = false;
     } else {
       document.querySelector('#tsRegionBtn').disabled = true;
+    }
+  }
+
+  function validatePlan() {
+    var plan = null;
+
+    plan = document.getElementById("plan").value;
+
+    if ((plan === 'IP') || (plan === 'LBAND') || (plan === 'IP+LBAND')) {
+      xplr.ppPlan = plan;
+      document.querySelector('#tsPlanBtn').disabled = false;
+    } else {
+      document.querySelector('#tsPlanBtn').disabled = true;
     }
   }
 

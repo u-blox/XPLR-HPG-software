@@ -16,11 +16,11 @@
 
 /* An example for MQTT connection to Thingstream (U-blox broker), via the cellular module LARA-R6
  *
- * In the current example U-blox XPLR-HPG-1/XPLR-HPG-2 kit, 
+ * In the current example U-blox XPLR-HPG-1/XPLR-HPG-2 kit,
  * is setup using KConfig,
  * registers to a network provider using the xplr_com component,
  * uses certificated downloaded from Thingstream to achieve a connection to the Thingstream MQTT broker
- * and subscribes to PointPerfect correction data topic, as well as a decryption key topic, using hpg_mqtt component. 
+ * and subscribes to PointPerfect correction data topic, as well as a decryption key topic, using hpg_mqtt component.
  *
  */
 
@@ -52,8 +52,8 @@
 #include "driver/timer.h"
 
 /**
- * If paths not found in VScode: 
- *      press keys --> <ctrl+shift+p> 
+ * If paths not found in VScode:
+ *      press keys --> <ctrl+shift+p>
  *      and select --> ESP-IDF: Add vscode configuration folder
  */
 
@@ -75,17 +75,25 @@
 
 #define XPLR_GNSS_I2C_ADDR  0x42
 
+#define APP_THINGSTREAM_REGION   XPLR_THINGSTREAM_PP_REGION_EU                  /** Thingstream service location. Possible values are EU and US 
+                                                                                  * as they are the only supported regions at the moment*/
+#define APP_THINGSTREAM_PLAN     XPLR_THINGSTREAM_PP_PLAN_IP                    /** Thingstream subscription plan. Possible values are IP, IPLBAND and LBAND
+                                                                                  * Check your subscription plan in the Location Thing Details tab in the 
+                                                                                  * Thingstream platform. Point Perfect Developer Plan is an IP plan, as is 
+                                                                                  * the included promo card*/
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
 /* application errors */
 typedef enum {
-    APP_ERROR_UNKNOWN = -6,
+    APP_ERROR_UNKNOWN = -7,
     APP_ERROR_CELL_INIT,
     APP_ERROR_GNSS_INIT,
     APP_ERROR_MQTT_CLIENT,
     APP_ERROR_NETWORK_OFFLINE,
     APP_ERROR_THINGSTREAM,
+    APP_ERROR_INVALID_PLAN,
     APP_ERROR_OK = 0,
 } app_error_t;
 
@@ -179,10 +187,10 @@ bool mqttSessionDisconnected = false;
 bool mqttMsgAvailable = false;
 
 /**
- * Populate the following files according to your needs.
- * If you are using Thingstream then you can find all the needed
- * certificates inside your location thing settings.
- */
+ * Populate the following files according to your needs.
+ * If you are using Thingstream then you can find all the needed
+ * certificates inside your location thing settings.
+ */
 const char rootCa[] = "-----BEGIN CERTIFICATE-----\
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\
@@ -348,6 +356,8 @@ void app_main(void)
                     app.state[0] = APP_FSM_INIT_MQTT_CLIENT;
                 } else if (app.error == APP_ERROR_NETWORK_OFFLINE) {
                     app.state[0] = APP_FSM_ERROR;
+                } else if (app.error == APP_ERROR_INVALID_PLAN) {
+                    app.state[0] = APP_FSM_TERMINATE;
                 } else {
                     /* module still trying to connect. do nothing */
                 }
@@ -683,10 +693,6 @@ static void cellMqttClientStatisticsPrint(void)
 
 static app_error_t thingstreamInit(const char *token, xplr_thingstream_t *instance)
 {
-    const char *keysDescription = "L-band + IP key distribution topic";
-    const char *keysTopic = "/pp/ubx/0236/Lb";
-    const char *correctionDataDescription = "L-band + IP correction topic for EU region";
-    const char *correctionDataTopic = "/pp/Lb/eu";
     const char *ztpToken = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
     app_error_t ret;
     xplr_thingstream_error_t err;
@@ -696,25 +702,30 @@ static app_error_t thingstreamInit(const char *token, xplr_thingstream_t *instan
 
     if (err != XPLR_THINGSTREAM_OK) {
         ret = APP_ERROR_THINGSTREAM;
+    } else if (APP_THINGSTREAM_PLAN == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
+        APP_CONSOLE(E, "L-band subscription plan is not supported in this example");
+        ret = APP_ERROR_INVALID_PLAN;
     } else {
-        strcpy(instance->pointPerfect.topicList[0].description, keysDescription);
-        strcpy(instance->pointPerfect.topicList[0].path, keysTopic);
-        strcpy(instance->pointPerfect.topicList[1].description, correctionDataDescription);
-        strcpy(instance->pointPerfect.topicList[1].path, correctionDataTopic);
-        instance->pointPerfect.numOfTopics = 2;
+        /* Config thingstream topics according to region and subscription plan*/
+        err = xplrThingstreamPpConfigTopics(APP_THINGSTREAM_REGION, APP_THINGSTREAM_PLAN, instance);
+        if (err == XPLR_THINGSTREAM_OK) {
+            instance->pointPerfect.numOfTopics = 2;
 
-        /* L-band + IP key distribution topic */
-        topics[0].index = 0;
-        topics[0].name = instance->pointPerfect.topicList[0].path;
-        topics[0].rxBuffer = &rxBuff[0][0];
-        topics[0].rxBufferSize = APP_MQTT_BUFFER_SIZE;
+            /* L-band + IP key distribution topic */
+            topics[0].index = 0;
+            topics[0].name = instance->pointPerfect.topicList[0].path;
+            topics[0].rxBuffer = &rxBuff[0][0];
+            topics[0].rxBufferSize = APP_MQTT_BUFFER_SIZE;
 
-        /* L-band + IP correction topic for EU region */
-        topics[1].index = 1;
-        topics[1].name = instance->pointPerfect.topicList[1].path;
-        topics[1].rxBuffer = &rxBuff[1][0];
-        topics[1].rxBufferSize = APP_MQTT_BUFFER_SIZE;
-        ret = APP_ERROR_OK;
+            /* L-band + IP correction topic for EU region */
+            topics[1].index = 1;
+            topics[1].name = instance->pointPerfect.topicList[1].path;
+            topics[1].rxBuffer = &rxBuff[1][0];
+            topics[1].rxBufferSize = APP_MQTT_BUFFER_SIZE;
+            ret = APP_ERROR_OK;
+        } else {
+            ret = APP_ERROR_THINGSTREAM;
+        }
     }
 
     return ret;

@@ -755,6 +755,9 @@ char *xplrWifiStarterWebserverDataGet(xplrWifiStarterServerData_t opt)
             case XPLR_WIFISTARTER_SERVERDATA_CLIENTREGION:
                 ret = userOptions.storage.ppClientRegion;
                 break;
+            case XPLR_WIFISTARTER_SERVERDATA_CLIENTPLAN:
+                ret = userOptions.storage.ppClientPlan;
+                break;
 
             default:
                 ret = NULL;
@@ -967,6 +970,7 @@ static esp_err_t wifiNvsInit(void)
             storage->ppClientCert = webserverData.pointPerfect.certificate;
             storage->ppClientKey = webserverData.pointPerfect.privateKey;
             storage->ppClientRegion = webserverData.pointPerfect.region;
+            storage->ppClientPlan = webserverData.pointPerfect.plan;
         }
         XPLRWIFISTARTER_CONSOLE(D, "nvs namespace <%s> for wifi client, init ok", storage->id);
         ret = ESP_OK;
@@ -1009,7 +1013,7 @@ static esp_err_t wifiNvsLoad(void)
 static esp_err_t wifiNvsWriteDefaults(void)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[9];
+    xplrNvs_error_t err[10];
     size_t numOfNvsEntries;
     esp_err_t ret;
 
@@ -1024,15 +1028,17 @@ static esp_err_t wifiNvsWriteDefaults(void)
         err[5] = xplrNvsWriteString(&storage->nvs, "ppCert", "n/a");
         err[6] = xplrNvsWriteString(&storage->nvs, "ppKey", "n/a");
         err[7] = xplrNvsWriteString(&storage->nvs, "ppRegion", "n/a");
-        err[8] = xplrNvsWriteU8(&storage->nvs, "configured", 0);
+        err[8] = xplrNvsWriteString(&storage->nvs, "ppPlan", "n/a");
+        err[9] = xplrNvsWriteU8(&storage->nvs, "configured", 0);
 
         storage->rootCa = webserverData.pointPerfect.rootCa;
         storage->ppClientId = webserverData.pointPerfect.clientId;
         storage->ppClientCert = webserverData.pointPerfect.certificate;
         storage->ppClientKey = webserverData.pointPerfect.privateKey;
         storage->ppClientRegion = webserverData.pointPerfect.region;
+        storage->ppClientPlan = webserverData.pointPerfect.plan;
 
-        numOfNvsEntries = 9;
+        numOfNvsEntries = 10;
     } else {
         numOfNvsEntries = 3;
     }
@@ -1053,7 +1059,7 @@ static esp_err_t wifiNvsWriteDefaults(void)
 static esp_err_t wifiNvsReadConfig(void)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[9];
+    xplrNvs_error_t err[10];
     size_t size[] = {XPLR_WIFI_NVS_NAMESPACE_LENGTH_MAX,
                      XPLR_WIFISTARTER_NVS_SSID_LENGTH_MAX,
                      XPLR_WIFISTARTER_NVS_PASSWORD_LENGTH_MAX,
@@ -1061,7 +1067,8 @@ static esp_err_t wifiNvsReadConfig(void)
                      XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE,
                      XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE,
                      XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE,
-                     XPLR_WIFIWEBSERVER_PPREGION_SIZE
+                     XPLR_WIFIWEBSERVER_PPREGION_SIZE,
+                     XPLR_WIFIWEBSERVER_PPPLAN_SIZE
                     };
     size_t numOfNvsEntries;
     esp_err_t ret;
@@ -1075,9 +1082,10 @@ static esp_err_t wifiNvsReadConfig(void)
         err[5] = xplrNvsReadString(&storage->nvs, "ppCert", storage->ppClientCert, &size[5]);
         err[6] = xplrNvsReadString(&storage->nvs, "ppKey", storage->ppClientKey, &size[6]);
         err[7] = xplrNvsReadString(&storage->nvs, "ppRegion", storage->ppClientRegion, &size[7]);
-        err[8] = xplrNvsReadU8(&storage->nvs, "configured", (uint8_t *)&storage->set);
+        err[8] = xplrNvsReadString(&storage->nvs, "ppPlan", storage->ppClientPlan, &size[8]);
+        err[9] = xplrNvsReadU8(&storage->nvs, "configured", (uint8_t *)&storage->set);
 
-        numOfNvsEntries = 9;
+        numOfNvsEntries = 10;
     } else {
         numOfNvsEntries = 3;
     }
@@ -1110,6 +1118,7 @@ static esp_err_t wifiNvsReadConfig(void)
             XPLRWIFISTARTER_CONSOLE(D, "ppCert: <%s>", storage->ppClientCert);
             XPLRWIFISTARTER_CONSOLE(D, "ppKey: <%s>", storage->ppClientKey);
             XPLRWIFISTARTER_CONSOLE(D, "ppRegion: <%s>", storage->ppClientRegion);
+            XPLRWIFISTARTER_CONSOLE(D, "ppPlan: <%s>", storage->ppClientPlan);
             XPLRWIFISTARTER_CONSOLE(D, "configured: <%u>", (uint8_t)storage->set);
         }
     }
@@ -1120,7 +1129,7 @@ static esp_err_t wifiNvsReadConfig(void)
 static esp_err_t wifiNvsUpdate(uint8_t opt)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[9];
+    xplrNvs_error_t err[10];
     size_t numOfNvsEntries;
     esp_err_t ret;
 
@@ -1136,6 +1145,7 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 xplrNvsEraseKey(&storage->nvs, "ppCert");
                 xplrNvsEraseKey(&storage->nvs, "ppKey");
                 xplrNvsEraseKey(&storage->nvs, "ppRegion");
+                xplrNvsEraseKey(&storage->nvs, "ppPlan");
                 xplrNvsEraseKey(&storage->nvs, "configured");
 
                 err[0] = xplrNvsWriteString(&storage->nvs, "id", storage->id);
@@ -1147,9 +1157,10 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                     err[5] = xplrNvsWriteString(&storage->nvs, "ppCert", storage->ppClientCert);
                     err[6] = xplrNvsWriteString(&storage->nvs, "ppKey", storage->ppClientKey);
                     err[7] = xplrNvsWriteString(&storage->nvs, "ppRegion", storage->ppClientRegion);
-                    err[8] = xplrNvsWriteU8(&storage->nvs, "configured", (uint8_t)storage->set);
+                    err[8] = xplrNvsWriteString(&storage->nvs, "ppPlan", storage->ppClientPlan);
+                    err[9] = xplrNvsWriteU8(&storage->nvs, "configured", (uint8_t)storage->set);
 
-                    numOfNvsEntries = 9;
+                    numOfNvsEntries = 10;
                 } else {
                     numOfNvsEntries = 3;
                 }
@@ -1213,12 +1224,14 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 userOptions.storage.ppClientCert = webserverData.pointPerfect.certificate;
                 userOptions.storage.ppClientKey = webserverData.pointPerfect.privateKey;
                 userOptions.storage.ppClientRegion = webserverData.pointPerfect.region;
+                userOptions.storage.ppClientPlan = webserverData.pointPerfect.plan;
 
                 xplrNvsEraseKey(&storage->nvs, "rootCa");
                 xplrNvsEraseKey(&storage->nvs, "ppId");
                 xplrNvsEraseKey(&storage->nvs, "ppCert");
                 xplrNvsEraseKey(&storage->nvs, "ppKey");
                 xplrNvsEraseKey(&storage->nvs, "ppRegion");
+                xplrNvsEraseKey(&storage->nvs, "ppPlan");
                 xplrNvsEraseKey(&storage->nvs, "configured");
 
                 err[0] = xplrNvsWriteString(&storage->nvs, "rootCa", storage->rootCa);
@@ -1226,9 +1239,10 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 err[2] = xplrNvsWriteString(&storage->nvs, "ppCert", storage->ppClientCert);
                 err[3] = xplrNvsWriteString(&storage->nvs, "ppKey", storage->ppClientKey);
                 err[4] = xplrNvsWriteString(&storage->nvs, "ppRegion", storage->ppClientRegion);
-                err[5] = xplrNvsWriteU8(&storage->nvs, "configured", (uint8_t)storage->set);
+                err[5] = xplrNvsWriteString(&storage->nvs, "ppPlan", storage->ppClientPlan);
+                err[6] = xplrNvsWriteU8(&storage->nvs, "configured", (uint8_t)storage->set);
 
-                numOfNvsEntries = 6;
+                numOfNvsEntries = 7;
 
                 for (int i = 0; i < numOfNvsEntries; i++) {
                     if (err[i] != XPLR_NVS_OK) {
@@ -1358,6 +1372,29 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 XPLRWIFISTARTER_CONSOLE(E, "Trying to write invalid config, error");
             }
             break;
+        case 8: //save thingstream plan from webserver data
+            if ((storage->id != NULL) && (userOptions.webserver)) {
+                userOptions.storage.ppClientPlan = webserverData.pointPerfect.plan;
+
+                xplrNvsEraseKey(&storage->nvs, "ppPlan");
+
+                err[0] = xplrNvsWriteString(&storage->nvs, "ppPlan", storage->ppClientPlan);
+
+                numOfNvsEntries = 1;
+
+                for (int i = 0; i < numOfNvsEntries; i++) {
+                    if (err[i] != XPLR_NVS_OK) {
+                        ret = ESP_FAIL;
+                        break;
+                    } else {
+                        ret = ESP_OK;
+                    }
+                }
+            } else {
+                ret = ESP_FAIL;
+                XPLRWIFISTARTER_CONSOLE(E, "Trying to write invalid config, error");
+            }
+            break;
 
         default:
             ret = ESP_FAIL;
@@ -1371,7 +1408,7 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
 static esp_err_t wifiNvsErase(uint8_t opt)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[9];
+    xplrNvs_error_t err[10];
     size_t numOfNvsEntries;
     esp_err_t ret;
 
@@ -1385,9 +1422,10 @@ static esp_err_t wifiNvsErase(uint8_t opt)
             err[5] = xplrNvsEraseKey(&storage->nvs, "ppCert");
             err[6] = xplrNvsEraseKey(&storage->nvs, "ppKey");
             err[7] = xplrNvsEraseKey(&storage->nvs, "ppRegion");
-            err[8] = xplrNvsEraseKey(&storage->nvs, "configured");
+            err[8] = xplrNvsEraseKey(&storage->nvs, "ppPlan");
+            err[9] = xplrNvsEraseKey(&storage->nvs, "configured");
 
-            numOfNvsEntries = 9;
+            numOfNvsEntries = 10;
         } else {
             numOfNvsEntries = 3;
         }
@@ -1408,8 +1446,9 @@ static esp_err_t wifiNvsErase(uint8_t opt)
         err[2] = xplrNvsEraseKey(&storage->nvs, "ppCert");
         err[3] = xplrNvsEraseKey(&storage->nvs, "ppKey");
         err[4] = xplrNvsEraseKey(&storage->nvs, "ppRegion");
-        err[5] = xplrNvsEraseKey(&storage->nvs, "configured");
-        numOfNvsEntries = 6;
+        err[5] = xplrNvsEraseKey(&storage->nvs, "ppPlan");
+        err[6] = xplrNvsEraseKey(&storage->nvs, "configured");
+        numOfNvsEntries = 7;
     } else {
         err[0] = XPLR_NVS_ERROR;
         numOfNvsEntries = 1;

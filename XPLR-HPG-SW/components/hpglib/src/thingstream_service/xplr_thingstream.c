@@ -31,8 +31,8 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-#if (1 == XPLRTHINGSTREAM_DEBUG_ACTIVE) && (1 == U_HPGLIB_SERIAL_DEBUG_ENABLED)
-#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...)   esp_rom_printf(U_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#if (1 == XPLRTHINGSTREAM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLR_THINGSTREAM_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -86,7 +86,9 @@ const char thingstreamPpFilterRegionUS[] =             "US";
 const char thingstreamPpFilterRegionUSAll[] =          "us";
 const char thingstreamPpFilterKeyDist[] =              "key distribution";
 const char thingstreamPpFilterAssistNow[] =            "AssistNow";
-const char thingstreamPpFilterCorrectionData[] =       "L-band + IP correction";
+const char thingstreamPpFilterCorrectionDataIpLb[] =   "L-band + IP correction";
+const char thingstreamPpFilterCorrectionDataIp[] =     "IP correction";
+const char thingstreamPpFilterCorrectionDataLb[] =     "L-band correction";
 const char thingstreamPpFilterGAD[] =                  "geographic area definition";
 const char thingstreamPpFilterHPAC[] =                 "high-precision atmosphere correction";
 const char thingstreamPpFilterOCB[] =                  "GNSS orbit, clocks and bias";
@@ -98,6 +100,7 @@ const char thingstreamPpDescAllEu[] = "L-band + IP EU topics";
 const char thingstreamPpDescAllUs[] = "L-band + IP US topics";
 const char thingstreamPpDescAll[] = "L-band + IP EU + US topics";
 
+static const char *thingstreamPpFilterCorrectionData;
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -132,6 +135,17 @@ static xplr_thingstream_error_t tsApiMsgParsePpZtpTopicList(const char *msg,
 
 static xplr_thingstream_error_t tsApiMsgParsePpZtpCheckTag(const char *msg, const char *tag);
 
+static xplr_thingstream_pp_plan_t tsPpGetPlanType(bool lbandSupported, bool mqttSupported);
+
+static xplr_thingstream_error_t tsPpGetKeysTopic(xplr_thingstream_pp_sub_t *tsplan,
+                                                 char *keysTopic);
+static xplr_thingstream_error_t tsPpGetKeysDesc(xplr_thingstream_pp_sub_t *tsplan, char *keysDesc);
+static xplr_thingstream_error_t tsPpGetCorrTopic(xplr_thingstream_pp_sub_t *tsplan,
+                                                 char *corrTopic);
+static xplr_thingstream_error_t tsPpGetCorrDesc(xplr_thingstream_pp_sub_t *tsplan, char *corrDesc);
+static xplr_thingstream_error_t tsPpGetFreqTopic(xplr_thingstream_pp_sub_t *tsplan,
+                                                 char *freqTopic);
+static xplr_thingstream_error_t tsPpGetFreqDesc(xplr_thingstream_pp_sub_t *tsplan, char *freqDesc);
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
@@ -202,6 +216,7 @@ xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
 {
     xplr_thingstream_error_t err[8];
     xplr_thingstream_error_t ret;
+    xplr_thingstream_pp_plan_t subType;
 
     /* get broker configuration settings */
     err[0] = xplrThingstreamPpParseServerInfo(data,
@@ -230,11 +245,14 @@ xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
     err[5] = xplrThingstreamPpParseMqttSupport(data,
                                                &settings->mqttSupported);
 
+    subType = tsPpGetPlanType(settings->lbandSupported, settings->mqttSupported);
+
     err[6] = xplrThingstreamPpParseDynamicKeys(data,
                                                &settings->dynamicKeys);
     /* get broker topics (region filtered) */
     err[7] = xplrThingstreamPpParseTopicsInfoByRegionAll(data,
                                                          region,
+                                                         subType,
                                                          settings->topicList);
 
     for (int8_t i = 0; i < 8; i++) {
@@ -293,6 +311,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseMqttSupport(const char *data,
 
 xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
                                                          xplr_thingstream_pp_region_t region,
+                                                         xplr_thingstream_pp_plan_t planType,
                                                          xplr_thingstream_pp_topic_type_t type,
                                                          xplr_thingstream_pp_topic_t *topic)
 {
@@ -336,8 +355,27 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
                 ret = XPLR_THINGSTREAM_OK;
                 break;
             case XPLR_THINGSTREAM_PP_TOPIC_CORRECTION_DATA:
-                topicFilter = thingstreamPpFilterCorrectionData;
-                ret = XPLR_THINGSTREAM_OK;
+                switch (planType) {
+                    case XPLR_THINGSTREAM_PP_PLAN_IP:
+                        topicFilter = thingstreamPpFilterCorrectionDataIp;
+                        ret = XPLR_THINGSTREAM_OK;
+                        break;
+                    case XPLR_THINGSTREAM_PP_PLAN_LBAND:
+                        topicFilter = thingstreamPpFilterCorrectionDataLb;
+                        ret = XPLR_THINGSTREAM_OK;
+                        break;
+                    case XPLR_THINGSTREAM_PP_PLAN_IPLBAND:
+                        topicFilter = thingstreamPpFilterCorrectionDataIpLb;
+                        ret = XPLR_THINGSTREAM_OK;
+                        break;
+                    case XPLR_THINGSTREAM_PP_PLAN_INVALID:
+                    default:
+                        ret = XPLR_THINGSTREAM_ERROR;
+                        break;
+                }
+                if (ret == XPLR_THINGSTREAM_OK) {
+                    thingstreamPpFilterCorrectionData = topicFilter;
+                }
                 break;
             case XPLR_THINGSTREAM_PP_TOPIC_GAD:
                 topicFilter = thingstreamPpFilterGAD;
@@ -393,6 +431,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
 
 xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegion(const char *data,
                                                                   xplr_thingstream_pp_region_t region,
+                                                                  xplr_thingstream_pp_plan_t planType,
                                                                   xplr_thingstream_pp_topic_t *topics)
 {
     xplr_thingstream_error_t err[4];
@@ -407,12 +446,14 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegion(const char *da
     for (int8_t i = 0; i < 3; i++) {
         err[i] = xplrThingstreamPpParseTopicInfo(data,
                                                  region,
+                                                 planType,
                                                  (xplr_thingstream_pp_topic_type_t)i,
                                                  &topics[i]);
     }
 
     err[3] = xplrThingstreamPpParseTopicInfo(data,
                                              region,
+                                             planType,
                                              XPLR_THINGSTREAM_PP_TOPIC_FREQ,
                                              &topics[3]);
 
@@ -428,6 +469,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegion(const char *da
 
 xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char *data,
                                                                      xplr_thingstream_pp_region_t region,
+                                                                     xplr_thingstream_pp_plan_t planType,
                                                                      xplr_thingstream_pp_topic_t *topics)
 {
     xplr_thingstream_error_t err[8];
@@ -437,6 +479,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char 
     for (int8_t i = 0; i < 7; i++) {
         err[i] = xplrThingstreamPpParseTopicInfo(data,
                                                  region,
+                                                 planType,
                                                  (xplr_thingstream_pp_topic_type_t)i,
                                                  &topics[i]);
     }
@@ -446,18 +489,21 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char 
         case XPLR_THINGSTREAM_PP_REGION_EU:
             err[7] = xplrThingstreamPpParseTopicInfo(data,
                                                      region,
+                                                     planType,
                                                      XPLR_THINGSTREAM_PP_TOPIC_ALL_EU,
                                                      &topics[7]);
             break;
         case XPLR_THINGSTREAM_PP_REGION_US:
             err[7] = xplrThingstreamPpParseTopicInfo(data,
                                                      region,
+                                                     planType,
                                                      XPLR_THINGSTREAM_PP_TOPIC_ALL_US,
                                                      &topics[7]);
             break;
         case XPLR_THINGSTREAM_PP_REGION_ALL:
             err[7] = xplrThingstreamPpParseTopicInfo(data,
                                                      region,
+                                                     planType,
                                                      XPLR_THINGSTREAM_PP_TOPIC_ALL,
                                                      &topics[7]);
             break;
@@ -560,6 +606,12 @@ bool xplrThingstreamPpMsgIsCorrectionData(const char *name, const xplr_thingstre
     const char *description = NULL;
     int32_t pathFoundInData;
     const char *descriptionFilter = thingstreamPpFilterCorrectionData;
+
+    if (descriptionFilter == NULL) {
+        XPLR_THINGSTREAM_CONSOLE(E,
+                                 "Subscription plan to Thingstream has not been specified... Please call xplrThingstreamPpSetSubType first!");
+        return false;
+    }
 
     /* find key distribution path from thingstream instance topic list */
     for (int i = 0; i < instance->pointPerfect.numOfTopics; i++) {
@@ -743,6 +795,37 @@ bool xplrThingstreamPpMsgIsFrequency(const char *name, const xplr_thingstream_t 
     }
 
     return ret;
+}
+
+xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_region_t region, xplr_thingstream_pp_plan_t plan,
+                                                       xplr_thingstream_t *instance)
+{
+    xplr_thingstream_error_t ret[4];
+
+    xplr_thingstream_pp_sub_t sub =  {
+        .region = region,
+        .plan = plan
+    };
+
+    /** Get topics and descriptions*/
+    ret[0] = tsPpGetKeysTopic(&sub, instance->pointPerfect.topicList[0].path);
+    ret[1] = tsPpGetKeysDesc(&sub, instance->pointPerfect.topicList[0].description);
+    if (sub.plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
+        ret[2] = tsPpGetFreqTopic(&sub, instance->pointPerfect.topicList[1].path);
+        ret[3] = tsPpGetFreqDesc(&sub, instance->pointPerfect.topicList[1].description);
+    } else {
+        ret[2] = tsPpGetCorrTopic(&sub, instance->pointPerfect.topicList[1].path);
+        ret[3] = tsPpGetCorrDesc(&sub, instance->pointPerfect.topicList[1].description);
+    }
+
+    /** Check for errors*/
+    for (int i = 0; i < 4; i++) {
+        if (ret[i] != XPLR_THINGSTREAM_OK) {
+            return XPLR_THINGSTREAM_ERROR;
+        }
+    }
+
+    return XPLR_THINGSTREAM_OK;
 }
 
 /* ----------------------------------------------------------------
@@ -1316,6 +1399,200 @@ static xplr_thingstream_error_t tsApiMsgParsePpZtpCheckTag(const char *msg, cons
         XPLR_THINGSTREAM_CONSOLE(E, "input msg is <NULL>.");
     }
 
+    return ret;
+}
+
+static xplr_thingstream_pp_plan_t tsPpGetPlanType(bool lbandSupported, bool mqttSupported)
+{
+    xplr_thingstream_pp_plan_t ret;
+
+    if (lbandSupported && mqttSupported) {
+        ret = XPLR_THINGSTREAM_PP_PLAN_IPLBAND;
+        XPLR_THINGSTREAM_CONSOLE(I,
+                                 "Your current Thingstream plan is : Point Perfect L-band and IP, thus, valid to receive correction data via MQTT");
+    } else if (mqttSupported) {
+        ret = XPLR_THINGSTREAM_PP_PLAN_IP;
+        XPLR_THINGSTREAM_CONSOLE(I,
+                                 "Your current Thingstream plan is : Point Perfect IP, thus, valid to receive correction data via MQTT");
+    } else {
+        ret = XPLR_THINGSTREAM_PP_PLAN_INVALID;
+        XPLR_THINGSTREAM_CONSOLE(E,
+                                 "Your current Thingstream plan is : Point Perfect L-band, thus, not valid to receive correction data via MQTT");
+        XPLR_THINGSTREAM_CONSOLE(E, "Try using L-band correction data via the MQTT decryption keys...");
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpGetKeysTopic(xplr_thingstream_pp_sub_t *tsplan, char *keysTopic)
+{
+    xplr_thingstream_error_t ret = XPLR_THINGSTREAM_OK;
+    strcpy(keysTopic, "/pp/ubx/0236/");
+    switch (tsplan->plan) {
+        case XPLR_THINGSTREAM_PP_PLAN_IP:
+            strcat(keysTopic, "ip");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_IPLBAND:
+        case XPLR_THINGSTREAM_PP_PLAN_LBAND:
+            strcat(keysTopic, "Lb");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_INVALID:
+        default:
+            XPLR_THINGSTREAM_CONSOLE(E, "Invalid Subscription Plan Type... Cannot get key distribution topic");
+            ret = XPLR_THINGSTREAM_ERROR;
+            break;
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpGetKeysDesc(xplr_thingstream_pp_sub_t *tsplan, char *keysDesc)
+{
+    xplr_thingstream_error_t ret = XPLR_THINGSTREAM_OK;
+
+    switch (tsplan->plan) {
+        case XPLR_THINGSTREAM_PP_PLAN_IP:
+            strcpy(keysDesc, "IP ");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_IPLBAND:
+            strcpy(keysDesc, "L-band + IP ");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_LBAND:
+            strcpy(keysDesc, "L-band ");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_INVALID:
+        default:
+            XPLR_THINGSTREAM_CONSOLE(E,
+                                     "Invalid Subscription Plan Type... Cannot get key distribution topic description");
+            ret = XPLR_THINGSTREAM_ERROR;
+            break;
+    }
+
+    if (ret == XPLR_THINGSTREAM_OK) {
+        strcat(keysDesc, "key distribution topic");
+    }
+
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpGetCorrTopic(xplr_thingstream_pp_sub_t *tsplan, char *corrTopic)
+{
+    xplr_thingstream_error_t ret = XPLR_THINGSTREAM_OK;
+
+    strcpy(corrTopic, "/pp/");
+    switch (tsplan->plan) {
+        case XPLR_THINGSTREAM_PP_PLAN_IP:
+            strcat(corrTopic, "ip/");
+            thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataIp;
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_IPLBAND:
+            strcat(corrTopic, "Lb/");
+            thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataIpLb;
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_LBAND:
+            strcat(corrTopic, "Lb/");
+            thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataLb;
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_INVALID:
+        default:
+            XPLR_THINGSTREAM_CONSOLE(E, "Invalid Subscription Plan Type... Cannot get correction topic");
+            ret = XPLR_THINGSTREAM_ERROR;
+            break;
+    }
+
+    if (ret == XPLR_THINGSTREAM_OK) {
+        switch (tsplan->region) {
+            case XPLR_THINGSTREAM_PP_REGION_EU:
+                strcat(corrTopic, "eu");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_US:
+                strcat(corrTopic, "us");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_KR:
+            case XPLR_THINGSTREAM_PP_REGION_ALL:
+                XPLR_THINGSTREAM_CONSOLE(E, "Only EU and US region are currently supported...");
+                ret = XPLR_THINGSTREAM_ERROR;
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_INVALID:
+            default:
+                XPLR_THINGSTREAM_CONSOLE(E, "Invalid region type... Only EU and US are supported");
+                ret = XPLR_THINGSTREAM_ERROR;
+                break;
+        }
+    }
+
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpGetCorrDesc(xplr_thingstream_pp_sub_t *tsplan, char *corrDesc)
+{
+    xplr_thingstream_error_t ret = XPLR_THINGSTREAM_OK;
+
+    switch (tsplan->plan) {
+        case XPLR_THINGSTREAM_PP_PLAN_IP:
+            strcpy(corrDesc, "IP ");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_IPLBAND:
+            strcpy(corrDesc, "L-band + IP ");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_LBAND:
+            strcpy(corrDesc, "L-band ");
+            break;
+        case XPLR_THINGSTREAM_PP_PLAN_INVALID:
+        default:
+            XPLR_THINGSTREAM_CONSOLE(E,
+                                     "Invalid Subscription Plan Type... Cannot get key correction topic description");
+            ret = XPLR_THINGSTREAM_ERROR;
+            break;
+    }
+
+    if (ret == XPLR_THINGSTREAM_OK) {
+        strcat(corrDesc, "correction topic for ");
+        switch (tsplan->region) {
+            case XPLR_THINGSTREAM_PP_REGION_EU:
+                strcat(corrDesc, "EU region");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_US:
+                strcat(corrDesc, "US region");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_KR:
+            case XPLR_THINGSTREAM_PP_REGION_ALL:
+                XPLR_THINGSTREAM_CONSOLE(E, "Only EU and US region are currently supported...");
+                ret = XPLR_THINGSTREAM_ERROR;
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_INVALID:
+            default:
+                XPLR_THINGSTREAM_CONSOLE(E, "Invalid region type... Only EU and US are supported");
+                ret = XPLR_THINGSTREAM_ERROR;
+                break;
+        }
+    }
+
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpGetFreqTopic(xplr_thingstream_pp_sub_t *tsplan, char *freqTopic)
+{
+    xplr_thingstream_error_t ret = XPLR_THINGSTREAM_OK;
+    if (tsplan->plan == XPLR_THINGSTREAM_PP_PLAN_LBAND ||
+        tsplan->plan == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
+        strcpy(freqTopic, "/pp/frequencies/Lb");
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "Non Lband plan does not have access to frequencies topic");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    
+    return ret;
+}
+static xplr_thingstream_error_t tsPpGetFreqDesc(xplr_thingstream_pp_sub_t *tsplan, char *freqDesc)
+{
+    xplr_thingstream_error_t ret = XPLR_THINGSTREAM_OK;
+    if (tsplan->plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
+        strcpy(freqDesc, "L-band frequencies topic");
+    } else if (tsplan->plan == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
+        strcpy(freqDesc, "L-band + IP frequencies topic");
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "Non Lband plan does not have access to frequencies topic");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
     return ret;
 }
 

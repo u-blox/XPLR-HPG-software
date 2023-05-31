@@ -62,6 +62,7 @@ xplr_thingstream_error_t xplrThingstreamInit(const char *ppToken,
  * @param  msg          thingstream location device profile id.
  * @param  size[in/out] On input defines provided buffer size.
  *                      On output denotes number of bytes written to buffer.
+ * @param  instance     thingstream instance to initialize.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
 xplr_thingstream_error_t xplrThingstreamApiMsgCreate(xplr_thingstream_api_t cmd,
@@ -74,6 +75,7 @@ xplr_thingstream_error_t xplrThingstreamApiMsgCreate(xplr_thingstream_api_t cmd,
  *        Data provided must include the ztp response payload.
  *
  * @param  data         configuration payload from thingstream.
+ * @param  region       thingstream location service region type
  * @param  settings     thingstream location settings to configure.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
@@ -120,12 +122,15 @@ xplr_thingstream_error_t xplrThingstreamPpParseMqttSupport(const char *data,
  * @brief Returns point perfect related topic info for given type
  *
  * @param data      thingstream data payload.
+ * @param region    thingstream location service region type
+ * @param subType   type of subscription plan to Thingstream platform
  * @param type      topic type to parse info from.
  * @param topic     instance to store the key distribution topic info.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
 xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
                                                          xplr_thingstream_pp_region_t region,
+                                                         xplr_thingstream_pp_plan_t planType,
                                                          xplr_thingstream_pp_topic_type_t type,
                                                          xplr_thingstream_pp_topic_t *topic);
 
@@ -133,24 +138,28 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
  * @brief Returns minimum required point perfect topics info by region
  *
  * @param data      thingstream data payload.
- * @param type      topic type to parse info from.
+ * @param region    thingstream location service region type
+ * @param subType   type of subscription plan to Thingstream platform
  * @param topics    instance list to store region related topics.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
 xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegion(const char *data,
                                                                   xplr_thingstream_pp_region_t region,
+                                                                  xplr_thingstream_pp_plan_t planType,
                                                                   xplr_thingstream_pp_topic_t *topics);
 
 /**
  * @brief Returns all region related point perfect topics info
  *
  * @param data      thingstream data payload.
- * @param type      topic type to parse info from.
+ * @param region    thingstream location service region type
+ * @param subType   type of subscription plan to Thingstream platform
  * @param topics    instance list to store region related topics.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
 xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char *data,
                                                                      xplr_thingstream_pp_region_t region,
+                                                                     xplr_thingstream_pp_plan_t planType,
                                                                      xplr_thingstream_pp_topic_t *topics);
 
 /**
@@ -245,6 +254,24 @@ bool xplrThingstreamPpMsgIsClock(const char *name, const xplr_thingstream_t *ins
  * @return true on success, false otherwise.
  */
 bool xplrThingstreamPpMsgIsFrequency(const char *name, const xplr_thingstream_t *instance);
+
+
+/**
+ * @brief Function that configures the topics of thingstream instance according
+ *        to the region and the subscription plan. Mandatory when using certificate
+ *        authentication to the broker, not needed when using ZTP
+ *        (in that case use xplrThingstreamPpConfig instead)
+ *
+ * @param region    thingstream location service region (right now only EU and US are
+ *                  supported by hpglib and thus are the only accepted values)
+ * @param plan      subscription plan (possible plans : IPLBAND, IP, LBAND).
+ *                  LBAND plan does NOT support correction data via MQTT, only fetches
+ *                  decryption keys for the NEO module.
+ * @param instance  thingstream instance.
+ * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
+*/
+xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_region_t region, xplr_thingstream_pp_plan_t plan,
+                                                       xplr_thingstream_t *instance);
 
 #ifdef __cplusplus
 }

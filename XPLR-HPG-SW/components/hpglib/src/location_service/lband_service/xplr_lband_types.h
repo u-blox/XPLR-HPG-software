@@ -31,17 +31,16 @@
  */
 
 /**
- * Lband frequencies to receive correction data from
- */
-#define XPLR_LBAND_FREQUENCY_EU     1545260000
-#define XPLR_LBAND_FREQUENCY_US     1556290000
-
-/**
  * Device and network config
  */
 typedef struct xplrLbandDeviceCfg_type {
     uDeviceCfg_t dvcSettings;        /**< Device config */
     uNetworkCfgGnss_t dvcNetwork;    /**< Network config */
 } xplrLbandDeviceCfg_t;
+
+typedef enum {
+    XPLR_LBAND_FREQUENCY_EU = 0,
+    XPLR_LBAND_FREQUENCY_US
+} xplrLbandRegion;
 
 #endif

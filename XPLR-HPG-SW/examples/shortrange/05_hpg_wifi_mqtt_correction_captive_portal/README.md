@@ -118,7 +118,7 @@ Please follow the steps described below to set up all credentails on the web int
 
 **NOTE**: If the smartphone only starts the hotspot at 5 GHz, then XPLR-HPG cannot connect.
 
-8. Following, copy and paste the Client ID, upload the Thingstream files, and select the device region (EU - Europe or US - United States). Don't forget to click the **Set** button on each Thingstream credential to define them.
+8. Following, copy and paste the Client ID, upload the Thingstream files, select the device region (EU - Europe or US - United States) and your Thingstream subscription plan. Don't forget to click the **Set** button on each Thingstream credential to define them.
 
 ![Web interface button](./../../../media/shared/readmes/thingstream_config.jpg)
 
@@ -154,3 +154,8 @@ Name | Description
 **[xplr_mqtt](./../../../components/xplr_mqtt)** | XPLR MQTT manager
 **[hpglib/location_services/xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)** | XPLR GNSS location device manager
 **[hpglib/location_services/location_service_helpers](./../../../components/hpglib/src/location_service/location_service_helpers/)** | Internally used by **[xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)**
+
+
+## Notes
+- In case that a device is already configured and the user tries to change the subscription plan, a manual reset to the device is required.
+- When configuring Thingstream subscription plan in captive portal settings page, please make sure that the subscription plan is also set in Thingstream otherwise the device will fail to acquire position data.

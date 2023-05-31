@@ -95,15 +95,17 @@
  */
 #define XPLR_GNSS_I2C_ADDR  0x42
 
-/**
- * MQTT topics for correction data and decryption keys
- */
-#define APP_KEYS_TOPIC              "/pp/ubx/0236/Lb"
-#define APP_CORRECTION_DATA_TOPIC   "/pp/Lb/eu"
-
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
+
+/**
+ * Valid options for locations
+ */
+typedef enum {
+    APP_REGION_EU,
+    APP_REGION_US
+} appRegions;
 
 /* ----------------------------------------------------------------
  * EXTERNAL VARIABLES
@@ -120,6 +122,11 @@ extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
+
+/**
+ * Using EU as a region
+ */
+static const appRegions region = APP_REGION_EU;
 
 /*
  * Fill this struct with your desired settings and try to connect
@@ -208,6 +215,8 @@ xplrMqttWifiPayload_t mqttMessage = {
 static bool requestDc;
 static bool gotZtp;
 static bool mqttFlag;
+static bool lbandFlag;
+static bool isNeededTopic;
 
 /**
  * Error return types
@@ -303,7 +312,8 @@ void app_main(void)
                  * If the user does not use it it will be discarded.
                  */
                 if (xplrMqttWifiReceiveItem(&mqttClient, &mqttMessage) == XPLR_MQTTWIFI_ITEM_OK) {
-                    if (strcmp(mqttMessage.topic, APP_KEYS_TOPIC) == 0) {
+                    isNeededTopic = (strcmp(mqttMessage.topic, ztpStyleTopics.topic[XPLR_JSON_PARSER_REQTOPIC_KEYDISTRIB].path) == 0);
+                    if (isNeededTopic) {
                         espRet = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
                         if (espRet != ESP_OK) {
                             APP_CONSOLE(E, "Failed to send decryption keys!");
@@ -311,7 +321,8 @@ void app_main(void)
                         }
                     }
 
-                    if (strcmp(mqttMessage.topic, APP_CORRECTION_DATA_TOPIC) == 0) {
+                    isNeededTopic = (strcmp(mqttMessage.topic, ztpStyleTopics.topic[XPLR_JSON_PARSER_REQTOPIC_CORRECDATA].path) == 0);
+                    if (isNeededTopic) {
                         espRet = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
                         if (espRet != ESP_OK) {
                             APP_CONSOLE(E, "Failed to send correction data!");
@@ -454,13 +465,26 @@ static esp_err_t appDoZtp(void)
 static void appMqttExecParsers(void)
 {
     appJsonParse();
-    appMqttCertificateParse();
-    appMqttPrivateKeyParse();
-    appMqttClientIdParse();
-    appMqttSubscriptionsParse();
     appMqttSupportParse();
-    appMqttHostParse();
-    appDeallocateJSON();
+    if (mqttFlag) {
+        appMqttCertificateParse();
+        appMqttPrivateKeyParse();
+        appMqttClientIdParse();
+        appMqttSubscriptionsParse();
+        appMqttHostParse();
+        appDeallocateJSON();
+    } else {
+        APP_CONSOLE(W, "MQTT is not supported.");
+        if (xplrJsonZtpSupportsLband(json, &lbandFlag) == XPLR_JSON_PARSER_OK) {
+            if (lbandFlag) {
+                APP_CONSOLE(W, "Correction plan is LBAND only.");
+            }
+        } else {
+            APP_CONSOLE(E, "Could not parse LBAND flag!");
+        }
+        APP_CONSOLE(E, "Halting execution.");
+        appHaltExecution();
+    }
 }
 
 /**
@@ -551,9 +575,21 @@ static void appMqttClientIdParse(void)
  */
 static void appMqttSubscriptionsParse(void)
 {
+    char strLoc[3];
+
+    memset(strLoc, 0x00, ELEMENTCNT(strLoc));
+
+    if (region == APP_REGION_EU) {
+        strcpy(strLoc, XPLR_ZTP_REGION_EU);
+    } else {
+        strcpy(strLoc, XPLR_ZTP_REGION_US);
+    }
+
+    APP_CONSOLE(D, "Configured region: %s", strLoc);
+
     ztpStyleTopics.populatedCount = 0;
     if (xplrJsonZtpGetRequiredTopicsByRegion(json, &ztpStyleTopics,
-                                             XPLR_ZTP_REGION_EU) != XPLR_JSON_PARSER_OK) {
+                                             strLoc) != XPLR_JSON_PARSER_OK) {
         APP_CONSOLE(E, "Parsing required MQTT topics failed!");
         appHaltExecution();
     }

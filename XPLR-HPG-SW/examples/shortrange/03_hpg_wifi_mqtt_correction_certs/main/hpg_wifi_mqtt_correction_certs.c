@@ -85,11 +85,20 @@
 #define APP_GNSS_I2C_ADDR  0x42
 
 /**
- * MQTT topics for correction data and decryption keys
- * Assuming we are in EU
+ * Valid values
+ * EU
+ * US
  */
-#define APP_KEYS_TOPIC              "/pp/ubx/0236/Lb"
-#define APP_CORRECTION_DATA_TOPIC   "/pp/Lb/eu"
+#define APP_ORIGIN_COUNTRY "EU"
+
+/**
+ * Valid values
+ * IP
+ * IPLBAND
+ */
+#define APP_CORRECTION_TYPE "sdfs"
+
+#define APP_MAX_TOPICLEN 64
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -191,8 +200,9 @@ static xplrWifiStarterOpts_t wifiOptions = {
  */
 static esp_mqtt_client_config_t mqttClientConfig;
 static xplrMqttWifiClient_t mqttClient;
-static char *topicArray[] = {APP_KEYS_TOPIC, 
-                             APP_CORRECTION_DATA_TOPIC};
+static char appKeysTopic[APP_MAX_TOPICLEN];
+static char appCorrectionDataTopic[APP_MAX_TOPICLEN];
+static char *topicArray[] = {appKeysTopic, appCorrectionDataTopic};
 
 /**
  * A struct where we can store our received MQTT message
@@ -217,6 +227,11 @@ static bool requestDc;
 static esp_err_t espRet;
 static xplrWifiStarterError_t wifistarterErr;
 static xplrMqttWifiError_t mqttErr;
+typedef struct subTopics_type {
+    char appKeysTopic[APP_MAX_TOPICLEN];
+    char appCorrDataTopic[APP_MAX_TOPICLEN];
+} subTopics_t;
+
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -228,6 +243,9 @@ static void appInitGnssDevice(void);
 static void appMqttInit(void);
 static void appPrintLocation(uint8_t periodSecs);
 static void appHaltExecution(void);
+static esp_err_t appConfigTopics(char **subTopics,
+                                      const char *region, 
+                                      const char *corrType);
 
 void app_main(void)
 {
@@ -245,6 +263,10 @@ void app_main(void)
         if (xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_CONNECT_OK) {
             if (xplrMqttWifiGetCurrentState(&mqttClient) == XPLR_MQTTWIFI_STATE_UNINIT || 
                 xplrMqttWifiGetCurrentState(&mqttClient) == XPLR_MQTTWIFI_STATE_DISCONNECTED_OK) {
+                if (appConfigTopics(topicArray, APP_ORIGIN_COUNTRY, APP_CORRECTION_TYPE) != ESP_OK) {
+                    APP_CONSOLE(E, "appConfigTopics failed!");
+                    appHaltExecution();
+                }
                 appMqttInit();
                 xplrMqttWifiStart(&mqttClient);
                 requestDc = false;
@@ -275,14 +297,14 @@ void app_main(void)
                  * If the user does not use it it will be discarded.
                  */
                 if (xplrMqttWifiReceiveItem(&mqttClient, &mqttMessage) == XPLR_MQTTWIFI_ITEM_OK) {
-                    if (strcmp(mqttMessage.topic, APP_KEYS_TOPIC) == 0) {
+                    if (strcmp(mqttMessage.topic, topicArray[0]) == 0) {
                         espRet = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
                         if (espRet != ESP_OK) {
                            APP_CONSOLE(E, "Failed to send decryption keys!");
                            appHaltExecution();
                         }
                     }
-                    if (strcmp(mqttMessage.topic, APP_CORRECTION_DATA_TOPIC) == 0) {
+                    if (strcmp(mqttMessage.topic, topicArray[1]) == 0) {
                         espRet = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
                         if (espRet != ESP_OK) {
                             APP_CONSOLE(E, "Failed to send correction data!");
@@ -457,4 +479,41 @@ static void appHaltExecution(void)
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
+
+static esp_err_t appConfigTopics(char **subTopics,
+                                      const char *region, 
+                                      const char *corrType)
+{
+    esp_err_t ret = ESP_OK;
+
+    memset(subTopics[0], 0x00, APP_MAX_TOPICLEN);
+    memset(subTopics[1], 0x00, APP_MAX_TOPICLEN);
+
+    if (strcmp(corrType, "IP") == 0) {
+        strcpy(subTopics[0], "/pp/ubx/0236/ip");
+        strcpy(subTopics[1], "/pp/ip/");
+    } else if ((strcmp(corrType, "IPLBAND") == 0)) {
+        strcpy(subTopics[0], "/pp/ubx/0236/Lb");
+        strcpy(subTopics[1], "/pp/Lb/");
+    } else if((strcmp(corrType, "LBAND") == 0)) {
+        APP_CONSOLE(E, "LBAND not supported by example");
+        ret = ESP_FAIL;
+    } else {
+        APP_CONSOLE(E, "Invalid Thingstream plan!");
+        ret = ESP_FAIL;
+    }
+
+    if (ret == ESP_OK) {
+        if (strcmp(region, "EU") == 0) {
+            strcat(subTopics[1], "eu");
+        } else if (strcmp(region, "US") == 0) {
+            strcat(subTopics[1], "us");
+        } else {
+            APP_CONSOLE(E, "Invalid region!");
+            ret = ESP_FAIL;
+        }
+    }
+    
+    return ret;
 }

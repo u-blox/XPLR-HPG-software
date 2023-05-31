@@ -118,9 +118,7 @@ Please follow the steps described bellow:
     The default value can be left as is and this step can be skipped.
 10. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point SSID` and configure your **Access Point's SSID** as needed.
 11. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure your **Access Point's Password** as needed.
-12. **`APP_KEYS_TOPIC "/pp/ubx/0236/Lb"`** Change topic, if needed, according to your correction data plan.
-13. **`APP_CORRECTION_DATA_TOPIC "/pp/Lb/eu"`** Change topic and region, if needed, according to your data plan and geographic location respectively.
-14. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
+12. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 
 <br>
 
@@ -161,11 +159,10 @@ Name | Description
 **`APP_MQTT_PAYLOAD_BUF_SIZE ((10U) * (KIB))`** | Definition of MQTT buffer size of 10 KBytes.
 **`APP_MQTT_CLIENT_ID_BUF_SIZE (128U)`** | A 128 Bytes buffer size to store the parsed MQTT Client ID from ZTP Json Parser
 **`APP_MQTT_HOST_BUF_SIZE (128U)`** | A 128 Bytes buffer size to store the parsed MQTT host URL/URI from ZTP Json Parser.
+**`APP_REGION`** | Selected region/location for device.
 **`APP_LOCATION_PRINT_PERIOD 5`** | Period in seconds on how often we want our print location function [**`appPrintLocation(uint8_t periodSecs)`**] to execute. Can be changed as desired.
 **`APP_MAX_TOPIC_CNT 2`** | Maximum number of MQTT topics to subscribe to.
 **`XPLR_GNSS_I2C_ADDR 0x42`** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module
-**`APP_KEYS_TOPIC "/pp/ubx/0236/Lb"`** | Decryption keys distribution topic. Change this according to your needs if needed.
-**`APP_CORRECTION_DATA_TOPIC "/pp/Lb/eu"`** | Correction data distribution topic. Change this according to your needs if needed.
 
 <br>
 <br>

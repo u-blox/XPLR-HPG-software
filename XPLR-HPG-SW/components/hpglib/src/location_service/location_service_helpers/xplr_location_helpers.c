@@ -288,7 +288,7 @@ esp_err_t xplrHlprLocSrvcOptionSingleValSet(xplrGnssDevBase_t *dvcBase,
         return ESP_FAIL;
     }
 
-    XPLRHELPERS_CONSOLE(I, "Set configuration value.");
+    XPLRHELPERS_CONSOLE(D, "Set configuration value.");
     return ESP_OK;
 }
 

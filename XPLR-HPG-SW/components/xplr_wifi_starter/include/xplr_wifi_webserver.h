@@ -41,6 +41,9 @@ extern "C" {
 /* Point Perfect size of a region */
 #define XPLR_WIFIWEBSERVER_PPREGION_SIZE                     (3U+1U)
 
+/* Point Perfect size of a region */
+#define XPLR_WIFIWEBSERVER_PPPLAN_SIZE                       (8U+1U)
+
 /* Max URIs that server can handle */
 #define WEBSERVER_URIS_MAX                                   (25U)
 
@@ -67,6 +70,8 @@ typedef struct xplrWifiWebServerDataPpCredentials_type {
     char privateKey[XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE];        /**< point perfect client private key. */
     char region[XPLR_WIFIWEBSERVER_PPREGION_SIZE];                        /**< point perfect region to parse correction data for.
                                                                              Supported values: EU and US */
+    char plan[XPLR_WIFIWEBSERVER_PPPLAN_SIZE];                            /**< point perfect plan to parse correction data for.
+                                                                             Supported values: IP, LBAND and IP+LBAND */
     bool set;
 } xplrWifiWebServerDataPpCredentials_t;
 
