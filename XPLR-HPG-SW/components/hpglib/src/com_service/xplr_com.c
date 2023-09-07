@@ -762,7 +762,7 @@ void cellDvcGetNetworkInfo(int8_t index, xplrCom_cell_netInfo_t *info)
 {
     uDeviceHandle_t dvcHandler = comDevices[index].handler;
 
-    uCellNetGetOperatorStr(dvcHandler, info->operator, 32);
+    uCellNetGetOperatorStr(dvcHandler, info->network_operator, 32);
     memcpy(info->rat,
            ratStr[uCellNetGetActiveRat(dvcHandler)],
            strlen(ratStr[uCellNetGetActiveRat(dvcHandler)])
@@ -776,7 +776,7 @@ void cellDvcGetNetworkInfo(int8_t index, xplrCom_cell_netInfo_t *info)
     uCellNetGetMccMnc(dvcHandler, &info->Mcc, &info->Mnc);
 
     XPLRCOM_CONSOLE(D, "cell network settings:");
-    XPLRCOM_CONSOLE(D, "operator: %s", info->operator);
+    XPLRCOM_CONSOLE(D, "operator: %s", info->network_operator);
     XPLRCOM_CONSOLE(D, "ip: %s", info->ip);
     XPLRCOM_CONSOLE(D, "registered: %d", info->registered);
     XPLRCOM_CONSOLE(D, "RAT: %s", info->rat);

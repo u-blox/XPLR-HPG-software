@@ -69,7 +69,7 @@ typedef struct xplrNvs_type {
  * @param  nvs  driver struct to initialize.
  * @return      XPLR_NVS_OK on success, XPLR_NVS_ERROR otherwise.
  */
-xplrNvs_error_t xplrNvsInit(xplrNvs_t* nvs, const char* namespace);
+xplrNvs_error_t xplrNvsInit(xplrNvs_t* nvs, const char* nvs_namespace);
 
 /**
  * @brief De-initialize nvs driver.
