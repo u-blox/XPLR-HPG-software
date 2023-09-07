@@ -94,7 +94,7 @@ typedef struct xplrCom_cell_config_type {
  * To retrieve it xplrComCellNetworkInfo() needs to called.
 */
 typedef struct xplrCom_cell_netInfo_type {
-    char                network_operator[32];                   /**< Network operator name. */
+    char                network_operator[32];           /**< Network operator name. */
     char                ip[U_CELL_NET_IP_ADDRESS_SIZE]; /**< IP acquired from network carrier. */
     char                apn[64];                        /**< APN of network carrier. */
     char                rat[32];                        /**< RAT used to register. */
