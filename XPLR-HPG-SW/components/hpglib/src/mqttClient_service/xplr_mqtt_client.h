@@ -53,8 +53,8 @@ extern "C" {
  * @return      XPLR_CELL_MQTT_OK on success, XPLR_CELL_MQTT_ERROR otherwise.
  */
 xplrCell_mqtt_error_t xplrCellMqttInit(int8_t dvcProfile,
-                                        int8_t clientId,
-                                        xplrCell_mqtt_client_t *client);
+                                       int8_t clientId,
+                                       xplrCell_mqtt_client_t *client);
 
 /**
  * @brief De-initialize MQTT API.
@@ -85,8 +85,8 @@ xplrCell_mqtt_error_t xplrCellMqttDisconnect(int8_t dvcProfile, int8_t clientId)
  * @return      XPLR_CELL_MQTT_OK on success, XPLR_CELL_MQTT_ERROR otherwise.
  */
 xplrCell_mqtt_error_t xplrCellMqttSubscribeToTopic(int8_t dvcProfile,
-                                                    int8_t clientId,
-                                                    xplrCell_mqtt_topic_t *topic);
+                                                   int8_t clientId,
+                                                   xplrCell_mqtt_topic_t *topic);
 
 /**
  * @brief Subscribe to topic list.
@@ -120,8 +120,8 @@ xplrCell_mqtt_error_t xplrCellMqttUnsubscribeFromTopicList(int8_t dvcProfile, in
  * @return      XPLR_CELL_MQTT_OK on success, XPLR_CELL_MQTT_ERROR otherwise.
  */
 xplrCell_mqtt_error_t xplrCellMqttUnsubscribeFromTopic(int8_t dvcProfile,
-                                                        int8_t clientId,
-                                                        xplrCell_mqtt_topic_t *topic);
+                                                       int8_t clientId,
+                                                       xplrCell_mqtt_topic_t *topic);
 
 /**
  * @brief Unsubscribe from topic list.
@@ -143,8 +143,8 @@ xplrCell_mqtt_error_t xplrCellMqttUnsubscribeFromTopicList(int8_t dvcProfile, in
  * @return      XPLR_CELL_MQTT_OK on success, XPLR_CELL_MQTT_ERROR otherwise.
  */
 xplrCell_mqtt_error_t xplrCellMqttUnsubscribeFromTopic(int8_t dvcProfile,
-                                                        int8_t clientId,
-                                                        xplrCell_mqtt_topic_t *topic);
+                                                       int8_t clientId,
+                                                       xplrCell_mqtt_topic_t *topic);
 
 /**
  * @brief Get number of available messages.
@@ -184,6 +184,24 @@ xplrCell_mqtt_error_t xplrCellFactoryReset(int8_t dvcProfile, int8_t clientId);
  * @return XPLR_CELL_MQTT_OK on success, XPLR_CELL_MQTT_ERROR otherwise.
  */
 xplrCell_mqtt_error_t xplrCellMqttFsmRun(int8_t dvcProfile, int8_t clientId);
+
+/**
+ * @brief Function that halts the logging of the cell mqtt module
+ * 
+ * @param dvcProfile   device profile id. Stored in xplrCom_cell_config_t
+ * @param clientId     MQTT client index
+ * @return true if succeeded to halt the module or false otherwise.
+*/
+bool xplrCellMqttHaltLogModule(int8_t dvcProfile, int8_t clientId);
+
+/**
+ * @brief Function that starts the logging of the cell mqtt module
+ * 
+ * @param dvcProfile   device profile id. Stored in xplrCom_cell_config_t
+ * @param clientId     MQTT client index 
+ * @return true if succeeded to start the module or false otherwise
+*/
+bool xplrCellMqttStartLogModule(int8_t dvcProfile, int8_t clientId);
 
 #ifdef __cplusplus
 }

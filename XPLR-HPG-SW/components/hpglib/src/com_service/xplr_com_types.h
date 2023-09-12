@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include "./../../../../components/ubxlib/ubxlib.h"
+#include "xplr_log.h"
 
 /** @file
  * @brief This header file defines the types used in communication service API,
@@ -74,9 +75,9 @@ typedef enum {
  * Struct to be provided by the user via xplrComCellInit().
 */
 typedef struct xplrCom_cell_config_type {
-    uDeviceCfgCell_t    *hwSettings;                            /**< pointer to cellular module hw settings. */
-    uDeviceCfgUart_t    *comSettings;                           /**< pointer to peripheral configuration pins. */
-    uNetworkCfgCell_t   *netSettings;                           /**< pointer to cellular module network settings. */
+    uDeviceCfgCell_t     *hwSettings;                           /**< pointer to cellular module hw settings. */
+    uDeviceCfgUart_t     *comSettings;                          /**< pointer to peripheral configuration pins. */
+    uNetworkCfgCell_t    *netSettings;                          /**< pointer to cellular module network settings. */
     int8_t               profileIndex;                          /**< holds profile index that current module is stored. */
     int32_t              mno;                                   /**< MNO of current profile. */
     uCellNetRat_t        ratList[XPLRCOM_CELL_RAT_SIZE];        /**< struct array to RAT list. */
@@ -88,6 +89,7 @@ typedef struct xplrCom_cell_config_type {
                                                                     Bandmask is only configured when the
                                                                     corresponding RAT is set to CAT-M1 or
                                                                     NB1. */
+    xplrLog_t           *logCfg;                                /**< pointer to the log struct of the module. */
 } xplrCom_cell_config_t;
 
 /** Cellular network information struct.

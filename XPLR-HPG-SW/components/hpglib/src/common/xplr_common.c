@@ -26,6 +26,9 @@
 #include "esp_mac.h"
 #include "esp_err.h"
 #include "mbedtls/md.h"
+#include <esp_heap_caps.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -169,7 +172,7 @@ int32_t xplrGetDeviceMac(uint8_t *mac)
     return ret;
 }
 
-esp_err_t timestampToDate(int64_t timeStamp, char *res, uint8_t maxLen)
+esp_err_t xplrTimestampToDate(int64_t timeStamp, char *res, uint8_t maxLen)
 {
     esp_err_t ret = ESP_OK;
     uint8_t intRet;
@@ -184,7 +187,7 @@ esp_err_t timestampToDate(int64_t timeStamp, char *res, uint8_t maxLen)
     return ret;
 }
 
-esp_err_t timestampToTime(int64_t timeStamp, char *res, uint8_t maxLen)
+esp_err_t xplrTimestampToTime(int64_t timeStamp, char *res, uint8_t maxLen)
 {
     esp_err_t ret = ESP_OK;
     uint8_t intRet;
@@ -199,7 +202,7 @@ esp_err_t timestampToTime(int64_t timeStamp, char *res, uint8_t maxLen)
     return ret;
 }
 
-esp_err_t timestampToDateTime(int64_t timeStamp, char *res, uint8_t maxLen)
+esp_err_t xplrTimestampToDateTime(int64_t timeStamp, char *res, uint8_t maxLen)
 {
     esp_err_t ret = ESP_OK;
     uint8_t intRet;
@@ -214,6 +217,26 @@ esp_err_t timestampToDateTime(int64_t timeStamp, char *res, uint8_t maxLen)
     return ret;
 }
 
+void xplrMemUsagePrint(uint8_t periodSecs)
+{
+    static uint64_t prevTime;
+    char taskList[720];
+    uint32_t free, minFree, total, numOfTasks;
+    if ((MICROTOSEC(esp_timer_get_time()) - prevTime >= periodSecs)) {
+        free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+        minFree = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+        total = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+        numOfTasks = uxTaskGetNumberOfTasks();
+        printf("heap: min %d cur %d size %d tasks: %d\n",
+               minFree,
+               free,
+               total,
+               numOfTasks);
+        vTaskList(taskList);
+        printf("Task List:\n%s\n", taskList);
+        prevTime = MICROTOSEC(esp_timer_get_time());
+    }
+}
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */

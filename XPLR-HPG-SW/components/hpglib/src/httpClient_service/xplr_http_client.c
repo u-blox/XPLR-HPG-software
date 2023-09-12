@@ -30,9 +30,17 @@
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
-
-#if (1 == XPLRCELL_HTTP_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRCELL_HTTP_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRCELL_HTTP_LOG_ACTIVE))
 #define XPLRCELL_HTTP_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrHttpCell", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRCELL_HTTP_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_HTTP_LOG_ACTIVE)
+#define XPLRCELL_HTTP_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrHttpCell", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    if (cellHttpLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrHttpCell", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+        XPLRLOG(&cellHttpLog,buff2Log);}
+#elif ((0 == XPLRCELL_HTTP_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_HTTP_LOG_ACTIVE)
+#define XPLRCELL_HTTP_CONSOLE(tag, message, ...) if (cellHttpLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrHttpCell", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+        XPLRLOG(&cellHttpLog,buff2Log);}
 #else
 #define XPLRCELL_HTTP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -60,6 +68,10 @@ typedef struct xplrCell_Http_type {
 
 static const char nvsNamespace[] = "httpCell_";
 static xplrCell_Http_t http[XPLRCOM_NUMOF_DEVICES];
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_HTTP_LOG_ACTIVE)
+static xplrLog_t cellHttpLog;
+static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
+#endif
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -97,6 +109,22 @@ xplrCell_http_error_t xplrCellHttpConnect(int8_t dvcProfile,
             instance->uHttpClientResponseCallback_t[clientId] = NULL;
         }
 
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_HTTP_LOG_ACTIVE)
+        xplrLog_error_t err = xplrLogInit(&cellHttpLog,
+                                          XPLR_LOG_DEVICE_INFO,
+                                          "/cellhttp.log",
+                                          100,
+                                          XPLR_SIZE_MB);
+        if (err == XPLR_LOG_OK) {
+            cellHttpLog.logEnable = true;
+            http[dvcProfile].client[clientId]->logCfg = &cellHttpLog;
+            /* Set pointer to the local log struct instance */
+            client->logCfg = &cellHttpLog;
+        } else {
+            cellHttpLog.logEnable = false;
+        }
+#endif
+
         /* init nvs of mqtt client */
         ret = clientNvsInit(dvcProfile, clientId);
 
@@ -129,9 +157,12 @@ void xplrCellHttpDeInit(int8_t dvcProfile, int8_t clientId)
     uHttpClientConnection_t *connection = &http[dvcProfile].clientConnection[clientId];
     uSecurityTlsSettings_t *tlsSettings = &http[dvcProfile].clientTlsSettings[clientId];
     xplrCellHttpDisconnect(dvcProfile, clientId);
-
     memset(connection, 0x00, sizeof(uHttpClientConnection_t));
     memset(tlsSettings, 0x00, sizeof(uSecurityTlsSettings_t));
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_HTTP_LOG_ACTIVE)
+    xplrLogDeInit(&cellHttpLog);
+    cellHttpLog.logEnable = false;
+#endif
 }
 
 void xplrCellHttpDisconnect(int8_t dvcProfile, int8_t clientId)
@@ -168,7 +199,7 @@ xplrCell_http_error_t xplrCellHttpCertificateSaveRootCA(int8_t dvcProfile,
         }
         clientNvsUpdate(dvcProfile, clientId);
         XPLRCELL_HTTP_CONSOLE(D, "Certificate %s stored in memory (md5:0x%08x).",
-                              client->credentials.rootCaName, md5Stored);
+                              client->credentials.rootCaName, (unsigned int)md5Stored);
         ret = XPLR_CELL_HTTP_OK;
     } else {
         XPLRCELL_HTTP_CONSOLE(E, "Error while storing %s certificate in memory.",
@@ -221,7 +252,7 @@ xplrCell_http_error_t xplrCellHttpCertificateCheckRootCA(int8_t dvcProfile,
         res = xplrCommonMd5Get((const unsigned char *)client->credentials.rootCa,
                                strlen(client->credentials.rootCa),
                                (unsigned char *)appMd5);
-        XPLRCELL_HTTP_CONSOLE(D, "MD5 hash of rootCa (user) is <0x%x>", appMd5);
+        XPLRCELL_HTTP_CONSOLE(D, "MD5 hash of rootCa (user) is <0x%x>", (unsigned int)appMd5);
 
         /* fetch md5 hash from modules' memory (will be different).
         * needed to see if there is a certificate stored in modules memory.
@@ -301,7 +332,7 @@ xplrCell_http_error_t xplrCellHttpPostRequest(int8_t dvcProfile,
 
     } else {
         XPLRCELL_HTTP_CONSOLE(W, "Device %d, Http client %d dataPath is NULL.",
-                              dvcProfile, clientId, client->session->data.path);
+                              dvcProfile, clientId);
         ret = XPLR_CELL_HTTP_ERROR;
     }
 
@@ -348,10 +379,57 @@ xplrCell_http_error_t xplrCellHttpGetRequest(int8_t dvcProfile,
 
     } else {
         XPLRCELL_HTTP_CONSOLE(W, "Device %d, Http client %d dataPath is NULL.",
-                              dvcProfile, clientId, client->session->data.path);
+                              dvcProfile, clientId);
         ret = XPLR_CELL_HTTP_ERROR;
     }
 
+    return ret;
+}
+
+bool xplrCellHttpHaltLogModule(int8_t dvcProfile, int8_t clientId)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_HTTP_LOG_ACTIVE)
+    if(http[dvcProfile].client[clientId]->logCfg != NULL) {
+        http[dvcProfile].client[clientId]->logCfg->logEnable = false;
+        ret = true;
+    } else {
+        /* log module is not initialized thus do nothing and return false*/
+        ret = false;
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrCellHttpStartLogModule(int8_t dvcProfile, int8_t clientId)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_HTTP_LOG_ACTIVE)
+    xplrLog_error_t err;
+    if(http[dvcProfile].client[clientId]->logCfg != NULL) {
+        http[dvcProfile].client[clientId]->logCfg->logEnable = true;
+        ret = true;
+    } else {
+        /* log module is not initialized thus don't enable logging
+           and return false*/
+    err = xplrLogInit(&cellHttpLog,
+                      XPLR_LOG_DEVICE_INFO,
+                      "/cellhttp.log",
+                      100,
+                      XPLR_SIZE_MB);
+    if (err == XPLR_LOG_OK) {
+        cellHttpLog.logEnable = true;
+        http[dvcProfile].client[clientId]->logCfg = &cellHttpLog;
+    } else {
+        cellHttpLog.logEnable = false;
+    }
+        ret = cellHttpLog.logEnable;
+    }
+#else 
+    ret = false;
+#endif
     return ret;
 }
 
@@ -462,7 +540,7 @@ xplrCell_http_error_t clientNvsReadConfig(int8_t dvcProfile, int8_t clientId)
 
     if (ret == XPLR_CELL_HTTP_OK) {
         XPLRCELL_HTTP_CONSOLE(D, "id: <%s>", storage->id);
-        XPLRCELL_HTTP_CONSOLE(D, "rootCa: <0x%x>", storage->md5RootCa);
+        XPLRCELL_HTTP_CONSOLE(D, "rootCa: <0x%x>", (unsigned int)storage->md5RootCa);
     }
 
     return ret;

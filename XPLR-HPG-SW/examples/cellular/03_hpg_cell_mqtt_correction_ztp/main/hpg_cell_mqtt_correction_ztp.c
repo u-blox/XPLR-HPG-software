@@ -18,12 +18,12 @@
  * An example for demonstration of the configuration of the LARA R6 cellular module το register to a network provider,
  * execute a Zero Touch Provisioning (ZTP) request and connect to Thingstream PointPerfect MQTT broker
  *
- * In the current example U-blox XPLR-HPG-1/XPLR-HPG-2 kit, 
+ * In the current example U-blox XPLR-HPG-1/XPLR-HPG-2 kit,
  * is setup using KConfig,
  * registers to a network provider using the xplr_com component,
  * executes an HTTPS request to ZTP using httpClient_service component,
  * fetches all required data for an MQTT connection by parsing the JSON response using thingstream_service component,
- * and finally subscribes to PointPerfect correction data topic, as well as a decryption key topic, using hpg_mqtt component. 
+ * and finally subscribes to PointPerfect correction data topic, as well as a decryption key topic, using hpg_mqtt component.
  *
  */
 
@@ -55,10 +55,11 @@
 #include "./../../../components/hpglib/src/mqttClient_service/xplr_mqtt_client.h"
 #include "./../../../components/hpglib/src/thingstream_service/xplr_thingstream.h"
 #include "./../../../components/hpglib/src/location_service/gnss_service/xplr_gnss.h"
+#include "./../../../components/hpglib/src/ztp_service/xplr_ztp.h"
 
 /**
- * If paths not found in VScode: 
- *      press keys --> <ctrl+shift+p> 
+ * If paths not found in VScode:
+ *      press keys --> <ctrl+shift+p>
  *      and select --> ESP-IDF: Add vscode configuration folder
  */
 
@@ -66,25 +67,43 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
+#define APP_PRINT_IMU_DATA         0U /* Disables/Enables imu data printing*/
+#define APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
+#define APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 0 for disabling*/
+#if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
+#elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
+#define APP_CONSOLE(tag, message, ...)\
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0) XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
+#else
+#define APP_CONSOLE(message, ...) do{} while(0)
+#endif
+
 #define APP_MAX_RETRIES_ON_ERROR        (5)             /* number of retries to recover from error before exiting */
 
 #define APP_STATISTICS_INTERVAL         (10 * 1)        /* frequency of statistics logging to console in seconds */
-#define APP_GNSS_INTERVAL               (1 * 1)         /* frequency of location info logging to console in seconds */
+#define APP_GNSS_LOC_INTERVAL           (1 * 1)         /* frequency of location info logging to console in seconds */
+#if 1 == APP_PRINT_IMU_DATA
+#define APP_GNSS_DR_INTERVAL            (5 * 1)         /* frequency of dead reckoning info logging to console in seconds */
+#endif
 #define APP_RUN_TIME                    (60 * 1)        /* period of app (in seconds) before exiting */
 #define APP_MQTT_BUFFER_SIZE_LARGE      (10 * 1024)     /* size of MQTT buffer used for large payloads */
 #define APP_MQTT_BUFFER_SIZE_SMALL      (2 * 1024)      /* size of MQTT buffer used for normal payloads */
 #define APP_HTTP_BUFFER_SIZE            (6 * 1024)      /* size of HTTP(S) buffer used for storing ZTP response */
 #define APP_CERTIFICATE_BUFFER_SIZE     (2 * 1024)      /* size of buffer used for storing certificates */
+#define APP_DEVICE_OFF_MODE_BTN         (BOARD_IO_BTN1) /* Button for shutting down device */
+#define APP_DEVICE_OFF_MODE_TRIGGER     (3U)            /* Device off press duration in sec */
 
-#define  APP_SERIAL_DEBUG_ENABLED 1U /* used to print debug messages in console. Set to 0 for disabling */
-#if defined (APP_SERIAL_DEBUG_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)   esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
-#else
-#define APP_CONSOLE(message, ...) do{} while(0)
-#endif
-
-#define XPLR_GNSS_I2C_ADDR  0x42
+#define APP_GNSS_I2C_ADDR  0x42
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -107,12 +126,12 @@ typedef enum {
     APP_FSM_ERROR,
     APP_FSM_INIT_HW = 0,
     APP_FSM_INIT_PERIPHERALS,
+    APP_FSM_CONFIG_GNSS,
     APP_FSM_CHECK_NETWORK,
     APP_FSM_INIT_HTTP_CLIENT,
     APP_FSM_GET_ROOT_CA,
     APP_FSM_APPLY_ROOT_CA,
-    APP_FSM_CONNECT_TO_THINGSTREAM,
-    APP_FSM_GET_THINGSTREAM_CREDS,
+    APP_FSM_PERFORM_ZTP,
     APP_FSM_APPLY_THINGSTREAM_CREDS,
     APP_FSM_INIT_MQTT_CLIENT,
     APP_FSM_RUN,
@@ -163,17 +182,27 @@ typedef struct app_type {
  * -------------------------------------------------------------- */
 // *INDENT-OFF*
 app_t app;
+/**
+ * Region for Thingstream's correction data
+ */
+xplr_thingstream_pp_region_t ppRegion = XPLR_THINGSTREAM_PP_REGION_EU;
 /* ubxlib configuration structs.
  * Configuration parameters are passed by calling  configCellSettings()
  */
+static xplrGnssDeviceCfg_t dvcGnssConfig;
 static uDeviceCfgCell_t cellHwConfig;
 static uDeviceCfgUart_t cellComConfig;
 static uNetworkCfgCell_t netConfig;
 /* hpg com service configuration struct  */
 static xplrCom_cell_config_t cellConfig;
 /* location modules */
-xplrGnssDevInfo_t gnssDvcInfo;
+xplrGnssStates_t gnssState;
 xplrGnssLocation_t gnssLocation;
+#if 1 == APP_PRINT_IMU_DATA
+xplrGnssImuAlignmentInfo_t imuAlignmentInfo;
+xplrGnssImuFusionStatus_t imuFusionStatus;
+xplrGnssImuVehDynMeas_t imuVehicleDynamics;
+#endif
 const uint8_t gnssDvcPrfId = 0;
 /* HTTP Client vars */
 static xplrCell_http_client_t httpClient;
@@ -186,6 +215,11 @@ const char urlAwsRootCa[] = CONFIG_XPLR_AWS_ROOTCA_URL;
 const char urlAwsRootCaPath[] = CONFIG_XPLR_AWS_ROOTCA_PATH;
 const char ztpRootCaName[] = "amazonAwsRootCa.crt"; /* name of root ca as stored in cellular module */
 const char ztpPpToken[] = CONFIG_XPLR_TS_PP_ZTP_TOKEN; /* ztp token */
+static char ztpPayload[APP_HTTP_BUFFER_SIZE];
+static xplrZtpData_t ztpData ={
+    .payload = ztpPayload,
+    .payloadLength = APP_HTTP_BUFFER_SIZE
+};
 /* mqtt client related  */
 static xplrCell_mqtt_client_t mqttClient;
 const char ztpPpCertName[] = "ztpPp.crt";   /* name of ztp cert as stored in cellular module */
@@ -199,13 +233,26 @@ bool mqttMsgAvailable = false;
 const char ztpRootCaHash[] = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";    //" ";
 const char ztpPpCertHash[] = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";    //" ";
 const char ztpPpKeyHash[] = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";     //" ";
+/* log structs and log dump buffer*/
+#if (1 == APP_SD_LOGGING_ENABLED)
+static xplrLog_t appLog, errorLog;
+static char appBuff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
+static char appLogFilename[] = "/APPLOG.TXT";               /**< Follow the same format if changing the filename*/
+static char errorLogFilename[] = "/ERRORLOG.TXT";           /**< Follow the same format if changing the filename*/
+static uint8_t logFileMaxSize = 100;                        /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U)*/
+static xplrLog_size_t logFileMaxSizeType = XPLR_SIZE_MB;    /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB)*/
+#endif
 // *INDENT-ON*
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
+/* initialize logging to the SD card*/
+static void appInitLog(void);
 /* configure free running timer for calculating time intervals in app */
 static void timerInit(void);
+/* configure gnss related settings*/
+static void configGnssSettings(xplrGnssDeviceCfg_t *gnssCfg);
 /* configure cellular related settings */
 static void configCellSettings(xplrCom_cell_config_t *cfg);
 /* configure HTTP(S) related settings */
@@ -214,6 +261,8 @@ static void configCellHttpSettings(xplrCell_http_client_t *client);
 static void configCellMqttSettings(xplrCell_mqtt_client_t *client, xplr_thingstream_t *settings);
 /* initialize cellular module */
 static app_error_t cellInit(void);
+/* runs the fsm for the GNSS module */
+static app_error_t gnssRunFsm(void);
 /* register cellular module to the network */
 static app_error_t cellNetworkRegister(void);
 /* check if cellular module is connected to the network */
@@ -228,11 +277,9 @@ static app_error_t cellHttpClientConnect(void);
 static void cellHttpClientDisconnect(void);
 /* retrieve root ca from webserver */
 static app_error_t cellHttpClientGetRootCa(void);
-/* retrieve point perfect credentials from ztp server */
-static app_error_t cellHttpClientGetThingstreamCredsZtp(void);
 /* apply obtained root ca */
 static app_error_t cellHttpClientApplyRootCa(void);
-/* apply obtained point perfect credentials */
+/* apply obtained PointPerfect credentials */
 static app_error_t cellHttpClientApplyThingstreamCreds(void);
 /* initialize MQTT client */
 static app_error_t cellMqttClientInit(void);
@@ -242,9 +289,6 @@ static app_error_t cellMqttClientMsgUpdate(void);
 static void cellMqttClientStatisticsPrint(void);
 /* initialize thingstream service */
 static app_error_t thingstreamInit(const char *token, xplr_thingstream_t *instance);
-/* create ztp request message */
-static app_error_t thingstreamCreatePpZtpMsg(xplr_thingstream_t *instance,
-                                             xplrCell_http_dataTransfer_t *data);
 /* update mqtt client with new parameters obtained from ztp response */
 static void thingstreamUpdateMqttClient(xplr_thingstream_t *instance,
                                         xplrCell_mqtt_client_t *client);
@@ -254,10 +298,20 @@ static app_error_t gnssInit(void);
 static void gnssFwdPpData(void);
 /* print location info to console */
 static void gnssLocationPrint(void);
+#if 1 == APP_PRINT_IMU_DATA
+/* print dead reckoning info to console */
+static void gnssDeadReckoningPrint(void);
+#endif
+/* initialize hw */
+static esp_err_t appInitBoard(void);
 /* initialize app */
 static void appInit(void);
+/* terminate/deinitialize logging to the SD card*/
+static void appDeInitLog(void);
 /* terminate app */
 static app_error_t appTerminate(void);
+/* powerdown device modules */
+static void appDeviceOffTask(void *arg);
 
 /* ----------------------------------------------------------------
  * STATIC CALLBACK FUNCTION PROTOTYPES
@@ -277,18 +331,23 @@ static void httpResponseCb(uDeviceHandle_t devHandle,
  * -------------------------------------------------------------- */
 void app_main(void)
 {
-    APP_CONSOLE(I, "XPLR-HPG-SW Demo: Thingstream Point Perfect with ZTP\n");
-
+    esp_err_t espErr;
     double secCnt = 0; /* timer counter */
     double appTime = 0; /* for printing mqtt statistics at APP_STATISTICS_INTERVAL */
-    double gnssTime = 0; /* for printing geolocation at APP_GNSS_INTERVAL */
+    double gnssLocTime = 0; /* for printing geolocation at APP_GNSS_LOC_INTERVAL */
+#if 1 == APP_PRINT_IMU_DATA
+    double gnssDrTime = 0; /* for printing dead reckoning at APP_GNSS_DR_INTERVAL */
+#endif
     size_t retries = 0; /* for error handling in APP_FSM_ERROR */
+
+    appInitLog();
+    APP_CONSOLE(I, "XPLR-HPG-SW Demo: Thingstream PointPerfect with ZTP\n");
 
     while (1) {
         switch (app.state[0]) {
             case APP_FSM_INIT_HW:
                 app.state[1] = app.state[0];
-                xplrBoardInit();
+                appInitBoard();
                 appInit();
                 app.state[0] = APP_FSM_INIT_PERIPHERALS;
                 break;
@@ -299,12 +358,26 @@ void app_main(void)
                     app.state[0] = APP_FSM_ERROR;
                 } else {
                     app.error = cellInit();
-                    app.state[0] = APP_FSM_CHECK_NETWORK;
+                    app.state[0] = APP_FSM_CONFIG_GNSS;
                 }
                 if (app.error != APP_ERROR_OK) {
                     app.state[0] = APP_FSM_ERROR;
                 } else {
-                    app.state[0] = APP_FSM_CHECK_NETWORK;
+                    app.state[0] = APP_FSM_CONFIG_GNSS;
+                }
+                break;
+            case APP_FSM_CONFIG_GNSS:
+                app.state[1] = app.state[0];
+                app.error = gnssRunFsm();
+                gnssState = xplrGnssGetCurrentState(gnssDvcPrfId);
+                if (app.error != APP_ERROR_OK) {
+                    app.state[0] = APP_FSM_ERROR;
+                } else {
+                    if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                        app.state[0] = APP_FSM_CHECK_NETWORK;
+                    } else {
+                        /* module still configuring. do nothing */
+                    }
                 }
                 break;
             case APP_FSM_CHECK_NETWORK:
@@ -322,6 +395,7 @@ void app_main(void)
                 app.state[1] = app.state[0];
                 configCellHttpSettings(&httpClient);
                 cellHttpClientSetServer(urlAwsRootCa, XPLR_CELL_HTTP_CERT_METHOD_NONE, true);
+                thingstreamSettings.connType = XPLR_THINGSTREAM_PP_CONN_CELL;
                 app.error = thingstreamInit(ztpPpToken, &thingstreamSettings);
                 if (app.error == APP_ERROR_OK) {
                     httpClient.credentials.rootCa = thingstreamSettings.server.rootCa;
@@ -349,47 +423,28 @@ void app_main(void)
                     app.error = cellHttpClientApplyRootCa();
                     if (app.error == APP_ERROR_OK) {
                         cellHttpClientDisconnect();
-                        app.state[0] = APP_FSM_CONNECT_TO_THINGSTREAM;
+                        app.state[0] = APP_FSM_PERFORM_ZTP;
                     } else {
                         app.state[0] = APP_FSM_ERROR;
                     }
                 }
                 break;
-            case APP_FSM_CONNECT_TO_THINGSTREAM:
+            case APP_FSM_PERFORM_ZTP:
                 app.state[1] = app.state[0];
-                cellHttpClientSetServer(thingstreamSettings.server.serverUrl,
-                                        XPLR_CELL_HTTP_CERT_METHOD_ROOTCA,
-                                        true);
-                app.error = cellHttpClientConnect();
-                if (app.error == APP_ERROR_OK) {
-                    app.state[0] = APP_FSM_GET_THINGSTREAM_CREDS;
-                } else {
-                    app.state[0] = APP_FSM_ERROR;
-                }
-                break;
-            case APP_FSM_GET_THINGSTREAM_CREDS:
-                app.state[1] = app.state[0];
-                app.error = thingstreamCreatePpZtpMsg(&thingstreamSettings, &httpClient.session->data);
-                if (app.error == APP_ERROR_OK) {
-                    app.error = cellHttpClientGetThingstreamCredsZtp();
-                }
-
-                if (app.error == APP_ERROR_OK) {
-                    app.state[0] = APP_FSM_APPLY_THINGSTREAM_CREDS;
+                espErr = xplrZtpGetPayloadCell(ztpRootCaName, &thingstreamSettings, &ztpData, &cellConfig);
+                if (espErr == ESP_OK) {
+                    app.state[0] =  APP_FSM_APPLY_THINGSTREAM_CREDS;
                 } else {
                     app.state[0] = APP_FSM_ERROR;
                 }
                 break;
             case APP_FSM_APPLY_THINGSTREAM_CREDS:
-                if (!httpClient.session->requestPending) {
-                    app.state[1] = app.state[0];
-                    app.error = cellHttpClientApplyThingstreamCreds();
-                    if (app.error == APP_ERROR_OK) {
-                        cellHttpClientDisconnect();
-                        app.state[0] = APP_FSM_INIT_MQTT_CLIENT;
-                    } else {
-                        app.state[0] = APP_FSM_ERROR;
-                    }
+                app.state[1] = app.state[0];
+                app.error = cellHttpClientApplyThingstreamCreds();
+                if (app.error == APP_ERROR_OK) {
+                    app.state[0] = APP_FSM_INIT_MQTT_CLIENT;
+                } else {
+                    app.state[0] = APP_FSM_ERROR;
                 }
                 break;
             case APP_FSM_INIT_MQTT_CLIENT:
@@ -403,8 +458,15 @@ void app_main(void)
                 break;
             case APP_FSM_RUN:
                 app.state[1] = app.state[0];
+                /* run GNSS FSM */
+                app.error = gnssRunFsm();
+                gnssState = xplrGnssGetCurrentState(gnssDvcPrfId);
+
                 /* check for new messages */
-                app.error = cellMqttClientMsgUpdate();
+                if ((app.error == APP_ERROR_OK) && (gnssState == XPLR_GNSS_STATE_DEVICE_READY)) {
+                    app.error = cellMqttClientMsgUpdate();
+                }
+
                 if (app.error != APP_ERROR_OK) {
                     app.state[0] = APP_FSM_ERROR;
                 } else {
@@ -414,7 +476,10 @@ void app_main(void)
                     timer_get_counter_time_sec(TIMER_GROUP_0, TIMER_0, &secCnt);
                     if (secCnt >= 1) {
                         appTime++;
-                        gnssTime++;
+                        gnssLocTime++;
+#if 1 == APP_PRINT_IMU_DATA
+                        gnssDrTime++;
+#endif
 
                         timer_pause(TIMER_GROUP_0, TIMER_0);
                         timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0);
@@ -426,10 +491,17 @@ void app_main(void)
                         cellMqttClientStatisticsPrint();
                     }
                     /* Print location data every APP_GNSS_INTERVAL sec */
-                    if (gnssTime >= APP_GNSS_INTERVAL) {
-                        gnssTime = 0;
+                    if (gnssLocTime >= APP_GNSS_LOC_INTERVAL) {
+                        gnssLocTime = 0;
                         gnssLocationPrint();
                     }
+#if 1 == APP_PRINT_IMU_DATA
+                    /* Print location data every APP_GNSS_INTERVAL sec */
+                    if (gnssDrTime >= APP_GNSS_DR_INTERVAL) {
+                        gnssDrTime = 0;
+                        gnssDeadReckoningPrint();
+                    }
+#endif
                     /* Check if its time to terminate the app */
                     if (app.stats.time >= APP_RUN_TIME) {
                         app.state[0] = APP_FSM_TERMINATE;
@@ -454,7 +526,7 @@ void app_main(void)
                     if (app.state[1] == APP_FSM_APPLY_THINGSTREAM_CREDS) {
                         /* http status code might return -1. In that case, retry*/
                         if (httpClient.session->error == -1) {
-                            app.state[0] = APP_FSM_GET_THINGSTREAM_CREDS;
+                            app.state[0] = APP_FSM_PERFORM_ZTP;
                             APP_CONSOLE(W, "Device %d, client %d returned %d, retry post request.\n",
                                         cellConfig.profileIndex,
                                         httpClient.id,
@@ -484,6 +556,30 @@ void app_main(void)
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
 
+static void appInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLog_error_t err = xplrLogInit(&errorLog,
+                                      XPLR_LOG_DEVICE_ERROR,
+                                      errorLogFilename,
+                                      logFileMaxSize,
+                                      logFileMaxSizeType);
+    if (err == XPLR_LOG_OK) {
+        errorLog.logEnable = true;
+        err = xplrLogInit(&appLog,
+                          XPLR_LOG_DEVICE_INFO,
+                          appLogFilename,
+                          logFileMaxSize,
+                          logFileMaxSizeType);
+    }
+    if (err == XPLR_LOG_OK) {
+        appLog.logEnable = true;
+    } else {
+        APP_CONSOLE(E, "Error initializing logging...");
+    }
+#endif
+}
+
 static void timerInit(void)
 {
     /** initialize timer
@@ -500,6 +596,40 @@ static void timerInit(void)
     };
     timer_init(TIMER_GROUP_0, TIMER_0, &timerCfg);
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0);
+}
+
+static void configGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
+{
+    /**
+     * Pin numbers are those of the MCU: if you
+     * are using an MCU inside a u-blox module the IO pin numbering
+     * for the module is likely different that from the MCU: check
+     * the data sheet for the module to determine the mapping
+     * DEVICE i.e. module/chip configuration: in this case a gnss
+     * module connected via UART
+     */
+    gnssCfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.i2cAddress = APP_GNSS_I2C_ADDR;
+    gnssCfg->hw.dvcConfig.transportType = U_DEVICE_TRANSPORT_TYPE_I2C;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.i2c = 0;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.pinSda = BOARD_IO_I2C_PERIPHERALS_SDA;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.pinScl = BOARD_IO_I2C_PERIPHERALS_SCL;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.clockHertz = 400000;
+
+    gnssCfg->hw.dvcNetwork.type = U_NETWORK_TYPE_GNSS;
+    gnssCfg->hw.dvcNetwork.moduleType = U_GNSS_MODULE_TYPE_M9;
+    gnssCfg->hw.dvcNetwork.devicePinPwr = -1;
+    gnssCfg->hw.dvcNetwork.devicePinDataReady = -1;
+
+    gnssCfg->dr.enable = CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE;
+    gnssCfg->dr.mode = XPLR_GNSS_IMU_CALIBRATION_AUTO;
+    gnssCfg->dr.vehicleDynMode = XPLR_GNSS_DYNMODE_AUTOMOTIVE;
+
+    gnssCfg->corrData.keys.size = 0;
+    gnssCfg->corrData.source = XPLR_GNSS_CORRECTION_FROM_IP;
 }
 
 static void configCellSettings(xplrCom_cell_config_t *cfg)
@@ -619,6 +749,30 @@ static app_error_t cellInit(void)
     } else {
         ret = APP_ERROR_CELL_INIT;
         APP_CONSOLE(E, "Cell setting init failed with code %d.\n", err);
+    }
+
+    return ret;
+}
+
+static app_error_t gnssRunFsm(void)
+{
+    app_error_t ret;
+    xplrGnssStates_t state;
+
+    xplrGnssFsm(gnssDvcPrfId);
+    state = xplrGnssGetCurrentState(gnssDvcPrfId);
+
+    switch (state) {
+        case XPLR_GNSS_STATE_DEVICE_READY:
+            ret = APP_ERROR_OK;
+            break;
+
+        case XPLR_GNSS_STATE_ERROR:
+            ret = APP_ERROR_GNSS_INIT;
+            break;
+
+        default:
+            ret = APP_ERROR_OK;
     }
 
     return ret;
@@ -753,35 +907,6 @@ static app_error_t cellHttpClientGetRootCa(void)
     return ret;
 }
 
-static app_error_t cellHttpClientGetThingstreamCredsZtp(void)
-{
-    app_error_t ret;
-    xplrCell_http_error_t err;
-
-    ret = cellNetworkConnected();
-
-    if (ret == APP_ERROR_OK) {
-        httpClient.session->data.path = thingstreamSettings.pointPerfect.urlPath;
-        memcpy(httpClient.session->data.contentType, "application/json", 17);
-        httpClient.session->data.bufferSizeIn = APP_HTTP_BUFFER_SIZE;
-        err = xplrCellHttpPostRequest(cellConfig.profileIndex, httpClient.id, NULL);
-        vTaskDelay(1);
-        if (err == XPLR_CELL_HTTP_ERROR) {
-            ret = APP_ERROR_HTTP_CLIENT;
-            APP_CONSOLE(E, "Device %d, client %d (http) POST REQUEST to %s, failed.\n", cellConfig.profileIndex,
-                        httpClient.id,
-                        httpClient.session->data.path);
-        } else {
-            ret = APP_ERROR_OK;
-            APP_CONSOLE(D, "Device %d, client %d (http) POST REQUEST to %s, ok.\n", cellConfig.profileIndex,
-                        httpClient.id,
-                        httpClient.session->data.path);
-        }
-    }
-
-    return ret;
-}
-
 static app_error_t cellHttpClientApplyRootCa(void)
 {
     xplrCell_http_error_t err;
@@ -842,61 +967,22 @@ static app_error_t cellHttpClientApplyRootCa(void)
 
 static app_error_t cellHttpClientApplyThingstreamCreds(void)
 {
-    xplrCell_http_session_t *httpSession = httpClient.session;
     xplr_thingstream_error_t tsErr;
     app_error_t ret;
 
-    /** check that a post response is available.
-     *  parse the response content and see if its a ztp response.
-     *  If ztp response, configure thingstream instance and apply parsed settings
-     *  to mqtt client.
-     */
+    tsErr = xplrThingstreamPpConfig(ztpData.payload, ppRegion, &thingstreamSettings);
+    if (tsErr == XPLR_THINGSTREAM_OK) {
+        APP_CONSOLE(I, "Thingstream credentials are parsed correctly");
+        ret = APP_ERROR_OK;
+    } else {
+        APP_CONSOLE(E, "Error in ZTP payload parse");
+        ret = APP_ERROR_THINGSTREAM;
+    }
 
-    if (httpSession->rspAvailable) {
-        httpSession->rspAvailable = false;
-        httpSession->data.bufferSizeOut = APP_HTTP_BUFFER_SIZE;
 
-        switch (httpSession->statusCode) {
-            case 200:
-                /* get thingstream point perfect configuration based on ztp post-response content */
-                tsErr = xplrThingstreamPpConfig(httpSession->data.buffer,
-                                                XPLR_THINGSTREAM_PP_REGION_EU,
-                                                &thingstreamSettings.pointPerfect);
-
-                if (tsErr != XPLR_THINGSTREAM_OK) {
-                    ret = APP_ERROR_THINGSTREAM;
-                    break;
-                } else {
-                    ret = APP_ERROR_OK;
-                }
-
-                /* format certificates and broker address to make them "cell-compatible" */
-                if (ret != APP_ERROR_THINGSTREAM) {
-                    /* remove LFs from certificates */
-                    xplrRemoveChar(thingstreamSettings.pointPerfect.clientCert, '\n');
-                    xplrRemoveChar(thingstreamSettings.pointPerfect.clientKey, '\n');
-                    /* add port number to broker url */
-                    xplrAddPortInfo(thingstreamSettings.pointPerfect.brokerAddress,
-                                    thingstreamSettings.pointPerfect.brokerPort);
-                }
-
-                /* all done, clear response buffer and reset response size */
-                memset(httpSession->data.buffer, 0x00, APP_HTTP_BUFFER_SIZE);
-                httpSession->rspSize = APP_HTTP_BUFFER_SIZE;
-
-                break;
-
-            default:
-                APP_CONSOLE(W, "Device %d, client %d POST REQUEST returned code %d.\n",
-                            cellConfig.profileIndex, httpClient.id, httpClient.session->error);
-                ret = APP_ERROR_HTTP_CLIENT;
-                break;
-        }
-
-        /* check if thingstream instance is configured and update mqtt client */
-        if (ret == APP_ERROR_OK) {
-            thingstreamUpdateMqttClient(&thingstreamSettings, &mqttClient);
-        }
+    /* check if thingstream instance is configured and update mqtt client */
+    if (ret == APP_ERROR_OK) {
+        thingstreamUpdateMqttClient(&thingstreamSettings, &mqttClient);
     } else {
         APP_CONSOLE(E, "Device %d, client %d has nothing to parse.\n",
                     cellConfig.profileIndex, httpClient.id);
@@ -1015,26 +1101,6 @@ static app_error_t thingstreamInit(const char *token, xplr_thingstream_t *instan
     return ret;
 }
 
-static app_error_t thingstreamCreatePpZtpMsg(xplr_thingstream_t *instance,
-                                             xplrCell_http_dataTransfer_t *data)
-{
-    app_error_t ret;
-    xplr_thingstream_error_t err;
-
-    err = xplrThingstreamApiMsgCreate(XPLR_THINGSTREAM_API_LOCATION_ZTP,
-                                      data->buffer,
-                                      &data->bufferSizeOut,
-                                      instance);
-
-    if (err != XPLR_THINGSTREAM_OK) {
-        ret = APP_ERROR_THINGSTREAM;
-    } else {
-        ret = APP_ERROR_OK;
-    }
-
-    return ret;
-}
-
 static void thingstreamUpdateMqttClient(xplr_thingstream_t *instance,
                                         xplrCell_mqtt_client_t *client)
 {
@@ -1103,14 +1169,8 @@ static app_error_t gnssInit(void)
         APP_CONSOLE(E, "UbxLib init (GNSS) failed!");
     } else {
         APP_CONSOLE(W, "Waiting for GNSS device to come online!");
-        err = xplrGnssStartDeviceDefaultSettings(gnssDvcPrfId, XPLR_GNSS_I2C_ADDR);
-    }
-
-    if (err != ESP_OK) {
-        ret = APP_ERROR_GNSS_INIT;
-        APP_CONSOLE(E, "Failed to start GNSS device at address (0x%02x)", XPLR_GNSS_I2C_ADDR);
-    } else {
-        err = xplrGnssSetCorrectionDataSource(gnssDvcPrfId, XPLR_GNSS_CORRECTION_FROM_IP);
+        configGnssSettings(&dvcGnssConfig);
+        err = xplrGnssStartDevice(gnssDvcPrfId, &dvcGnssConfig);
     }
 
     if (err != ESP_OK) {
@@ -1118,13 +1178,11 @@ static app_error_t gnssInit(void)
         APP_CONSOLE(E, "Failed to set correction data source!");
     } else {
         ret = APP_ERROR_OK;
-        xplrGnssPrintDeviceInfo(gnssDvcPrfId);
         APP_CONSOLE(D, "Location service initialized ok");
     }
 
     return ret;
 }
-
 static void gnssFwdPpData(void)
 {
     bool topicFound[8];
@@ -1225,16 +1283,94 @@ static void gnssLocationPrint(void)
     bool hasMessage = xplrGnssHasMessage(gnssDvcPrfId);
 
     if (hasMessage) {
-        err = xplrGnssPrintLocation(gnssDvcPrfId);
+        err = xplrGnssGetLocationData(gnssDvcPrfId, &gnssLocation);
         if (err != ESP_OK) {
-            APP_CONSOLE(W, "Could not print gnss location!");
+            APP_CONSOLE(W, "Could not get gnss location!");
+        } else {
+            err = xplrGnssPrintLocationData(&gnssLocation);
+            if (err != ESP_OK) {
+                APP_CONSOLE(W, "Could not print gnss location data!");
+            }
         }
 
-        err = xplrGnssPrintGmapsLocation(0);
+        err = xplrGnssPrintGmapsLocation(gnssDvcPrfId);
         if (err != ESP_OK) {
             APP_CONSOLE(W, "Could not print Gmaps location!");
         }
     }
+}
+
+#if 1 == APP_PRINT_IMU_DATA
+static void gnssDeadReckoningPrint(void)
+{
+    esp_err_t ret;
+
+    if (xplrGnssIsDrEnabled(gnssDvcPrfId)) {
+        ret = xplrGnssGetImuAlignmentInfo(gnssDvcPrfId, &imuAlignmentInfo);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not get Imu alignment info!");
+        }
+
+        ret = xplrGnssPrintImuAlignmentInfo(&imuAlignmentInfo);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not print Imu alignment data!");
+        }
+
+        ret = xplrGnssGetImuAlignmentStatus(gnssDvcPrfId, &imuFusionStatus);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not get Imu alignment status!");
+        }
+        ret = xplrGnssPrintImuAlignmentStatus(&imuFusionStatus);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not print Imu alignment status!");
+        }
+
+        if (xplrGnssIsDrCalibrated(gnssDvcPrfId)) {
+            ret = xplrGnssGetImuVehicleDynamics(gnssDvcPrfId, &imuVehicleDynamics);
+            if (ret != ESP_OK) {
+                APP_CONSOLE(W, "Could not get Imu vehicle dynamic data!");
+            }
+
+            ret = xplrGnssPrintImuVehicleDynamics(&imuVehicleDynamics);
+            if (ret != ESP_OK) {
+                APP_CONSOLE(W, "Could not print Imu vehicle dynamic data!");
+            }
+        }
+    }
+}
+#endif
+
+static esp_err_t appInitBoard(void)
+{
+    gpio_config_t io_conf = {0};
+    esp_err_t ret;
+
+    APP_CONSOLE(I, "Initializing board.");
+    ret = xplrBoardInit();
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Board initialization failed!");
+    } else {
+        /* config boot0 pin as input */
+        io_conf.pin_bit_mask = 1ULL << APP_DEVICE_OFF_MODE_BTN;
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pull_up_en = 1;
+        ret = gpio_config(&io_conf);
+    }
+
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Failed to set boot0 pin in input mode");
+    } else {
+        if (xTaskCreate(appDeviceOffTask, "deviceOffTask", 2 * 2048, NULL, 10, NULL) == pdPASS) {
+            APP_CONSOLE(D, "Boot0 pin configured as button OK");
+            APP_CONSOLE(D, "Board Initialized");
+        } else {
+            APP_CONSOLE(D, "Failed to start deviceOffTask task");
+            APP_CONSOLE(E, "Board initialization failed!");
+            ret = ESP_FAIL;
+        }
+    }
+
+    return ret;
 }
 
 static void appInit(void)
@@ -1242,6 +1378,14 @@ static void appInit(void)
     app.state[0] = APP_FSM_INIT_HW;
     timerInit();
     app.state[0] = APP_FSM_INIT_PERIPHERALS;
+}
+
+static void appDeInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLogDeInit(&appLog);
+    xplrLogDeInit(&errorLog);
+#endif
 }
 
 static app_error_t appTerminate(void)
@@ -1272,8 +1416,58 @@ static app_error_t appTerminate(void)
     APP_CONSOLE(D, "Bytes Received: %d.", app.stats.bytesReceived);
     APP_CONSOLE(D, "Uptime: %d seconds.", app.stats.time);
     APP_CONSOLE(W, "App disconnected the MQTT client.");
-
+    xplrBoardSetPower(XPLR_PERIPHERAL_LTE_ID, false);
+    appDeInitLog();
     return ret;
+}
+
+static void appDeviceOffTask(void *arg)
+{
+    uint32_t btnStatus;
+    uint32_t currTime, prevTime;
+    uint32_t btnPressDuration = 0;
+
+    for (;;) {
+        btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
+        currTime = MICROTOSEC(esp_timer_get_time());
+
+        //Check button button state
+        if (btnStatus != 1) { //check if pressed
+            prevTime = MICROTOSEC(esp_timer_get_time());
+            while (btnStatus != 1) { //wait for btn release.
+                btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                currTime = MICROTOSEC(esp_timer_get_time());
+            }
+
+            btnPressDuration = currTime - prevTime;
+        } else {
+            //reset hold duration on release
+            btnPressDuration = 0;
+        }
+
+        /*
+         *  Check button hold duration.
+         * Power down device if:
+         *  button hold duration >= APP_DEVICE_OFF_MODE_TRIGGER
+         *  and
+         *  not already powered down by the app
+        */
+        if (btnPressDuration >= APP_DEVICE_OFF_MODE_TRIGGER) {
+            if (app.state[0] != APP_FSM_INACTIVE) {
+                APP_CONSOLE(W, "Device OFF triggered");
+                xplrGnssHaltLogModule(XPLR_GNSS_LOG_MODULE_ALL);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                xplrBoardSetPower(XPLR_PERIPHERAL_LTE_ID, false);
+            } else {
+                APP_CONSOLE(D, "Device is powered down, nothing to do...");
+            }
+        } else {
+            //nothing to do...
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100)); //wait for btn release.
+    }
 }
 
 /* ----------------------------------------------------------------

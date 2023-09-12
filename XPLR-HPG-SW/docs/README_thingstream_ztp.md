@@ -7,7 +7,7 @@
 
 ## Description 
  A **token** is used to perform a **ZTP - Zero Touch Provisioning** request.\
-In this way we do not have to manually get the necessary settings and data to required for a device to connect to the **[Point Perfect](https://www.u-blox.com/en/product/pointperfect)** services (such as subscription topics, certificates and keys, etc.).
+In this way we do not have to manually get the necessary settings and data to required for a device to connect to the **[PointPerfect](https://www.u-blox.com/en/product/pointperfect)** services (such as subscription topics, certificates and keys, etc.).
 
 **NOTE**\
 **ZTP** will not work with devices created by using a **redemption/promo code**. Instead it only works with purchased plans.
@@ -43,7 +43,6 @@ Follow the video below for a more detailed explanation of the steps above:\
 ### Further reading
 You can also have a look at this **[guide](https://developer.thingstream.io/guides/location-services/pointperfect-zero-touch-provisioning)** on the official **Thingstream** documentation site.
 
-<br>
 <br>
 
 ## Caveats

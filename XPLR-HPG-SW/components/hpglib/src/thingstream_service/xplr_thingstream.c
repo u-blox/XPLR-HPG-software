@@ -24,15 +24,24 @@
 #include "string.h"
 #include "xplr_thingstream.h"
 #include "cJSON.h"
+#include "xplr_log.h"
 
 #include "./../../../components/hpglib/src/common/xplr_common.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
-
-#if (1 == XPLRTHINGSTREAM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRTHINGSTREAM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLR_THINGSTREAM_LOG_ACTIVE))
 #define XPLR_THINGSTREAM_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRTHINGSTREAM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    if (thingstreamLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+        XPLRLOG(&thingstreamLog,buff2Log);}
+#elif ((0 == XPLRTHINGSTREAM_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...) if (thingstreamLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+        XPLRLOG(&thingstreamLog,buff2Log);}
 #else
 #define XPLR_THINGSTREAM_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -59,7 +68,8 @@ typedef enum {
  * -------------------------------------------------------------- */
 
 const uint16_t brokerPort = 8883;
-const char thingstreamApiUrl[] = "api.thingstream.io:443";
+const char thingstreamApiUrlCell[] = "api.thingstream.io:443";
+const char thingstreamApiUrlWifi[] = "https://api.thingstream.io";
 const char thingstreamApiPpCredPath[] = "/ztp/pointperfect/credentials";
 
 const char tsPpClientCertTag[] =         "certificate";     /* string */
@@ -101,12 +111,31 @@ const char thingstreamPpDescAllUs[] = "L-band + IP US topics";
 const char thingstreamPpDescAll[] = "L-band + IP EU + US topics";
 
 static const char *thingstreamPpFilterCorrectionData;
+
+const char tsCommThingServerUrlStart[] =    "<ServerURI>";
+const char tsCommThingServerUrlEnd[] =      "</ServerURI>";
+const char tsCommThingClientIdStart[] =      "<ClientID>";
+const char tsCommThingClientIdEnd[] =       "</ClientID>";
+const char tsCommThingUsernameStart[] =     "<Username>";
+const char tsCommThingUsernameEnd[] =       "</Username>";
+const char tsCommThingPasswordStart[] =     "<Password>";
+const char tsCommThingPasswordEnd[] =       "</Password>";
+
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+/**
+ * Logging variables
+*/
+static xplrLog_t thingstreamLog;
+static char buff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
+#endif
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
 static xplr_thingstream_error_t tsCreateDeviceUid(char *uid);
-static xplr_thingstream_error_t tsApiMsgCreatePpZtp(char *msg, size_t *size,
+static xplr_thingstream_error_t tsApiMsgCreatePpZtp(char *msg,
+                                                    size_t *size,
                                                     xplr_thingstream_t *settings);
 static xplr_thingstream_error_t tsApiMsgParsePpZtpBrokerAddress(const char *msg,
                                                                 char *info,
@@ -146,7 +175,27 @@ static xplr_thingstream_error_t tsPpGetCorrDesc(xplr_thingstream_pp_sub_t *tspla
 static xplr_thingstream_error_t tsPpGetFreqTopic(xplr_thingstream_pp_sub_t *tsplan,
                                                  char *freqTopic);
 static xplr_thingstream_error_t tsPpGetFreqDesc(xplr_thingstream_pp_sub_t *tsplan, char *freqDesc);
-/* ----------------------------------------------------------------
+static void tsPpModifyBroker(char *brokerAddress);
+static xplr_thingstream_error_t tsPpConfigFileGetBroker(char *payload, char *brokerAddress);
+static xplr_thingstream_error_t tsPpConfigFileGetDeviceId(char *payload, char *deviceId);
+static xplr_thingstream_error_t tsPpConfigFileGetClientKey(char *payload, char *clientKey);
+static xplr_thingstream_error_t tsPpConfigFileGetClientCert(char *payload, char *clientCert);
+static xplr_thingstream_error_t tsPpConfigFileGetRootCa(char *payload, char *rootCa);
+static xplr_thingstream_error_t tsPpConfigFileGetDynamicKeys(char *payload,
+                                                             xplr_thingstream_pp_dKeys_t *dynamicKeys);
+static xplr_thingstream_error_t tsPpConfigFileParseTopicsInfoByRegionAll(char *payload,
+                                                                         xplr_thingstream_pp_region_t region,
+                                                                         xplr_thingstream_pp_settings_t *settings);
+static xplr_thingstream_error_t tsPpConfigFileFormatCert(char *cert,
+                                                         xplr_thingstream_pp_serverInfo_type_t type);
+static void tsPpSetDescFilter(xplr_thingstream_pp_settings_t *settings);
+static xplr_thingstream_error_t tsCommThingParserCheckSize(const char *start,
+                                                           const char *end,
+                                                           size_t size);
+static xplr_thingstream_error_t tsCommThingGetCredential(char *payload,
+                                                         char *credential,
+                                                         xplr_thingstream_comm_cred_type_t
+                                                         credType);/* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
 
@@ -154,27 +203,60 @@ xplr_thingstream_error_t xplrThingstreamInit(const char *ppToken,
                                              xplr_thingstream_t *thingstream)
 {
     size_t tokenLength;
-    size_t serverUrlLength = strlen(thingstreamApiUrl);
+    size_t serverUrlLength;
     size_t ppZtpUrlLength = strlen(thingstreamApiPpCredPath);
     xplr_thingstream_error_t ret;
+
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    if (!thingstreamLog.logEnable) {
+        xplrLog_error_t err = xplrLogInit(&thingstreamLog, XPLR_LOG_DEVICE_INFO, "/thing.log", 100,
+                                          XPLR_SIZE_MB);
+        if (err == XPLR_LOG_OK) {
+            thingstreamLog.logEnable = true;
+        } else {
+            thingstreamLog.logEnable = false;
+        }
+        thingstream->logCfg = &thingstreamLog;
+    }
+#endif
 
     if (ppToken != NULL) {
         /* check token length */
         tokenLength = strlen(ppToken);
         if (tokenLength == XPLR_THINGSTREAM_PP_TOKEN_SIZE - 1) {
             memcpy(&thingstream->server.ppToken, ppToken, XPLR_THINGSTREAM_PP_TOKEN_SIZE);
-            memcpy(&thingstream->server.serverUrl, thingstreamApiUrl, serverUrlLength);
-            memcpy(&thingstream->pointPerfect.urlPath, thingstreamApiPpCredPath, ppZtpUrlLength);
-            thingstream->pointPerfect.brokerPort = brokerPort;
-            ret = tsCreateDeviceUid(thingstream->server.deviceId);
+            switch (thingstream->connType) {
+                case XPLR_THINGSTREAM_PP_CONN_WIFI:
+                    serverUrlLength = strlen(thingstreamApiUrlWifi);
+                    memcpy(&thingstream->server.serverUrl, thingstreamApiUrlWifi, serverUrlLength);
+                    ret = XPLR_THINGSTREAM_OK;
+                    break;
+                case XPLR_THINGSTREAM_PP_CONN_CELL:
+                    serverUrlLength = strlen(thingstreamApiUrlCell);
+                    memcpy(&thingstream->server.serverUrl, thingstreamApiUrlCell, serverUrlLength);
+                    ret = XPLR_THINGSTREAM_OK;
+                    break;
+                case XPLR_THINGSTREAM_PP_CONN_INVALID:
+                default:
+                    XPLR_THINGSTREAM_CONSOLE(E, "Error in selection of connection type");
+                    ret = XPLR_THINGSTREAM_ERROR;
+                    break;
+            }
             if (ret != XPLR_THINGSTREAM_OK) {
                 XPLR_THINGSTREAM_CONSOLE(E, "Thingstream init failed.");
             } else {
-                XPLR_THINGSTREAM_CONSOLE(D, "Thingstream settings config ok.");
-                XPLR_THINGSTREAM_CONSOLE(D, "Server url:%s.", thingstream->server.serverUrl);
-                XPLR_THINGSTREAM_CONSOLE(D, "PP credentials path:%s.", thingstream->pointPerfect.urlPath);
-                XPLR_THINGSTREAM_CONSOLE(D, "Device UID:%s.", thingstream->server.deviceId);
-                XPLR_THINGSTREAM_CONSOLE(D, "Location service token:%s.", thingstream->server.ppToken);
+                memcpy(&thingstream->pointPerfect.urlPath, thingstreamApiPpCredPath, ppZtpUrlLength);
+                thingstream->pointPerfect.brokerPort = brokerPort;
+                ret = tsCreateDeviceUid(thingstream->server.deviceId);
+                if (ret != XPLR_THINGSTREAM_OK) {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Thingstream init failed.");
+                } else {
+                    XPLR_THINGSTREAM_CONSOLE(D, "Thingstream settings config ok.");
+                    XPLR_THINGSTREAM_CONSOLE(D, "Server url:%s.", thingstream->server.serverUrl);
+                    XPLR_THINGSTREAM_CONSOLE(D, "PP credentials path:%s.", thingstream->pointPerfect.urlPath);
+                    XPLR_THINGSTREAM_CONSOLE(D, "Device UID:%s.", thingstream->server.deviceId);
+                    XPLR_THINGSTREAM_CONSOLE(D, "Location service token:%s.", thingstream->server.ppToken);
+                }
             }
         } else {
             XPLR_THINGSTREAM_CONSOLE(E, "Provided token is invalid.");
@@ -212,7 +294,7 @@ xplr_thingstream_error_t xplrThingstreamApiMsgCreate(xplr_thingstream_api_t cmd,
 
 xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
                                                  xplr_thingstream_pp_region_t region,
-                                                 xplr_thingstream_pp_settings_t *settings)
+                                                 xplr_thingstream_t *settings)
 {
     xplr_thingstream_error_t err[8];
     xplr_thingstream_error_t ret;
@@ -220,41 +302,61 @@ xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
 
     /* get broker configuration settings */
     err[0] = xplrThingstreamPpParseServerInfo(data,
-                                              settings->brokerAddress,
+                                              settings->pointPerfect.brokerAddress,
                                               XPLR_THINGSTREAM_URL_SIZE_MAX,
                                               XPLR_THINGSTREAM_PP_SERVER_ADDRESS);
 
     err[1] = xplrThingstreamPpParseServerInfo(data,
-                                              settings->deviceId,
+                                              settings->pointPerfect.deviceId,
                                               XPLR_THINGSTREAM_PP_DEVICEID_SIZE,
                                               XPLR_THINGSTREAM_PP_SERVER_ID);
 
     err[2] = xplrThingstreamPpParseServerInfo(data,
-                                              settings->clientCert,
+                                              settings->pointPerfect.clientCert,
                                               XPLR_THINGSTREAM_CERT_SIZE_MAX,
                                               XPLR_THINGSTREAM_PP_SERVER_CERT);
 
     err[3] = xplrThingstreamPpParseServerInfo(data,
-                                              settings->clientKey,
+                                              settings->pointPerfect.clientKey,
                                               XPLR_THINGSTREAM_CERT_SIZE_MAX,
                                               XPLR_THINGSTREAM_PP_SERVER_KEY);
 
     err[4] = xplrThingstreamPpParseLbandSupport(data,
-                                                &settings->lbandSupported);
+                                                &settings->pointPerfect.lbandSupported);
 
     err[5] = xplrThingstreamPpParseMqttSupport(data,
-                                               &settings->mqttSupported);
+                                               &settings->pointPerfect.mqttSupported);
 
-    subType = tsPpGetPlanType(settings->lbandSupported, settings->mqttSupported);
+    subType = tsPpGetPlanType(settings->pointPerfect.lbandSupported,
+                              settings->pointPerfect.mqttSupported);
 
     err[6] = xplrThingstreamPpParseDynamicKeys(data,
-                                               &settings->dynamicKeys);
+                                               &settings->pointPerfect.dynamicKeys);
     /* get broker topics (region filtered) */
     err[7] = xplrThingstreamPpParseTopicsInfoByRegionAll(data,
                                                          region,
                                                          subType,
-                                                         settings->topicList);
+                                                         settings->pointPerfect.topicList);
 
+    if ((settings->connType == XPLR_THINGSTREAM_PP_CONN_WIFI) && (err[0] == XPLR_THINGSTREAM_OK)) {
+        tsPpModifyBroker(settings->pointPerfect.brokerAddress);
+    } else if ((settings->connType == XPLR_THINGSTREAM_PP_CONN_CELL) &&
+               (err[0] == XPLR_THINGSTREAM_OK)) {
+        //Modify certs and broker
+        xplrAddPortInfo(settings->pointPerfect.brokerAddress, settings->pointPerfect.brokerPort);
+        if ((err[2] == XPLR_THINGSTREAM_OK) && (err[3] == XPLR_THINGSTREAM_OK)) {
+            /* remove LFs from certificates */
+            xplrRemoveChar(settings->pointPerfect.clientCert, '\n');
+            xplrRemoveChar(settings->pointPerfect.clientKey, '\n');
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Certificates are parsed incorrectly!");
+            err[0] = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        //Error
+        XPLR_THINGSTREAM_CONSOLE(E, "Connection type not configured correctly!");
+        err[0] = XPLR_THINGSTREAM_ERROR;
+    }
     for (int8_t i = 0; i < 8; i++) {
         if (err[i] != XPLR_THINGSTREAM_OK) {
             ret = XPLR_THINGSTREAM_ERROR;
@@ -262,7 +364,7 @@ xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
         } else {
             ret = XPLR_THINGSTREAM_OK;
         }
-        settings->numOfTopics = i + 1;
+        settings->pointPerfect.numOfTopics = i;
     }
 
     return ret;
@@ -472,7 +574,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char 
                                                                      xplr_thingstream_pp_plan_t planType,
                                                                      xplr_thingstream_pp_topic_t *topics)
 {
-    xplr_thingstream_error_t err[8];
+    xplr_thingstream_error_t err[7];
     xplr_thingstream_error_t ret;
 
     /* iterate through the topics type list and grab the info */
@@ -484,36 +586,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char 
                                                  &topics[i]);
     }
 
-    /* filter concatenated topic path based on region property */
-    switch (region) {
-        case XPLR_THINGSTREAM_PP_REGION_EU:
-            err[7] = xplrThingstreamPpParseTopicInfo(data,
-                                                     region,
-                                                     planType,
-                                                     XPLR_THINGSTREAM_PP_TOPIC_ALL_EU,
-                                                     &topics[7]);
-            break;
-        case XPLR_THINGSTREAM_PP_REGION_US:
-            err[7] = xplrThingstreamPpParseTopicInfo(data,
-                                                     region,
-                                                     planType,
-                                                     XPLR_THINGSTREAM_PP_TOPIC_ALL_US,
-                                                     &topics[7]);
-            break;
-        case XPLR_THINGSTREAM_PP_REGION_ALL:
-            err[7] = xplrThingstreamPpParseTopicInfo(data,
-                                                     region,
-                                                     planType,
-                                                     XPLR_THINGSTREAM_PP_TOPIC_ALL,
-                                                     &topics[7]);
-            break;
-
-        default:
-            err[7] = XPLR_THINGSTREAM_ERROR;
-            break;
-    }
-
-    for (int8_t i = 0; i < 8; i++) {
+    for (int8_t i = 0; i < 7; i++) {
         ret = err[i];
         if (err[i] != XPLR_THINGSTREAM_OK) {
             break;
@@ -608,8 +681,9 @@ bool xplrThingstreamPpMsgIsCorrectionData(const char *name, const xplr_thingstre
     const char *descriptionFilter = thingstreamPpFilterCorrectionData;
 
     if (descriptionFilter == NULL) {
-        XPLR_THINGSTREAM_CONSOLE(E,
-                                 "Subscription plan to Thingstream has not been specified... Please call xplrThingstreamPpSetSubType first!");
+        /*INDENT-OFF*/
+        XPLR_THINGSTREAM_CONSOLE(E, "Subscription plan to Thingstream has not been specified... Please call xplrThingstreamPpSetSubType first!");
+        /*INDENT-ON*/
         return false;
     }
 
@@ -797,7 +871,8 @@ bool xplrThingstreamPpMsgIsFrequency(const char *name, const xplr_thingstream_t 
     return ret;
 }
 
-xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_region_t region, xplr_thingstream_pp_plan_t plan,
+xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_region_t region,
+                                                       xplr_thingstream_pp_plan_t plan,
                                                        xplr_thingstream_t *instance)
 {
     xplr_thingstream_error_t ret[4];
@@ -828,6 +903,205 @@ xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_regio
     return XPLR_THINGSTREAM_OK;
 }
 
+xplr_thingstream_error_t xplrThingstreamPpConfigFromFile(char *data,
+                                                         xplr_thingstream_pp_region_t region,
+                                                         xplr_thingstream_t *instance)
+{
+    xplr_thingstream_error_t ret;
+    xplr_thingstream_error_t err[7];
+    uint8_t index;
+
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    if (!thingstreamLog.logEnable) {
+        xplrLog_error_t logErr = xplrLogInit(&thingstreamLog, XPLR_LOG_DEVICE_INFO, "/thing.log", 100,
+                                             XPLR_SIZE_MB);
+        if (logErr == XPLR_LOG_OK) {
+            thingstreamLog.logEnable = true;
+        } else {
+            thingstreamLog.logEnable = false;
+        }
+        instance->logCfg = &thingstreamLog;
+    }
+#endif
+
+    // Null pointer check
+    if (data == NULL) {
+        XPLR_THINGSTREAM_CONSOLE(E, "Payload to parse is NULL!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    } else {
+        // Get Broker address and port
+        err[0] = tsPpConfigFileGetBroker(data, instance->pointPerfect.brokerAddress);
+        instance->pointPerfect.brokerPort = brokerPort;
+        // Get device ID
+        err[1] = tsPpConfigFileGetDeviceId(data, instance->pointPerfect.deviceId);
+        // Get MQTT Key
+        err[2] = tsPpConfigFileGetClientKey(data, instance->pointPerfect.clientKey);
+        // Get MQTT Cert
+        err[3] = tsPpConfigFileGetClientCert(data, instance->pointPerfect.clientCert);
+        // Get Root CA
+        err[4] = tsPpConfigFileGetRootCa(data, instance->server.rootCa);
+        // Get Dynamic Keys
+        err[5] = tsPpConfigFileGetDynamicKeys(data, &instance->pointPerfect.dynamicKeys);
+        // Get topics by region and num of topics and set mqtt and lband support flags
+        err[6] = tsPpConfigFileParseTopicsInfoByRegionAll(data,
+                                                          region,
+                                                          &instance->pointPerfect);
+        // Check for errors and return
+        for (index = 0; index < 7; index++) {
+            if (err[index] != XPLR_THINGSTREAM_OK) {
+                ret = XPLR_THINGSTREAM_ERROR;
+                break;
+            } else {
+                ret = XPLR_THINGSTREAM_OK;
+            }
+        }
+    }
+
+    return ret;
+}
+
+xplr_thingstream_error_t xplrThingstreamCommConfigFromFile(char *data,
+                                                           xplr_thingstream_comm_thing_t *instance)
+{
+    xplr_thingstream_error_t ret;
+    xplr_thingstream_error_t err[4];
+
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    if (!thingstreamLog.logEnable) {
+        xplrLog_error_t logErr = xplrLogInit(&thingstreamLog, XPLR_LOG_DEVICE_INFO, "/thing.log", 100,
+                                             XPLR_SIZE_MB);
+        if (logErr == XPLR_LOG_OK) {
+            thingstreamLog.logEnable = true;
+        } else {
+            thingstreamLog.logEnable = false;
+        }
+        instance->logCfg = &thingstreamLog;
+    }
+#endif
+
+    // Null Pointer check
+    if (data == NULL) {
+        ret = XPLR_THINGSTREAM_ERROR;
+    } else {
+        // Get broker url and port
+        err[0] = tsCommThingGetCredential(data,
+                                          instance->brokerAddress,
+                                          XPLR_THINGSTREAM_COMM_CRED_SERVER_URL);
+        // Get device ID
+        err[1] = tsCommThingGetCredential(data,
+                                          instance->deviceId,
+                                          XPLR_THINGSTREAM_COMM_CRED_DEVICE_ID);
+        // Get username
+        err[2] = tsCommThingGetCredential(data,
+                                          instance->username,
+                                          XPLR_THINGSTREAM_COMM_CRED_USERNAME);
+        // Get password
+        err[3] = tsCommThingGetCredential(data,
+                                          instance->password,
+                                          XPLR_THINGSTREAM_COMM_CRED_PASSWORD);
+        // Check for errors and return
+        for (int i = 0; i < 4; i++) {
+            if (err[i] != XPLR_THINGSTREAM_OK) {
+                ret = XPLR_THINGSTREAM_ERROR;
+                break;
+            } else {
+                ret = XPLR_THINGSTREAM_OK;
+            }
+        }
+    }
+    return ret;
+}
+
+bool xplrThingstreamPpHaltLogModule(xplr_thingstream_t *instance)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    if(instance->logCfg != NULL) {
+        instance->logCfg->logEnable = false;
+        ret = true;
+    } else {
+        /* log module is not initialized thus do nothing and return false*/
+        ret = false;
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrThingstreamPpStartLogModule(xplr_thingstream_t *instance)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    xplrLog_error_t logErr;
+    if(instance->logCfg != NULL) {
+        instance->logCfg->logEnable = true;
+        ret = true;
+    } else {
+        logErr = xplrLogInit(&thingstreamLog,
+                             XPLR_LOG_DEVICE_INFO, 
+                             "/thing.log", 
+                             100,
+                             XPLR_SIZE_MB);
+        if (logErr == XPLR_LOG_OK) {
+            thingstreamLog.logEnable = true;
+        } else {
+            thingstreamLog.logEnable = false;
+        }
+        instance->logCfg = &thingstreamLog;
+        ret = thingstreamLog.logEnable;
+    }
+#else 
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrThingstreamCommHaltLogModule(xplr_thingstream_comm_thing_t *instance)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    if(instance->logCfg != NULL) {
+        instance->logCfg->logEnable = false;
+        ret = true;
+    } else {
+        /* log module is not initialized thus do nothing and return false*/
+        ret = false;
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrThingstreamCommStartLogModule(xplr_thingstream_comm_thing_t *instance)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    xplrLog_error_t logErr;
+    if(instance->logCfg != NULL) {
+        instance->logCfg->logEnable = true;
+        ret = true;
+    } else {
+        logErr = xplrLogInit(&thingstreamLog,
+                             XPLR_LOG_DEVICE_INFO, 
+                             "/thing.log", 
+                             100,
+                             XPLR_SIZE_MB);
+        if (logErr == XPLR_LOG_OK) {
+            thingstreamLog.logEnable = true;
+        } else {
+            thingstreamLog.logEnable = false;
+        }
+        instance->logCfg = &thingstreamLog;
+        ret = thingstreamLog.logEnable;
+    }
+#else 
+    ret = false;
+#endif
+    return ret;
+}
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
@@ -846,7 +1120,7 @@ static xplr_thingstream_error_t tsCreateDeviceUid(char *uid)
     } else {
         uidLength = snprintf(uid,
                              XPLR_THINGSTREAM_DEVICEUID_SIZE,
-                             "xplr%02x%02x%02x",
+                             "hpg-%02x%02x%02x",
                              mac[3],
                              mac[4],
                              mac[5]);
@@ -1409,15 +1683,15 @@ static xplr_thingstream_pp_plan_t tsPpGetPlanType(bool lbandSupported, bool mqtt
     if (lbandSupported && mqttSupported) {
         ret = XPLR_THINGSTREAM_PP_PLAN_IPLBAND;
         XPLR_THINGSTREAM_CONSOLE(I,
-                                 "Your current Thingstream plan is : Point Perfect L-band and IP, thus, valid to receive correction data via MQTT");
+                                 "Your current Thingstream plan is : PointPerfect L-band and IP, thus, valid to receive correction data via MQTT");
     } else if (mqttSupported) {
         ret = XPLR_THINGSTREAM_PP_PLAN_IP;
         XPLR_THINGSTREAM_CONSOLE(I,
-                                 "Your current Thingstream plan is : Point Perfect IP, thus, valid to receive correction data via MQTT");
+                                 "Your current Thingstream plan is : PointPerfect IP, thus, valid to receive correction data via MQTT");
     } else {
         ret = XPLR_THINGSTREAM_PP_PLAN_INVALID;
         XPLR_THINGSTREAM_CONSOLE(E,
-                                 "Your current Thingstream plan is : Point Perfect L-band, thus, not valid to receive correction data via MQTT");
+                                 "Your current Thingstream plan is : PointPerfect L-band, thus, not valid to receive correction data via MQTT");
         XPLR_THINGSTREAM_CONSOLE(E, "Try using L-band correction data via the MQTT decryption keys...");
     }
     return ret;
@@ -1579,7 +1853,7 @@ static xplr_thingstream_error_t tsPpGetFreqTopic(xplr_thingstream_pp_sub_t *tspl
         XPLR_THINGSTREAM_CONSOLE(E, "Non Lband plan does not have access to frequencies topic");
         ret = XPLR_THINGSTREAM_ERROR;
     }
-    
+
     return ret;
 }
 static xplr_thingstream_error_t tsPpGetFreqDesc(xplr_thingstream_pp_sub_t *tsplan, char *freqDesc)
@@ -1596,8 +1870,629 @@ static xplr_thingstream_error_t tsPpGetFreqDesc(xplr_thingstream_pp_sub_t *tspla
     return ret;
 }
 
-/* ----------------------------------------------------------------
- * STATIC CALLBACK FUNCTION DEFINITIONS
- * -------------------------------------------------------------- */
+static void tsPpModifyBroker(char *brokerAddress)
+{
+    char modifiedBroker[XPLR_THINGSTREAM_URL_SIZE_MAX];
+    snprintf(modifiedBroker, XPLR_THINGSTREAM_URL_SIZE_MAX, "mqtts://%s", brokerAddress);
+    strcpy(brokerAddress, modifiedBroker);
+}
 
+static xplr_thingstream_error_t tsPpConfigFileGetBroker(char *payload, char *brokerAddress)
+{
+    xplr_thingstream_error_t ret;
+    cJSON *root, *element;
+    cJSON_bool jBool;
+    char *token;
+    char *keys[] = {"MQTT", "Connectivity", "ServerURI"};
+
+    if (payload != NULL) {
+        ret = tsApiMsgParsePpZtpCheckTag(payload, keys[0]);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            root = cJSON_Parse(payload);
+            element = root;
+            for (int i = 0; i < 3; i++) {
+                jBool = cJSON_HasObjectItem(element, keys[i]);
+                if (!jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Could not find tag <%s> in configuration file", keys[i]);
+                    ret = XPLR_THINGSTREAM_ERROR;
+                    break;
+                } else {
+                    element = cJSON_GetObjectItem(element, keys[i]);
+                    ret = XPLR_THINGSTREAM_OK;
+                }
+            }
+            if (ret == XPLR_THINGSTREAM_OK) {
+                jBool = cJSON_IsString(element);
+                if (jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(D, "Parsed Server URI from configuration payload");
+                    token = strrchr(element->valuestring, '/');
+                    if ((strlen(token) - 1) <= XPLR_THINGSTREAM_URL_SIZE_MAX) {
+                        xplrRemovePortInfo(token + 1, brokerAddress, XPLR_THINGSTREAM_URL_SIZE_MAX);
+                        tsPpModifyBroker(brokerAddress);
+                        ret = XPLR_THINGSTREAM_OK;
+                    } else {
+                        XPLR_THINGSTREAM_CONSOLE(E, "Parsed Server URI greater than URL max size");
+                        ret = XPLR_THINGSTREAM_ERROR;
+                    }
+                } else {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Invalid value for Server URI in configuration file!");
+                    ret = XPLR_THINGSTREAM_ERROR;
+                }
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Parsing Failed!");
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+            cJSON_Delete(root);
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Configuration file invalid tags");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "NULL pointer to file payload!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpConfigFileGetDeviceId(char *payload, char *deviceId)
+{
+    xplr_thingstream_error_t ret;
+    cJSON *root, *element;
+    cJSON_bool jBool;
+    char *keys[] = {"MQTT", "Connectivity", "ClientID"};
+
+    if (payload != NULL) {
+        ret = tsApiMsgParsePpZtpCheckTag(payload, keys[0]);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            root = cJSON_Parse(payload);
+            element = root;
+            for (int i = 0; i < 3; i++) {
+                jBool = cJSON_HasObjectItem(element, keys[i]);
+                if (!jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Could not find tag <%s> in configuration file", keys[i]);
+                    ret = XPLR_THINGSTREAM_ERROR;
+                    break;
+                } else {
+                    element = cJSON_GetObjectItem(element, keys[i]);
+                    ret = XPLR_THINGSTREAM_OK;
+                }
+            }
+            if (ret == XPLR_THINGSTREAM_OK) {
+                jBool = cJSON_IsString(element);
+                if (jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(D, "Parsed Client ID from configuration payload");
+                    if (strlen(element->valuestring) <= XPLR_THINGSTREAM_CLIENTID_MAX) {
+                        strcpy(deviceId, element->valuestring);
+                        ret = XPLR_THINGSTREAM_OK;
+                    } else {
+                        XPLR_THINGSTREAM_CONSOLE(E, "Parsed Client ID larger than CLIENTID_MAX_SIZE!");
+                        ret = XPLR_THINGSTREAM_ERROR;
+                    }
+                } else {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Invalid value for Client ID in configuration file!");
+                    ret = XPLR_THINGSTREAM_ERROR;
+                }
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Parsing Failed!");
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+            cJSON_Delete(root);
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Configuration file invalid tags");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "NULL pointer to file payload!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    return ret;
+}
+static xplr_thingstream_error_t tsPpConfigFileGetClientKey(char *payload, char *clientKey)
+{
+    xplr_thingstream_error_t ret;
+    cJSON *root, *element;
+    cJSON_bool jBool;
+    char *keys[] = {"MQTT", "Connectivity", "ClientCredentials", "Key"};
+
+    if (payload != NULL) {
+        ret = tsApiMsgParsePpZtpCheckTag(payload, keys[0]);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            root = cJSON_Parse(payload);
+            element = root;
+            for (int i = 0; i < 4; i++) {
+                jBool = cJSON_HasObjectItem(element, keys[i]);
+                if (!jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Could not find tag <%s> in configuration file", keys[i]);
+                    ret = XPLR_THINGSTREAM_ERROR;
+                    break;
+                } else {
+                    element = cJSON_GetObjectItem(element, keys[i]);
+                    ret = XPLR_THINGSTREAM_OK;
+                }
+            }
+            if (ret == XPLR_THINGSTREAM_OK) {
+                jBool = cJSON_IsString(element);
+                if (jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(D, "Parsed Client Key from configuration payload");
+                    if (strlen(element->valuestring) <= XPLR_THINGSTREAM_CERT_SIZE_MAX) {
+                        strcpy(clientKey, element->valuestring);
+                        ret = tsPpConfigFileFormatCert(clientKey, XPLR_THINGSTREAM_PP_SERVER_KEY);
+                    } else {
+                        XPLR_THINGSTREAM_CONSOLE(E, "Parsed Client Key larger tha CERT_SIZE_MAX!");
+                        ret = XPLR_THINGSTREAM_ERROR;
+                    }
+                } else {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Invalid value for Client Key in configuration file!");
+                    ret = XPLR_THINGSTREAM_ERROR;
+                }
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Parsing Failed!");
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+            cJSON_Delete(root);
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Configuration file invalid tags");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "NULL pointer to file payload!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpConfigFileGetClientCert(char *payload, char *clientCert)
+{
+    xplr_thingstream_error_t ret;
+    cJSON *root, *element;
+    cJSON_bool jBool;
+    char *keys[] = {"MQTT", "Connectivity", "ClientCredentials", "Cert"};
+
+    if (payload != NULL) {
+        ret = tsApiMsgParsePpZtpCheckTag(payload, keys[0]);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            root = cJSON_Parse(payload);
+            element = root;
+            for (int i = 0; i < 4; i++) {
+                jBool = cJSON_HasObjectItem(element, keys[i]);
+                if (!jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Could not find tag <%s> in configuration file", keys[i]);
+                    ret = XPLR_THINGSTREAM_ERROR;
+                    break;
+                } else {
+                    element = cJSON_GetObjectItem(element, keys[i]);
+                    ret = XPLR_THINGSTREAM_OK;
+                }
+            }
+            if (ret == XPLR_THINGSTREAM_OK) {
+                jBool = cJSON_IsString(element);
+                if (jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(D, "Parsed Client Cert from configuration payload");
+                    if (strlen(element->valuestring) <= XPLR_THINGSTREAM_CERT_SIZE_MAX) {
+                        strcpy(clientCert, element->valuestring);
+                        ret = tsPpConfigFileFormatCert(clientCert, XPLR_THINGSTREAM_PP_SERVER_CERT);
+                    } else {
+                        XPLR_THINGSTREAM_CONSOLE(E, "Parsed Client Cert larger than CERT_SIZE_MAX!");
+                    }
+                } else {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Invalid value for Client Cert in configuration file!");
+                    ret = XPLR_THINGSTREAM_ERROR;
+                }
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Parsing Failed!");
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+            cJSON_Delete(root);
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Configuration file invalid tags");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "NULL pointer to file payload!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpConfigFileGetRootCa(char *payload, char *rootCa)
+{
+    xplr_thingstream_error_t ret;
+    cJSON *root, *element;
+    cJSON_bool jBool;
+    char *keys[] = {"MQTT", "Connectivity", "ClientCredentials", "RootCA"};
+
+    if (payload != NULL) {
+        ret = tsApiMsgParsePpZtpCheckTag(payload, keys[0]);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            root = cJSON_Parse(payload);
+            element = root;
+            for (int i = 0; i < 4; i++) {
+                jBool = cJSON_HasObjectItem(element, keys[i]);
+                if (!jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Could not find tag <%s> in configuration file", keys[i]);
+                    ret = XPLR_THINGSTREAM_ERROR;
+                    break;
+                } else {
+                    element = cJSON_GetObjectItem(element, keys[i]);
+                    ret = XPLR_THINGSTREAM_OK;
+                }
+            }
+            if (ret == XPLR_THINGSTREAM_OK) {
+                jBool = cJSON_IsString(element);
+                if (jBool) {
+                    XPLR_THINGSTREAM_CONSOLE(D, "Parsed Root CA from configuration payload");
+                    if (strlen(element->valuestring) <= XPLR_THINGSTREAM_CERT_SIZE_MAX) {
+                        strcpy(rootCa, element->valuestring);
+                        ret = tsPpConfigFileFormatCert(rootCa, XPLR_THINGSTREAM_PP_SERVER_ROOTCA);
+                    } else {
+                        XPLR_THINGSTREAM_CONSOLE(E, "Parsed Root CA larger than CERT_MAX_SIZE");
+                        ret = XPLR_THINGSTREAM_ERROR;
+                    }
+                } else {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Invalid value for Server URI in configuration file!");
+                    ret = XPLR_THINGSTREAM_ERROR;
+                }
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Parsing Failed!");
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+            cJSON_Delete(root);
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Configuration file invalid tags");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "NULL pointer to file payload!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    return ret;
+}
+static xplr_thingstream_error_t tsPpConfigFileGetDynamicKeys(char *payload,
+                                                             xplr_thingstream_pp_dKeys_t *dynamicKeys)
+{
+    xplr_thingstream_error_t ret;
+    cJSON *root, *element, *currKey, *nextKey;
+    cJSON_bool jBool, hasCurrKey, hasNextKey;
+    char *value;
+    char *keysFilter[] = {"MQTT", "dynamicKeys", "current", "next"};
+    char *keysTags[] = {"duration", "start", "value"};
+
+    if (payload != NULL) {
+        ret = tsApiMsgParsePpZtpCheckTag(payload, keysFilter[0]);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            root = cJSON_Parse(payload);
+            element = cJSON_GetObjectItem(root, keysFilter[0]);
+            jBool = cJSON_HasObjectItem(element, keysFilter[1]);
+            if (jBool) {
+                element = cJSON_GetObjectItem(element, keysFilter[1]);
+                hasCurrKey = cJSON_HasObjectItem(element, keysFilter[2]);
+                hasNextKey = cJSON_HasObjectItem(element, keysFilter[3]);
+                if (hasCurrKey && hasNextKey) {
+                    currKey = cJSON_GetObjectItem(element, keysFilter[2]);
+                    dynamicKeys->current.duration = cJSON_GetObjectItem(currKey, keysTags[0])->valuedouble;
+                    dynamicKeys->current.start = cJSON_GetObjectItem(currKey, keysTags[1])->valuedouble;
+                    value = cJSON_GetObjectItem(currKey, keysTags[2])->valuestring;
+                    strcpy(dynamicKeys->current.value, value);
+                    nextKey = cJSON_GetObjectItem(element, keysFilter[3]);
+                    dynamicKeys->next.duration = cJSON_GetObjectItem(nextKey, keysTags[0])->valuedouble;
+                    dynamicKeys->next.start = cJSON_GetObjectItem(nextKey, keysTags[1])->valuedouble;
+                    value = cJSON_GetObjectItem(nextKey, keysTags[2])->valuestring;
+                    strcpy(dynamicKeys->next.value, value);
+                    ret = XPLR_THINGSTREAM_OK;
+                } else {
+                    XPLR_THINGSTREAM_CONSOLE(E, "Cannot find dynamic keys values in configuration file payload");
+                    ret = XPLR_THINGSTREAM_ERROR;
+                }
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Could not find tag <%s> in configuration file", keysFilter[1]);
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Configuration file invalid tags");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "NULL pointer to file payload!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+
+    if (ret == XPLR_THINGSTREAM_OK) {
+        XPLR_THINGSTREAM_CONSOLE(D,
+                                 "\nDynamic keys parsed:\
+                                  \nCurrent key:\n\t start (UTC):%llu\n\t duration (UTC):%llu\n\t value:%s\
+                                  \nNext key:\n\t start (UTC):%llu\n\t duration (UTC):%llu\n\t value:%s\n",
+                                 dynamicKeys->current.start,
+                                 dynamicKeys->current.duration,
+                                 dynamicKeys->current.value,
+                                 dynamicKeys->next.start,
+                                 dynamicKeys->next.duration,
+                                 dynamicKeys->next.value);
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpConfigFileParseTopicsInfoByRegionAll(char *payload,
+                                                                         xplr_thingstream_pp_region_t region,
+                                                                         xplr_thingstream_pp_settings_t *settings)
+{
+    xplr_thingstream_error_t ret;
+    cJSON *root, *element, *keyDist, *assistNow, *corrData;
+    cJSON_bool jBool, hasCorrData, hasKeyDist, hasAssistNow;
+    char *subKeys[] = {"MQTT", "Subscriptions", "Key", "AssistNow", "Data"};
+    const char *secTopicsDesc[] = {thingstreamPpFilterGAD, thingstreamPpFilterHPAC, thingstreamPpFilterOCB, thingstreamPpFilterClock, thingstreamPpFilterFreq};
+    char *token, *corrTopic, *secondaryTopics;
+    int arraySize, index;
+
+    if (payload != NULL) {
+        ret = tsApiMsgParsePpZtpCheckTag(payload, subKeys[0]);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            root = cJSON_Parse(payload);
+            element = cJSON_GetObjectItem(root, subKeys[0]);
+            jBool = cJSON_HasObjectItem(element, subKeys[1]);
+            if (jBool) {
+                element = cJSON_GetObjectItem(element, subKeys[1]);
+                hasKeyDist = cJSON_HasObjectItem(element, subKeys[2]);
+                hasAssistNow = cJSON_HasObjectItem(element, subKeys[3]);
+                hasCorrData = cJSON_HasObjectItem(element, subKeys[4]);
+                if (hasKeyDist && hasAssistNow && hasCorrData) {
+                    // Parse Key Distribution Topic path and QoS
+                    keyDist = cJSON_GetObjectItem(element, subKeys[2]);
+                    settings->topicList[0].qos = cJSON_GetObjectItem(keyDist, "QoS")->valueint;
+                    keyDist = cJSON_GetObjectItem(keyDist, "KeyTopics");
+                    keyDist = cJSON_GetArrayItem(keyDist, 0);
+                    strcpy(settings->topicList[0].path, keyDist->valuestring);
+                    strcpy(settings->topicList[0].description, thingstreamPpFilterKeyDist);
+                    settings->numOfTopics = 1;
+                    // Check IP or LBAND support
+                    if (strstr(settings->topicList[0].path, "Lb") != NULL) {
+                        settings->lbandSupported = true;
+                    } else if (strstr(settings->topicList[0].path, "ip") != NULL) {
+                        settings->mqttSupported = true;
+                        settings->lbandSupported = false;
+                    } else {
+                        settings->mqttSupported = false;
+                        settings->lbandSupported = false;
+                    }
+                    if (!settings->mqttSupported && !settings->lbandSupported) {
+                        XPLR_THINGSTREAM_CONSOLE(E, "Error regarding subscription type to Thingstream!");
+                        ret = XPLR_THINGSTREAM_ERROR;
+                    } else {
+                        assistNow = cJSON_GetObjectItem(element, subKeys[3]);
+                        // Parse Assist Now Topic path and QoS
+                        settings->topicList[1].qos = cJSON_GetObjectItem(assistNow, "QoS")->valueint;
+                        assistNow = cJSON_GetObjectItem(assistNow, "AssistNowTopics");
+                        assistNow = cJSON_GetArrayItem(assistNow, 0);
+                        strcpy(settings->topicList[1].path, assistNow->valuestring);
+                        strcpy(settings->topicList[1].description, thingstreamPpFilterAssistNow);
+                        settings->numOfTopics++;
+                        // Parse Correction Data Topics
+                        corrData = cJSON_GetObjectItem(element, subKeys[4]);
+                        settings->topicList[2].qos = cJSON_GetObjectItem(corrData, "QoS")->valueint;
+                        corrData = cJSON_GetObjectItem(corrData, "DataTopics");
+                        arraySize = cJSON_GetArraySize(corrData);
+                        if (arraySize == 1) {
+                            // No correction data topics so no MQTT support
+                            settings->mqttSupported = false;
+                            XPLR_THINGSTREAM_CONSOLE(W, "No MQTT support, thus, no correction data...");
+                        } else {
+                            // Select topics based on region
+                            switch (region) {
+                                case XPLR_THINGSTREAM_PP_REGION_EU:
+                                    corrTopic = cJSON_GetArrayItem(corrData, 0)->valuestring;
+                                    secondaryTopics = cJSON_GetArrayItem(corrData, 1)->valuestring;
+                                    settings->mqttSupported = true;
+                                    break;
+                                case XPLR_THINGSTREAM_PP_REGION_US:
+                                    corrTopic = cJSON_GetArrayItem(corrData, 2)->valuestring;
+                                    secondaryTopics = cJSON_GetArrayItem(corrData, 3)->valuestring;
+                                    settings->mqttSupported = true;
+                                    break;
+                                case XPLR_THINGSTREAM_PP_REGION_KR:
+                                case XPLR_THINGSTREAM_PP_REGION_INVALID:
+                                default:
+                                    XPLR_THINGSTREAM_CONSOLE(E, "Only EU and US regions are currently supported!");
+                                    corrTopic = NULL;
+                                    secondaryTopics = NULL;
+                                    settings->mqttSupported = false;
+                            }
+                            if (settings->mqttSupported) {
+                                strcpy(settings->topicList[2].path, corrTopic);
+                                if (settings->lbandSupported) {
+                                    strcpy(settings->topicList[2].description, thingstreamPpFilterCorrectionDataIpLb);
+                                } else {
+                                    strcpy(settings->topicList[2].description, thingstreamPpFilterCorrectionDataIp);
+                                }
+                                settings->numOfTopics++;
+                                // Let's separate the secondary topics
+                                // Get first token
+                                token = strtok(secondaryTopics, ";");
+                                index = 0;
+                                // Get the rest of the tokens
+                                while (token != NULL &&
+                                       index < 5 &&
+                                       settings->numOfTopics < XPLR_THINGSTREAM_PP_NUMOF_TOPICS_MAX) {
+                                    strcpy(settings->topicList[settings->numOfTopics].path, token);
+                                    strcpy(settings->topicList[settings->numOfTopics].description, secTopicsDesc[index]);
+                                    // All data topics share the same QoS
+                                    settings->topicList[settings->numOfTopics].qos = settings->topicList[2].qos;
+                                    settings->numOfTopics++;
+                                    index++;
+                                    token = strtok(NULL, ";");
+                                }
+                                tsPpSetDescFilter(settings);
+                                // We are done! All topics are parsed
+                                ret = XPLR_THINGSTREAM_OK;
+                            } else {
+                                ret = XPLR_THINGSTREAM_ERROR;
+                            }
+                        }
+                    }
+                }
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Subscription tag not found in configuration file payload!");
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+            cJSON_Delete(root);
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Configuration file invalid tags");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "NULL pointer to file payload!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsPpConfigFileFormatCert(char *cert,
+                                                         xplr_thingstream_pp_serverInfo_type_t type)
+{
+    xplr_thingstream_error_t ret;
+    char buf[2048] = {0};
+    char footer[32] = {0};
+    uint16_t times, timesMod;
+    switch (type) {
+        case XPLR_THINGSTREAM_PP_SERVER_KEY:
+            strcpy(buf, "-----BEGIN RSA PRIVATE KEY-----\n");
+            strcpy(footer, "-----END RSA PRIVATE KEY-----\n");
+            ret = XPLR_THINGSTREAM_OK;
+            break;
+        case XPLR_THINGSTREAM_PP_SERVER_ROOTCA:
+        case XPLR_THINGSTREAM_PP_SERVER_CERT:
+            strcpy(buf, "-----BEGIN CERTIFICATE-----\n");
+            strcpy(footer, "-----END CERTIFICATE-----\n");
+            ret = XPLR_THINGSTREAM_OK;
+            break;
+        default:
+            ret = XPLR_THINGSTREAM_ERROR;
+            break;
+    }
+    if (cert != NULL && ret == XPLR_THINGSTREAM_OK) {
+        times = strlen(cert) / 64;
+        timesMod = strlen(cert) % 64;
+        for (int i = 0; i <= times; i++) {
+            memcpy(buf + strlen(buf), cert + i * 64, 64);
+            if ((timesMod != 0) || (i != times)) {
+                strcat(buf + strlen(buf), "\n");
+            } else {
+                //Do nothing
+            }
+        }
+        strcat(buf, footer);
+        memset(cert, 0x00, XPLR_THINGSTREAM_CERT_SIZE_MAX);
+        memcpy(cert, buf, XPLR_THINGSTREAM_CERT_SIZE_MAX);
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "Pointer to Certificate is NULL!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+    return ret;
+}
+
+static xplr_thingstream_error_t tsCommThingParserCheckSize(const char *start,
+                                                           const char *end,
+                                                           size_t size)
+{
+    xplr_thingstream_error_t ret;
+
+    if (end > start && start != NULL && end != NULL && size != 0) {
+        if (sizeof(end - start) <= size) {
+            ret = XPLR_THINGSTREAM_OK;
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Check size failed for size");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else {
+        XPLR_THINGSTREAM_CONSOLE(E, "Check size was given empty pointer or wrong size");
+        ret = XPLR_THINGSTREAM_ERROR;
+    }
+
+    return ret;
+}
+
+static xplr_thingstream_error_t tsCommThingGetCredential(char *payload,
+                                                         char *credential,
+                                                         xplr_thingstream_comm_cred_type_t credType)
+{
+    xplr_thingstream_error_t ret;
+    const char *startStr, *endStr;
+    char *start, *end;
+    size_t size;
+
+    switch (credType) {
+        case XPLR_THINGSTREAM_COMM_CRED_SERVER_URL:
+            startStr = tsCommThingServerUrlStart;
+            endStr = tsCommThingServerUrlEnd;
+            size = XPLR_THINGSTREAM_URL_SIZE_MAX;
+            break;
+        case XPLR_THINGSTREAM_COMM_CRED_DEVICE_ID:
+            startStr = tsCommThingClientIdStart;
+            endStr = tsCommThingClientIdEnd;
+            size = XPLR_THINGSTREAM_CLIENTID_MAX;
+            break;
+        case XPLR_THINGSTREAM_COMM_CRED_USERNAME:
+            startStr = tsCommThingUsernameStart;
+            endStr = tsCommThingUsernameEnd;
+            size = XPLR_THINGSTREAM_USERNAME_MAX;
+            break;
+        case XPLR_THINGSTREAM_COMM_CRED_PASSWORD:
+            startStr = tsCommThingPasswordStart;
+            endStr = tsCommThingPasswordEnd;
+            size = XPLR_THINGSTREAM_PASSWORD_MAX;
+            break;
+        case XPLR_THINGSTREAM_COMM_CRED_CERT:
+        case XPLR_THINGSTREAM_COMM_CRED_KEY:
+        case XPLR_THINGSTREAM_COMM_CRED_INVALID:
+        default:
+            XPLR_THINGSTREAM_CONSOLE(E, "Error in credential type!");
+            startStr = NULL;
+            endStr = NULL;
+            break;
+    }
+
+    // Null pointer check
+    if (payload == NULL || startStr == NULL || endStr == NULL) {
+        XPLR_THINGSTREAM_CONSOLE(E, "Error in parsing credentials due to NULL pointer!");
+        ret = XPLR_THINGSTREAM_ERROR;
+    } else {
+        start = strstr(payload, startStr);
+        end = strstr(payload, endStr);
+        // Check size
+        ret = tsCommThingParserCheckSize(start, end, size);
+        if (ret == XPLR_THINGSTREAM_OK) {
+            size = end - start - strlen(startStr);
+            strncpy(credential, start + strlen(startStr), size);
+            if (credential != NULL && credential[0] != 0) {
+                ret = XPLR_THINGSTREAM_OK;
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Tags : <%s><%s> contain no credential...", startStr, endStr);
+                ret = XPLR_THINGSTREAM_ERROR;
+            }
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E,
+                                     "Tags : <%s><%s> contain credential larger than <%u> bytes",
+                                     startStr,
+                                     endStr,
+                                     size);
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    }
+
+    return ret;
+}
+
+static void tsPpSetDescFilter(xplr_thingstream_pp_settings_t *settings)
+{
+    if (settings->mqttSupported) {
+        if (settings->lbandSupported) {
+            thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataIpLb;
+            XPLR_THINGSTREAM_CONSOLE(D, "IP + L-Band plan does support correction data via MQTT!");
+        } else {
+            thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataIp;
+            XPLR_THINGSTREAM_CONSOLE(D, "IP  plan does support correction data via MQTT!");
+        }
+    } else {
+        thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataLb;
+        XPLR_THINGSTREAM_CONSOLE(W, "L-Band plan does not support correction data via MQTT...");
+    }
+}
 // End of file

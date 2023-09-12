@@ -33,7 +33,7 @@ To use AStyle from Vim editor just follow [this](https://blog.shichao.io/2014/01
 ### Batch Formatting Source Files
 In order to batch format any source files (`*.c`, `*.h`) residing under [components](../components/) and [examples](../examples/) folder the [batch formatter](./astyle_batch_formatter.bat) can be used.<br>
 To run the script:
-* Open a command promt/powershell window.
+* Open a command prompt/powershell window.
 * Navigate to `<Repository Dir>/XPLR-HPG-SW/bin`
 * Run the script using `.\astyle_batch_formatter.bat`
 

@@ -17,7 +17,7 @@
 /*
  * An example for MQTT connection to Thingstream (U-blox broker) using ZTP and correction data for the GNSS module.
  *
- * In the current example U-blox XPLR-HPG-1/XPLR-HPG-2 kit, 
+ * In the current example U-blox XPLR-HPG-1/XPLR-HPG-2 kit,
  * is setup using KConfig,
  * connects to WiFi network using wifi_starter component,
  * connects to Thingstream, using the Zero Touch Provisioning (referred as ZTP from now on) to achieve a connection to the MQTT broker
@@ -32,11 +32,12 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_spi_flash.h"
+#include "esp_crt_bundle.h"
 #include "xplr_wifi_starter.h"
-#include "xplr_ztp_json_parser.h"
+#include "xplr_thingstream.h"
+#include "xplr_ztp.h"
 #include "xplr_mqtt.h"
 #include "mqtt_client.h"
-#include "xplr_ztp.h"
 #include "./../../../components/ubxlib/ubxlib.h"
 #include "u_cfg_app_platform_specific.h"
 #include "./../../../../components/hpglib/xplr_hpglib_cfg.h"
@@ -53,8 +54,8 @@
 #include "./../../../components/hpglib/src/common/xplr_common.h"
 
 /**
- * If paths not found in VScode: 
- *      press keys --> <ctrl+shift+p> 
+ * If paths not found in VScode:
+ *      press keys --> <ctrl+shift+p>
  *      and select --> ESP-IDF: Add vscode configuration folder
  */
 
@@ -62,10 +63,23 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-#define  APP_SERIAL_DEBUG_ENABLED 1U /* used to print debug messages in console. Set to 0 for disabling */
-#if defined (APP_SERIAL_DEBUG_ENABLED)
+#define APP_PRINT_IMU_DATA          0U /* Disables/Enables imu data printing*/
+#define APP_SERIAL_DEBUG_ENABLED    1U /* used to print debug messages in console. Set to 0 for disabling */
+#define APP_SD_LOGGING_ENABLED      0U /* used to log the debug messages to the sd card. Set to 1 for enabling*/
+#if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
 #define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)   esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
+#elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
+#define APP_CONSOLE(tag, message, ...)\
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
 #else
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -85,6 +99,23 @@
  */
 #define APP_LOCATION_PRINT_PERIOD  5
 
+/*
+ * Button for shutting down device
+ */
+#define APP_DEVICE_OFF_MODE_BTN        (BOARD_IO_BTN1)
+
+/*
+ * Device off press duration in sec
+ */
+#define APP_DEVICE_OFF_MODE_TRIGGER    (3U)
+
+#if 1 == APP_PRINT_IMU_DATA
+/**
+ * Period in seconds to print Dead Reckoning data
+ */
+#define APP_DEAD_RECKONING_PRINT_PERIOD 5
+#endif
+
 /**
  * Max topic count
  */
@@ -93,93 +124,81 @@
 /**
  * GNSS I2C address in hex
  */
-#define XPLR_GNSS_I2C_ADDR  0x42
+#define APP_GNSS_I2C_ADDR  0x42
 
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
 
 /**
- * Valid options for locations
+ * Region for Thingstream's correction data
  */
-typedef enum {
-    APP_REGION_EU,
-    APP_REGION_US
-} appRegions;
-
-/* ----------------------------------------------------------------
- * EXTERNAL VARIABLES
- * -------------------------------------------------------------- */
-
-/**
- * Populate the following files according to your needs.
- * If you are using Thingstream then you can find all the needed
- * certificates inside your location thing settings.
- */
-extern const uint8_t server_root_crt_start[] asm("_binary_root_crt_start");
-extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
+xplr_thingstream_pp_region_t ppRegion = XPLR_THINGSTREAM_PP_REGION_EU;
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
 
 /**
- * Using EU as a region
+ * GNSS configuration.
  */
-static const appRegions region = APP_REGION_EU;
-
-/*
- * Fill this struct with your desired settings and try to connect
- * The data are taken from KConfig or you can overwrite the 
- * values as needed here.
- */
-static const char *ztpPostUrl = CONFIG_XPLR_TS_PP_ZTP_CREDENTIALS_URL;
-static xplrZtpDevicePostData_t devPostData = {
-    .dvcToken = CONFIG_XPLR_TS_PP_ZTP_TOKEN,
-    .dvcName = CONFIG_XPLR_TS_PP_DEVICE_NAME
-};
+static xplrGnssDeviceCfg_t dvcConfig;
 
 /**
- * Buffers used to store data
+ * Gnss FSM state
  */
-static char cert[APP_KEYCERT_PARSE_BUF_SIZE];
-static char privateKey[APP_KEYCERT_PARSE_BUF_SIZE];
-static char mqttClientId[APP_MQTT_CLIENT_ID_BUF_SIZE];
-static char mqttHost[APP_MQTT_HOST_BUF_SIZE];
+xplrGnssStates_t gnssState;
+
+/**
+ * Gnss device profile id
+ */
+const uint8_t gnssDvcPrfId = 0;
+
+/**
+ * Location data struct
+ */
+static xplrGnssLocation_t locData;
+
+#if 1 == APP_PRINT_IMU_DATA
+/**
+ * Dead Reckoning data structs
+ */
+xplrGnssImuAlignmentInfo_t imuAlignmentInfo;
+xplrGnssImuFusionStatus_t imuFusionStatus;
+xplrGnssImuVehDynMeas_t imuVehicleDynamics;
+#endif
+
+/* thingstream platform vars */
+static xplr_thingstream_t thingstreamSettings;
+/*
+ * Fill this struct with your desired settings and try to connect
+ * The data are taken from KConfig or you can overwrite the
+ * values as needed here.
+ */
+static const char *urlAwsRootCa = CONFIG_XPLR_AWS_ROOTCA_URL;
+static const char *tsPpZtpToken = CONFIG_XPLR_TS_PP_ZTP_TOKEN;
 
 /**
  * ZTP payload from POST
  */
 static char ztpPostPayload[APP_ZTP_PAYLOAD_BUF_SIZE];
-xplrZtpData_t ztpData = {
+static xplrZtpData_t ztpData = {
     .payload = ztpPostPayload,
     .payloadLength = APP_ZTP_PAYLOAD_BUF_SIZE
 };
 
 /**
- * ZTP style topics to subscribe to
- */
-static xplrTopic topics[APP_MAX_TOPIC_CNT];
-static xplrZtpStyleTopics_t ztpStyleTopics = {
-    .topic = topics,
-    .maxCount = APP_MAX_TOPIC_CNT,
-    .populatedCount = 0
-};
-
-/**
- * A cJSON object to store JSON reply from ZTP POST
- */
-static cJSON *json;
-
-/**
  * Keeps time at "this" point of code execution.
  * Used to calculate elapse time.
  */
-static uint64_t timeNow;
+static uint64_t timePrevLoc;
+#if 1 == APP_PRINT_IMU_DATA
+static uint64_t timePrevDr;
+#endif
 
 /*
  * Fill this struct with your desired settings and try to connect
- * The data are taken from KConfig or you can overwrite the 
+ * The data are taken from KConfig or you can overwrite the
  * values as needed here.
  */
 static const char wifiSsid[] = CONFIG_XPLR_WIFI_SSID;
@@ -214,49 +233,92 @@ xplrMqttWifiPayload_t mqttMessage = {
  */
 static bool requestDc;
 static bool gotZtp;
-static bool mqttFlag;
-static bool lbandFlag;
 static bool isNeededTopic;
+
+/**
+ * Stack pointer used in HTTP response callback
+*/
+static uint32_t bufferStackPointer = 0;
 
 /**
  * Error return types
  */
-static esp_err_t espRet;
 static xplrWifiStarterError_t wifistarterErr;
 static xplrMqttWifiError_t mqttErr;
-
+/*INDENT-OFF*/
+/**
+ * Static log configuration struct and variables
+ */
+#if (1 == APP_SD_LOGGING_ENABLED)
+static xplrLog_t appLog, errorLog;
+static char appBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
+static char appLogFilename[] = "/APPLOG.TXT";               /**< Follow the same format if changing the filename*/
+static char errorLogFilename[] = "/ERRORLOG.TXT";           /**< Follow the same format if changing the filename*/
+static uint8_t logFileMaxSize = 100;                        /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U)*/
+static xplrLog_size_t logFileMaxSizeType = XPLR_SIZE_MB;    /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB)*/
+#endif
+/*INDENT-ON*/
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
-static void appInitBoard(void);
+static void appInitLog(void);
+static esp_err_t appInitBoard(void);
 static void appInitWiFi(void);
+static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCf);
 static void appInitGnssDevice(void);
-static esp_err_t appDoZtp(void);
+static esp_err_t appGetRootCa(void);
+static esp_err_t appApplyThingstreamCreds(void);
 static void appMqttInit(void);
-static void appMqttExecParsers(void);
-static void appJsonParse(void);
-static void appMqttCertificateParse(void);
-static void appMqttClientIdParse(void);
-static void appDeallocateJSON(void);
-static void appMqttSubscriptionsParse(void);
-static void appMqttSupportParse(void);
-static void appMqttHostParse(void);
-static void appMqttPrivateKeyParse(void);
 static void appPrintLocation(uint8_t periodSecs);
+#if 1 == APP_PRINT_IMU_DATA
+static void appPrintDeadReckoning(uint8_t periodSecs);
+#endif
+static void appDeInitLog(void);
 static void appHaltExecution(void);
+static void appDeviceOffTask(void *arg);
+/* ---------------------------------------------------------------
+ * CALLBACK FUNCTION PROTOTYPES
+ * -------------------------------------------------------------- */
+static esp_err_t httpClientEventCB(esp_http_client_event_handle_t evt);
 
 void app_main(void)
 {
+    esp_err_t espRet;
+    xplr_thingstream_error_t tsErr;
     gotZtp = false;
-
+    appInitLog();
     appInitBoard();
     appInitWiFi();
     appInitGnssDevice();
-    xplrGnssPrintDeviceInfo(0);
     xplrMqttWifiInitState(&mqttClient);
 
+    timePrevLoc = MICROTOSEC(esp_timer_get_time());
+#if 1 == APP_PRINT_IMU_DATA
+    timePrevDr = MICROTOSEC(esp_timer_get_time());
+#endif
+
     while (1) {
+        xplrGnssFsm(gnssDvcPrfId);
+        gnssState = xplrGnssGetCurrentState(gnssDvcPrfId);
+
+        switch (gnssState) {
+            case XPLR_GNSS_STATE_DEVICE_READY:
+                appPrintLocation(APP_LOCATION_PRINT_PERIOD);
+#if 1 == APP_PRINT_IMU_DATA
+                appPrintDeadReckoning(APP_DEAD_RECKONING_PRINT_PERIOD);
+#endif
+                break;
+
+            case XPLR_GNSS_STATE_ERROR:
+                APP_CONSOLE(E, "GNSS in error state");
+                appHaltExecution();
+                break;
+
+            default:
+                break;
+        }
+
         wifistarterErr = xplrWifiStarterFsm();
 
         /**
@@ -265,18 +327,44 @@ void app_main(void)
          */
         if (xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_CONNECT_OK) {
             if (!gotZtp) {
-                if (appDoZtp() != ESP_OK) {
-                    APP_CONSOLE(E, "ZTP failed");
+                thingstreamSettings.connType = XPLR_THINGSTREAM_PP_CONN_WIFI;
+                tsErr = xplrThingstreamInit(tsPpZtpToken, &thingstreamSettings);
+                if (tsErr != XPLR_THINGSTREAM_OK) {
+                    APP_CONSOLE(E, "Error in Thingstream configuration");
                     appHaltExecution();
+                } else {
+                    espRet = appGetRootCa();
+                    if (espRet != ESP_OK) {
+                        APP_CONSOLE(E, "Could not get Root CA certificate from Amazon. Halting execution...");
+                        appHaltExecution();
+                    } else {
+                        espRet = xplrZtpGetPayloadWifi(&thingstreamSettings,
+                                                       &ztpData);
+                        if (espRet != ESP_OK) {
+                            APP_CONSOLE(E, "Error in ZTP");
+                            appHaltExecution();
+                        } else {
+                            espRet = appApplyThingstreamCreds();
+                            if (espRet != ESP_OK) {
+                                APP_CONSOLE(E, "Error in applying Thingstream Credentials");
+                                appHaltExecution();
+                            } else {
+                                gotZtp = true;
+                                APP_CONSOLE(I, "ZTP Successful!");
+                            }
+                        }
+                    }
                 }
-
                 /**
                  * Since MQTT is supported we can initialize the MQTT broker and try to connect
                  */
-                if (mqttFlag) {
+                if (thingstreamSettings.pointPerfect.mqttSupported) {
                     appMqttInit();
                     xplrMqttWifiStart(&mqttClient);
                     requestDc = false;
+                } else {
+                    APP_CONSOLE(E, "Your Thingstream subscription plan does not include correction data via MQTT");
+                    appHaltExecution();
                 }
             }
         }
@@ -294,11 +382,15 @@ void app_main(void)
             case XPLR_MQTTWIFI_STATE_CONNECTED:
                 /**
                  * Lets try to use ZTP format topics to subscribe
+                 * We subscribe after the GNSS device is ready. This way we do not
+                 * lose the first message which contains the decryption keys
                  */
-                espRet = xplrMqttWifiSubscribeToTopicArrayZtp(&mqttClient, &ztpStyleTopics, 0);
-                if (espRet != ESP_OK) {
-                    APP_CONSOLE(E, "xplrMqttWifiSubscribeToTopicArrayZtp failed");
-                    appHaltExecution();
+                if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                    espRet = xplrMqttWifiSubscribeToTopicArrayZtp(&mqttClient, &thingstreamSettings.pointPerfect);
+                    if (espRet != ESP_OK) {
+                        APP_CONSOLE(E, "xplrMqttWifiSubscribeToTopicArrayZtp failed");
+                        appHaltExecution();
+                    }
                 }
                 break;
 
@@ -312,20 +404,28 @@ void app_main(void)
                  * If the user does not use it it will be discarded.
                  */
                 if (xplrMqttWifiReceiveItem(&mqttClient, &mqttMessage) == XPLR_MQTTWIFI_ITEM_OK) {
-                    isNeededTopic = (strcmp(mqttMessage.topic, ztpStyleTopics.topic[XPLR_JSON_PARSER_REQTOPIC_KEYDISTRIB].path) == 0);
-                    if (isNeededTopic) {
-                        espRet = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
-                        if (espRet != ESP_OK) {
-                            APP_CONSOLE(E, "Failed to send decryption keys!");
-                            appHaltExecution();
+                    /**
+                     * Do not send data if GNSS is not in ready state.
+                     * The device might not be initialized and the device handler
+                     * would be NULL
+                     */
+                    if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                        isNeededTopic = xplrThingstreamPpMsgIsKeyDist(mqttMessage.topic, &thingstreamSettings);
+                        if (isNeededTopic) {
+                            espRet = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
+                            if (espRet != ESP_OK) {
+                                APP_CONSOLE(E, "Failed to send decryption keys!");
+                                appHaltExecution();
+                            }
                         }
-                    }
-
-                    isNeededTopic = (strcmp(mqttMessage.topic, ztpStyleTopics.topic[XPLR_JSON_PARSER_REQTOPIC_CORRECDATA].path) == 0);
-                    if (isNeededTopic) {
-                        espRet = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
-                        if (espRet != ESP_OK) {
-                            APP_CONSOLE(E, "Failed to send correction data!");
+                        /*INDENT-OFF*/
+                        isNeededTopic = xplrThingstreamPpMsgIsCorrectionData(mqttMessage.topic, &thingstreamSettings);
+                        /*INDENT-ON*/
+                        if (isNeededTopic) {
+                            espRet = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
+                            if (espRet != ESP_OK) {
+                                APP_CONSOLE(E, "Failed to send correction data!");
+                            }
                         }
                     }
                 }
@@ -334,11 +434,6 @@ void app_main(void)
             default:
                 break;
         }
-
-        /**
-         * Print location every APP_LOCATION_PRINT_PERIOD secs
-         */
-        appPrintLocation(APP_LOCATION_PRINT_PERIOD);
 
         /**
          * We lost WiFi connection.
@@ -356,10 +451,10 @@ void app_main(void)
          * If you request a hard disconnect then the client handler
          * and callback are destroyed and so is autoreconnect.
          */
-        if ((requestDc == false) && 
+        if ((requestDc == false) &&
             ((xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_DISCONNECT_OK) ||
              (xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_SCHEDULE_RECONNECT))) {
-            
+
             if (mqttClient.handler != NULL) {
                 xplrMqttWifiHardDisconnect(&mqttClient);
             }
@@ -382,14 +477,38 @@ void app_main(void)
 /*
  * Initialize XPLR-HPG kit using its board file
  */
-static void appInitBoard(void)
+static esp_err_t appInitBoard(void)
 {
+    gpio_config_t io_conf = {0};
+    esp_err_t espRet;
+
     APP_CONSOLE(I, "Initializing board.");
     espRet = xplrBoardInit();
     if (espRet != ESP_OK) {
         APP_CONSOLE(E, "Board initialization failed!");
         appHaltExecution();
+    } else {
+        /* config boot0 pin as input */
+        io_conf.pin_bit_mask = 1ULL << APP_DEVICE_OFF_MODE_BTN;
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pull_up_en = 1;
+        espRet = gpio_config(&io_conf);
     }
+
+    if (espRet != ESP_OK) {
+        APP_CONSOLE(E, "Failed to set boot0 pin in input mode");
+    } else {
+        if (xTaskCreate(appDeviceOffTask, "deviceOffTask", 2 * 2048, NULL, 10, NULL) == pdPASS) {
+            APP_CONSOLE(D, "Boot0 pin configured as button OK");
+            APP_CONSOLE(D, "Board Initialized");
+        } else {
+            APP_CONSOLE(D, "Failed to start deviceOffTask task");
+            APP_CONSOLE(E, "Board initialization failed!");
+            espRet = ESP_FAIL;
+        }
+    }
+
+    return espRet;
 }
 
 /*
@@ -397,6 +516,7 @@ static void appInitBoard(void)
  */
 static void appInitWiFi(void)
 {
+    esp_err_t espRet;
     APP_CONSOLE(I, "Starting WiFi in station mode.");
     espRet = xplrWifiStarterInitConnection(&wifiOptions);
     if (espRet != ESP_OK) {
@@ -406,27 +526,59 @@ static void appInitWiFi(void)
 }
 
 /**
+ * Populates gnss settings
+ */
+static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
+{
+    /**
+    * Pin numbers are those of the MCU: if you
+    * are using an MCU inside a u-blox module the IO pin numbering
+    * for the module is likely different that from the MCU: check
+    * the data sheet for the module to determine the mapping
+    * DEVICE i.e. module/chip configuration: in this case a gnss
+    * module connected via UART
+    */
+    gnssCfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.i2cAddress = APP_GNSS_I2C_ADDR;
+    gnssCfg->hw.dvcConfig.transportType = U_DEVICE_TRANSPORT_TYPE_I2C;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.i2c = 0;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.pinSda = BOARD_IO_I2C_PERIPHERALS_SDA;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.pinScl = BOARD_IO_I2C_PERIPHERALS_SCL;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.clockHertz = 400000;
+
+    gnssCfg->hw.dvcNetwork.type = U_NETWORK_TYPE_GNSS;
+    gnssCfg->hw.dvcNetwork.moduleType = U_GNSS_MODULE_TYPE_M9;
+    gnssCfg->hw.dvcNetwork.devicePinPwr = -1;
+    gnssCfg->hw.dvcNetwork.devicePinDataReady = -1;
+
+    gnssCfg->dr.enable = CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE;
+    gnssCfg->dr.mode = XPLR_GNSS_IMU_CALIBRATION_AUTO;
+    gnssCfg->dr.vehicleDynMode = XPLR_GNSS_DYNMODE_AUTOMOTIVE;
+
+    gnssCfg->corrData.keys.size = 0;
+    gnssCfg->corrData.source = XPLR_GNSS_CORRECTION_FROM_IP;
+}
+
+/**
  * Makes all required initializations
  */
 static void appInitGnssDevice(void)
 {
+    esp_err_t espRet;
     espRet = xplrGnssUbxlibInit();
     if (espRet != ESP_OK) {
         APP_CONSOLE(E, "UbxLib init failed!");
         appHaltExecution();
     }
 
+    appConfigGnssSettings(&dvcConfig);
 
-    APP_CONSOLE(D, "Waiting for GNSS device to come online!");
-    espRet = xplrGnssStartDeviceDefaultSettings(0, XPLR_GNSS_I2C_ADDR);
+    espRet = xplrGnssStartDevice(0, &dvcConfig);
     if (espRet != ESP_OK) {
         APP_CONSOLE(E, "Failed to start GNSS device!");
-        appHaltExecution();
-    }
-
-    espRet = xplrGnssSetCorrectionDataSource(0, XPLR_GNSS_CORRECTION_FROM_IP);
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "Failed to set correction data source!");
         appHaltExecution();
     }
 
@@ -434,57 +586,75 @@ static void appInitGnssDevice(void)
 }
 
 /**
- * Execute ZTP and fetch settings to start MQTT
- */
-static esp_err_t appDoZtp(void)
+ * Function that handles the HTTP GET request to fetch the Root CA certificate
+*/
+static esp_err_t appGetRootCa(void)
 {
-    APP_CONSOLE(I, "Performing HTTPS POST request.");
-    espRet = xplrZtpGetPayload((const char *)server_root_crt_start, 
-                               ztpPostUrl, 
-                               &devPostData, 
-                               &ztpData);
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "Performing HTTPS POST failed!");
-        return ESP_FAIL;
-    } else {
-        if (ztpData.httpReturnCode == HttpStatus_Ok) {
-            appMqttExecParsers();
+    esp_err_t ret;
+    esp_http_client_handle_t client = NULL;
+    char rootCa[APP_KEYCERT_PARSE_BUF_SIZE];
+    xplrZtpData_t userData = {
+        .payload = rootCa,
+        .payloadLength = APP_KEYCERT_PARSE_BUF_SIZE
+    };
+
+    //Configure http client
+    esp_http_client_config_t clientConfig = {
+        .url = urlAwsRootCa,
+        .method = HTTP_METHOD_GET,
+        .event_handler = httpClientEventCB,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .transport_type = HTTP_TRANSPORT_OVER_SSL,
+        .user_data = &userData
+    };
+
+    client = esp_http_client_init(&clientConfig);
+    if (client != NULL) {
+        ret = esp_http_client_set_header(client, "Accept", "text/html");
+        if (ret == ESP_OK) {
+            ret = esp_http_client_perform(client); //Blocking no need for retries or while loop
+            if (ret == ESP_OK) {
+                userData.httpReturnCode = esp_http_client_get_status_code(client);
+                if (userData.httpReturnCode == 200) {
+                    int len = esp_http_client_get_content_length(client);
+                    APP_CONSOLE(I, "HTTPS GET request OK: code [%d] - payload size [%d].", userData.httpReturnCode,
+                                len);
+                } else {
+                    APP_CONSOLE(E, "HTTPS GET request failed with code [%d]", userData.httpReturnCode);
+                }
+            } else {
+                APP_CONSOLE(E, "Error in GET request");
+            }
         } else {
-            APP_CONSOLE(E, "ZTP MQTT is not supported!");
+            APP_CONSOLE(E, "Failed to set HTTP headers");
         }
+        esp_http_client_cleanup(client);
+    } else {
+        APP_CONSOLE(E, "Could not initiate HTTP client");
+        ret = ESP_FAIL;
     }
 
-    gotZtp = true;
-
-    return ESP_OK;
+    if (rootCa != NULL) {
+        memcpy(thingstreamSettings.server.rootCa, rootCa, APP_KEYCERT_PARSE_BUF_SIZE);
+    }
+    return ret;
 }
 
 /**
- * Executes all parsing function in a batch
- */
-static void appMqttExecParsers(void)
+ * Function that applies the Thingstream credentials fetched from the ZTP
+*/
+static esp_err_t appApplyThingstreamCreds(void)
 {
-    appJsonParse();
-    appMqttSupportParse();
-    if (mqttFlag) {
-        appMqttCertificateParse();
-        appMqttPrivateKeyParse();
-        appMqttClientIdParse();
-        appMqttSubscriptionsParse();
-        appMqttHostParse();
-        appDeallocateJSON();
+    esp_err_t espRet;
+    xplr_thingstream_error_t tsErr;
+    tsErr = xplrThingstreamPpConfig(ztpData.payload, ppRegion, &thingstreamSettings);
+    if (tsErr != XPLR_THINGSTREAM_OK) {
+        espRet = ESP_FAIL;
+        APP_CONSOLE(E, "Error in Thingstream credential payload");
     } else {
-        APP_CONSOLE(W, "MQTT is not supported.");
-        if (xplrJsonZtpSupportsLband(json, &lbandFlag) == XPLR_JSON_PARSER_OK) {
-            if (lbandFlag) {
-                APP_CONSOLE(W, "Correction plan is LBAND only.");
-            }
-        } else {
-            APP_CONSOLE(E, "Could not parse LBAND flag!");
-        }
-        APP_CONSOLE(E, "Halting execution.");
-        appHaltExecution();
+        espRet = ESP_OK;
     }
+    return espRet;
 }
 
 /**
@@ -492,168 +662,247 @@ static void appMqttExecParsers(void)
  */
 static void appMqttInit(void)
 {
+    esp_err_t ret;
     /**
      * We declare how many slots a ring buffer should have.
      * You can chose to have more depending on the traffic of your broker.
      * If the ring buffer cannot keep up then you can increase this number
      * to better suit your case.
      */
-    mqttClient.ucd.ringBufferSlotsNumber = 3;
+    ret = xplrMqttWifiSetRingbuffSlotsCount(&mqttClient, 6);
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Failed to set MQTT ringbuffer slots!");
+        appHaltExecution();
+    }
 
     /**
      * Settings for client
      * If ZTP is successful then all the following settings
      * will be populated
      */
-    mqttClientConfig.uri = mqttHost;
-    mqttClientConfig.client_id = mqttClientId;
-    mqttClientConfig.client_cert_pem = (const char *)cert;
-    mqttClientConfig.client_key_pem = (const char *)privateKey;
-    mqttClientConfig.cert_pem = (const char *)server_root_crt_start;
+    mqttClientConfig.uri = thingstreamSettings.pointPerfect.brokerAddress;
+    mqttClientConfig.client_id = thingstreamSettings.pointPerfect.deviceId;
+    mqttClientConfig.client_cert_pem = (const char *)thingstreamSettings.pointPerfect.clientCert;
+    mqttClientConfig.client_key_pem = (const char *)thingstreamSettings.pointPerfect.clientKey;
+    mqttClientConfig.cert_pem = (const char *)thingstreamSettings.server.rootCa;
     mqttClientConfig.user_context = &mqttClient.ucd;
 
     /**
-     * Let's start our client. 
-     * In case of multiple clients an array of clients can be used. 
+     * Let's start our client.
+     * In case of multiple clients an array of clients can be used.
      */
-    xplrMqttWifiInitClient(&mqttClient, &mqttClientConfig);
-}
-
-/*
- * Allocation for JSON parsing.
- * From this object we can take all the data we are interested in.
- * Remember to deallocate the json file after we are done precessing it.
- * In case the JSON object is invalid then the returned item will be NULL.
- */
-static void appJsonParse(void)
-{
-    json = cJSON_Parse(ztpData.payload);
-    if (json == NULL) {
-        APP_CONSOLE(E, "cJSON parsing failed!");
-        APP_CONSOLE(E, "Seems like the JSON payload is not valid!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Getting certificate value
- * Please refer to Readme and the Thingstream documentation
- * for more fields and their uses
- */
-static void appMqttCertificateParse(void)
-{
-    if (xplrJsonZtpGetMqttCertificate(json, cert, APP_KEYCERT_PARSE_BUF_SIZE) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing Certificate failed!");
+    ret = xplrMqttWifiInitClient(&mqttClient, &mqttClientConfig);
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Failed to initialize Mqtt client!");
         appHaltExecution();
     }
 }
 
 /**
- * Parse private key
- */
-static void appMqttPrivateKeyParse(void)
-{
-    if (xplrJsonZtpGetPrivateKey(json, privateKey, APP_KEYCERT_PARSE_BUF_SIZE) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing Private Key failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Returns Client ID for MQTT
- */
-static void appMqttClientIdParse(void)
-{
-    if (xplrJsonZtpGetMqttClientId(json, mqttClientId, APP_MQTT_CLIENT_ID_BUF_SIZE) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing MQTT client ID failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Fetches array with topics to subscribe
- */
-static void appMqttSubscriptionsParse(void)
-{
-    char strLoc[3];
-
-    memset(strLoc, 0x00, ELEMENTCNT(strLoc));
-
-    if (region == APP_REGION_EU) {
-        strcpy(strLoc, XPLR_ZTP_REGION_EU);
-    } else {
-        strcpy(strLoc, XPLR_ZTP_REGION_US);
-    }
-
-    APP_CONSOLE(D, "Configured region: %s", strLoc);
-
-    ztpStyleTopics.populatedCount = 0;
-    if (xplrJsonZtpGetRequiredTopicsByRegion(json, &ztpStyleTopics,
-                                             strLoc) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing required MQTT topics failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Fetches host
- */
-static void appMqttHostParse(void)
-{
-    if (xplrJsonZtpGetBrokerHost(json, mqttHost, APP_MQTT_HOST_BUF_SIZE) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing host failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Checks if MQTT is supported
- */
-static void appMqttSupportParse(void)
-{
-    if (xplrJsonZtpSupportsMqtt(json, &mqttFlag) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing MQTT support flag failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Deallocate JSON after we are done
- */
-static void appDeallocateJSON(void)
-{
-    if (json != NULL) {
-        APP_CONSOLE(I, "Deallocating JSON object.");
-        cJSON_Delete(json);
-    }
-}
-
-/**
- * Declare a period in seconds to print location
+ * Prints locations according to period
  */
 static void appPrintLocation(uint8_t periodSecs)
 {
-    if ((MICROTOSEC(esp_timer_get_time()) - timeNow >= periodSecs) && xplrGnssHasMessage(0)) {        
-        espRet = xplrGnssPrintLocation(0);
-        if (espRet != ESP_OK) {
-            APP_CONSOLE(W, "Could not print gnss location!");
+    esp_err_t ret;
+
+    if ((MICROTOSEC(esp_timer_get_time()) - timePrevLoc >= periodSecs) && xplrGnssHasMessage(0)) {
+        ret = xplrGnssGetLocationData(0, &locData);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not get gnss location data!");
+        } else {
+            ret = xplrGnssPrintLocationData(&locData);
+            if (ret != ESP_OK) {
+                APP_CONSOLE(W, "Could not print gnss location data!");
+            }
         }
 
-        espRet = xplrGnssPrintGmapsLocation(0);
-        if (espRet != ESP_OK) {
+        ret = xplrGnssPrintGmapsLocation(0);
+        if (ret != ESP_OK) {
             APP_CONSOLE(W, "Could not print Gmaps location!");
         }
 
-        timeNow = MICROTOSEC(esp_timer_get_time());
+        timePrevLoc = MICROTOSEC(esp_timer_get_time());
+    }
+}
+
+#if 1 == APP_PRINT_IMU_DATA
+/**
+ * Prints Dead Reckoning data over a period (seconds).
+ * Declare a period in seconds to print location.
+ */
+static void appPrintDeadReckoning(uint8_t periodSecs)
+{
+    esp_err_t ret;
+
+    if ((MICROTOSEC(esp_timer_get_time()) - timePrevDr >= periodSecs) &&
+        xplrGnssIsDrEnabled(gnssDvcPrfId)) {
+        ret = xplrGnssGetImuAlignmentInfo(gnssDvcPrfId, &imuAlignmentInfo);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not get Imu alignment info!");
+        }
+
+        ret = xplrGnssPrintImuAlignmentInfo(&imuAlignmentInfo);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not print Imu alignment data!");
+        }
+
+        ret = xplrGnssGetImuAlignmentStatus(gnssDvcPrfId, &imuFusionStatus);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not get Imu alignment status!");
+        }
+        ret = xplrGnssPrintImuAlignmentStatus(&imuFusionStatus);
+        if (ret != ESP_OK) {
+            APP_CONSOLE(W, "Could not print Imu alignment status!");
+        }
+
+        if (xplrGnssIsDrCalibrated(gnssDvcPrfId)) {
+            ret = xplrGnssGetImuVehicleDynamics(gnssDvcPrfId, &imuVehicleDynamics);
+            if (ret != ESP_OK) {
+                APP_CONSOLE(W, "Could not get Imu vehicle dynamic data!");
+            }
+
+            ret = xplrGnssPrintImuVehicleDynamics(&imuVehicleDynamics);
+            if (ret != ESP_OK) {
+                APP_CONSOLE(W, "Could not print Imu vehicle dynamic data!");
+            }
+        }
+
+        timePrevDr = MICROTOSEC(esp_timer_get_time());
+    }
+}
+#endif
+
+static void appInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLog_error_t err = xplrLogInit(&errorLog,
+                                      XPLR_LOG_DEVICE_ERROR,
+                                      errorLogFilename,
+                                      logFileMaxSize,
+                                      logFileMaxSizeType);
+    if (err == XPLR_LOG_OK) {
+        errorLog.logEnable = true;
+        err = xplrLogInit(&appLog,
+                          XPLR_LOG_DEVICE_INFO,
+                          appLogFilename,
+                          logFileMaxSize,
+                          logFileMaxSizeType);
+    }
+    if (err == XPLR_LOG_OK) {
+        appLog.logEnable = true;
+    } else {
+        APP_CONSOLE(E, "Error initializing logging...");
+    }
+#endif
+}
+
+static void appDeInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLogDeInit(&appLog);
+    xplrLogDeInit(&errorLog);
+#endif
+}
+
+/*
+ * Function to halt app execution
+ */
+static void appHaltExecution(void)
+{
+    APP_CONSOLE(E, "Halting Execution....");
+    appDeInitLog();
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+static void appDeviceOffTask(void *arg)
+{
+    uint32_t btnStatus;
+    uint32_t currTime, prevTime;
+    uint32_t btnPressDuration = 0;
+
+    for (;;) {
+        btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
+        currTime = MICROTOSEC(esp_timer_get_time());
+
+        if (btnStatus != 1) { //check if pressed
+            prevTime = MICROTOSEC(esp_timer_get_time());
+            while (btnStatus != 1) { //wait for btn release.
+                btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                currTime = MICROTOSEC(esp_timer_get_time());
+            }
+
+            btnPressDuration = currTime - prevTime;
+
+            if (btnPressDuration >= APP_DEVICE_OFF_MODE_TRIGGER) {
+                APP_CONSOLE(W, "Device OFF triggered");
+                xplrGnssHaltLogModule(XPLR_GNSS_LOG_MODULE_ALL);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                xplrBoardSetPower(XPLR_PERIPHERAL_LTE_ID, false);
+                btnPressDuration = 0;
+                appHaltExecution();
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100)); //wait for btn release.
     }
 }
 
 /**
- * A dummy function to pause on error
- */
-static void appHaltExecution(void)
+ * CALLBACK FUNCTION
+*/
+static esp_err_t httpClientEventCB(esp_http_client_event_handle_t evt)
 {
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    switch (evt->event_id) {
+        case HTTP_EVENT_ON_CONNECTED:
+            APP_CONSOLE(D, "HTTP_EVENT_ON_CONNECTED!");
+            break;
+
+        case HTTP_EVENT_HEADERS_SENT:
+            break;
+
+        case HTTP_EVENT_ON_HEADER:
+            break;
+
+        case HTTP_EVENT_ON_DATA:
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                xplrZtpData_t *tempData = (xplrZtpData_t *)evt->user_data;
+                if (bufferStackPointer < tempData->payloadLength) {
+                    memcpy(tempData->payload + bufferStackPointer, evt->data, evt->data_len);
+                    bufferStackPointer += evt->data_len;
+                    tempData->payload[bufferStackPointer] = 0;
+                } else {
+                    APP_CONSOLE(E, "Payload buffer not big enough. Could not copy all data from HTTP!");
+                }
+            }
+            break;
+
+        case HTTP_EVENT_ERROR:
+            /*
+             * How does the following ESP_LOG work?
+             * We are currently receiving data from the internet.
+             * We are not sure if the payload is null terminated.
+             * We need to define the length of the string to print.
+             * The following "%.*s" --> expands to: print string s as many chars as dataLength.
+             * It's the equivalent of writing
+             *      ESP_LOGE("HTTP_EVENT_ERROR: %.6f", float);
+             * which is more intuitive to understand; we define a constant number of decimal places.
+             * In our case the number of characters is defined on runtime by ".*"
+             * You can see how it works on:
+             * https://embeddedartistry.com/blog/2017/07/05/printf-a-limited-number-of-characters-from-a-string/
+             */
+            APP_CONSOLE(E, "HTTP_EVENT_ERROR: %.*s", evt->data_len, (char *)evt->data);
+            break;
+
+        case HTTP_EVENT_ON_FINISH:
+            APP_CONSOLE(D, "HTTP_EVENT_ON_FINISH");
+            break;
+
+        default:
+            break;
     }
+
+    return ESP_OK;
 }

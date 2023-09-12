@@ -30,7 +30,7 @@
 
 /*Definitions of Board*/
 #define BOARD_NAME "MAZGCH-HPG-SOLUTION"
-#define BOARD_VERSION "v1.0"
+#define BOARD_VERSION "v0.9"
 #define BOARD_VENDOR "uBlox"
 #define BOARD_URL "https://github.com/mazgch/hpg"
 
@@ -44,7 +44,7 @@
 #define BOARD_IO_BTN1 0U
 #define BOARD_IO_LED 2U
 
-#define BOARD_IO_LTE_PWR_ON 33U
+#define BOARD_IO_LTE_PWR_ON 12U
 
 #define BOARD_IO_LTE_ON_nSENSE 37U
 #define BOARD_IO_LTE_nRST 13U
@@ -61,6 +61,7 @@
 #define BOARD_IO_SPI_SD_MOSI 23
 #define BOARD_IO_SPI_SD_MISO 19
 #define BOARD_IO_SPI_SD_nCS 32
+#define BOARD_IO_SD_DETECT 38
 
 #define BOARD_IO_UART_DBG_TX 1U
 #define BOARD_IO_UART_DBG_RX 3U
@@ -160,6 +161,13 @@ xplr_board_error_t xplrBoardSetPower(xplr_board_peripheral_id_t id, bool on);
  * @return  XPLR_BOARD_ERROR_OK on success, XPLR_BOARD_ERROR otherwise.
  */
 xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode);
+
+/**
+ * @brief Check if the SD card is in the slot
+ *
+ * @return XPLR_BOARD_ERROR_OK on success, XPLR_BOARD_ERROR otherwise.
+*/
+xplr_board_error_t xplrBoardDetectSd(void);
 
 #ifdef __cplusplus
 }

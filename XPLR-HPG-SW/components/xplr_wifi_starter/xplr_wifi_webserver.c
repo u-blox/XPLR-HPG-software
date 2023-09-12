@@ -33,8 +33,16 @@
 /* Data buffer for websocket transactions */
 #define WEBSOCKET_BUFSIZE           (CONFIG_WS_BUFFER_SIZE)
 
-#if (1 == XPLRWIFIWEBSERVER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRWIFIWEBSERVER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRWIFIWEBSERVER_LOG_ACTIVE))
 #define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRWIFIWEBSERVER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFIWEBSERVER_LOG_ACTIVE)
+#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+    XPLRLOG(&wifiStarterLog,wifiBuff2Log);
+#elif ((0 == XPLRWIFIWEBSERVER_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFIWEBSERVER_LOG_ACTIVE)
+#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...)\
+    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    XPLRLOG(&wifiStarterLog,wifiBuff2Log);
 #else
 #define XPLRWIFIWEBSERVER_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -88,6 +96,8 @@ typedef enum {
     XPLR_WEBSERVER_WSREQ_PPKEY_SET,
     XPLR_WEBSERVER_WSREQ_PPREGION_SET,
     XPLR_WEBSERVER_WSREQ_PPPLAN_SET,
+    XPLR_WEBSERVER_WSREQ_SDLOG_SET,
+    XPLR_WEBSERVER_WSREQ_DR_SET,
     XPLR_WEBSERVER_WSREQ_LOCATION,
     XPLR_WEBSERVER_WSREQ_MESSAGE,
     XPLR_WEBSERVER_WSREQ_SUPPORTED  //number of requests supported
@@ -706,6 +716,7 @@ esp_err_t error404Handler(httpd_req_t *req, httpd_err_code_t err)
 static bool xplrHpgThingstreamCredsConfigured(void)
 {
     int res[6];
+    int8_t tVal;
     bool ret;
 
     res[0] = memcmp(webserver.wsData->pointPerfect.clientId, "n/a", strlen("n/a"));
@@ -722,6 +733,12 @@ static bool xplrHpgThingstreamCredsConfigured(void)
         } else {
             ret = true;
         }
+    }
+
+    if (ret) {
+        tVal = 0;
+        xplrWifiStarterDeviceForceSaveThingstream(7);
+        xplrWifiStarterWebserverDiagnosticsSet(XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED, (void *)&tVal);
     }
 
     return ret;
@@ -937,9 +954,37 @@ static esp_err_t wsParseData(httpd_req_t *req, uint8_t *data)
                     xplrWifiStarterDeviceForceSaveThingstream(6);
                 }
                 break;
-            }  else if (memcmp(reqValue,
-                               "dvcEraseThingstream",
-                               strlen("dvcEraseThingstream")) == 0) {
+            } else if (memcmp(reqValue,
+                              "dvcSdLogSet",
+                              strlen("dvcSdLogSet")) == 0) {
+                reqValue = cJSON_GetObjectItem(wsIn, "sd")->valuestring;
+                if (memcmp(reqValue, "Enable", strlen("Enable")) == 0) {
+                    webserver.wsData->misc.sd = true;
+                } else {
+                    webserver.wsData->misc.sd = false;
+                }
+                XPLRWIFIWEBSERVER_CONSOLE(D, "\nSD Log set to:%u",
+                                          webserver.wsData->misc.sd);
+                reqType = XPLR_WEBSERVER_WSREQ_SDLOG_SET;
+                xplrWifiStarterDeviceForceSaveMiscOptions(1);
+                break;
+            } else if (memcmp(reqValue,
+                              "dvcGnssDrSet",
+                              strlen("dvcGnssDrSet")) == 0) {
+                reqValue = cJSON_GetObjectItem(wsIn, "gnssDR")->valuestring;
+                if (memcmp(reqValue, "Enable", strlen("Enable")) == 0) {
+                    webserver.wsData->misc.gnssDR = true;
+                } else {
+                    webserver.wsData->misc.gnssDR = false;
+                }
+                XPLRWIFIWEBSERVER_CONSOLE(D, "\nGNSS DR set to:%u",
+                                          webserver.wsData->misc.gnssDR);
+                reqType = XPLR_WEBSERVER_WSREQ_DR_SET;
+                xplrWifiStarterDeviceForceSaveMiscOptions(2);
+                break;
+            } else if (memcmp(reqValue,
+                              "dvcEraseThingstream",
+                              strlen("dvcEraseThingstream")) == 0) {
                 xplrWifiStarterDeviceEraseThingstream();
                 reqType = XPLR_WEBSERVER_WSREQ_ERASE_THINGSTREAM;
                 break;
@@ -1044,13 +1089,19 @@ static esp_err_t wsServeReq(httpd_req_t *req, xplrWifiWebserverWsReqType_t type)
                     cJSON_AddStringToObject(wsOut, "host", "n/a");
                 }
 
+                if (webserver.wsData->diagnostics.plan != NULL) {
+                    cJSON_AddStringToObject(wsOut, "plan", webserver.wsData->diagnostics.plan);
+                } else {
+                    cJSON_AddStringToObject(wsOut, "plan", "n/a");
+                }
+
                 if (webserver.wsData->diagnostics.upTime != NULL) {
                     cJSON_AddStringToObject(wsOut, "uptime", webserver.wsData->diagnostics.upTime);
                 } else {
                     cJSON_AddStringToObject(wsOut, "uptime", "n/a");
                 }
 
-                if (webserver.wsData->diagnostics.upTime != NULL) {
+                if (webserver.wsData->diagnostics.timeToFix != NULL) {
                     cJSON_AddStringToObject(wsOut, "timeToFix", webserver.wsData->diagnostics.timeToFix);
                 } else {
                     cJSON_AddStringToObject(wsOut, "timeToFix", "n/a");
@@ -1058,6 +1109,21 @@ static esp_err_t wsServeReq(httpd_req_t *req, xplrWifiWebserverWsReqType_t type)
 
                 cJSON_AddStringToObject(wsOut, "mqttTraffic", webserver.wsData->diagnostics.mqttTraffic);
                 cJSON_AddNumberToObject(wsOut, "accuracy", (double)webserver.wsData->diagnostics.gnssAccuracy);
+#if (1 == XPLR_HPGLIB_LOG_ENABLED)
+                if (webserver.wsData->diagnostics.sd != NULL) {
+                    cJSON_AddStringToObject(wsOut, "sdInfo", webserver.wsData->diagnostics.sd);
+                    memset(webserver.wsData->diagnostics.sd, 0x00, 256);
+                }
+#endif
+                if (webserver.wsData->diagnostics.gnssDr != NULL) {
+                    cJSON_AddStringToObject(wsOut, "drInfo", webserver.wsData->diagnostics.gnssDr);
+                    memset(webserver.wsData->diagnostics.gnssDr, 0x00, 32);
+                }
+
+                if (webserver.wsData->diagnostics.gnssDrCalibration != NULL) {
+                    cJSON_AddStringToObject(wsOut, "drCalibrationInfo", webserver.wsData->diagnostics.gnssDrCalibration);
+                    memset(webserver.wsData->diagnostics.gnssDrCalibration, 0x00, 32);
+                }
                 cJSON_AddStringToObject(wsOut, "fwVersion", webserver.wsData->diagnostics.version);
                 wsOutBuf = cJSON_Print(wsOut);
                 if (wsOutBuf != NULL) {
@@ -1154,6 +1220,8 @@ static esp_err_t wsServeReq(httpd_req_t *req, xplrWifiWebserverWsReqType_t type)
         case XPLR_WEBSERVER_WSREQ_ERASE_ALL:
         case XPLR_WEBSERVER_WSREQ_ERASE_WIFI:
         case XPLR_WEBSERVER_WSREQ_ERASE_THINGSTREAM:
+        case XPLR_WEBSERVER_WSREQ_SDLOG_SET:
+        case XPLR_WEBSERVER_WSREQ_DR_SET:
             ret = ESP_OK;
             break;
 

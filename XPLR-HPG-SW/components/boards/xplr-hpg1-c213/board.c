@@ -275,6 +275,18 @@ xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode)
     return ret;
 }
 
+xplr_board_error_t xplrBoardDetectSd(void)
+{
+    /**
+     * This function always returns XPLR_BOARD_ERROR_OK, as there is
+     * no way to set the Card Detect Pin to INPUT mode and read it
+     * For more information check the logging module's README.md file
+     * and also the GPIO restrictions of esp32s3 in:
+     * https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/gpio.html
+    */
+    return XPLR_BOARD_ERROR_OK;
+}
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
@@ -347,7 +359,6 @@ static xplr_board_error_t board_config_default_gpios(board_gpio_config_t gpio_id
             BOARD_CHECK(ret == ESP_OK, "LTE Not Set in mikroBus.", ret);
 #endif
             break;
-
         default:
             ret = XPLR_BOARD_ERROR;
             BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "Config resource not found", ret);

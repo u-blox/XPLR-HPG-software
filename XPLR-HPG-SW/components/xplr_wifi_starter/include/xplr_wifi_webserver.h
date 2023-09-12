@@ -29,20 +29,23 @@ extern "C" {
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-/* Max length of SSID name */
+/* Max num of supported sockets */
 #define XPLR_WIFIWEBSERVER_SOCKETS_OPEN_MAX                  (4U)
 
 /* Max size of a certificate file */
 #define XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE         (2U*2U*1024+128)
 
-/* Point Perfect size of a client id */
+/* PointPerfect size of a client id */
 #define XPLR_WIFIWEBSERVER_PPID_SIZE                         (36U+1U)
 
-/* Point Perfect size of a region */
+/* PointPerfect size of a region */
 #define XPLR_WIFIWEBSERVER_PPREGION_SIZE                     (3U+1U)
 
-/* Point Perfect size of a region */
+/* PointPerfect size of a region */
 #define XPLR_WIFIWEBSERVER_PPPLAN_SIZE                       (8U+1U)
+
+/* PointPerfect u-center config file */
+#define XPLR_WIFIWEBSERVER_PPUCONFIG_SIZE                    (5500U)
 
 /* Max URIs that server can handle */
 #define WEBSERVER_URIS_MAX                                   (25U)
@@ -60,17 +63,17 @@ typedef struct xplrWifiWebServerDataWifiCredentials_type {
     bool set;
 } xplrWifiWebServerDataWifiCredentials_t;
 
-/** Point perfect credentials for the device to connect to Thingstream's location service.
+/** PointPerfect credentials for the device to connect to Thingstream's location service.
  *  Configured under the "settings" tab.
 */
 typedef struct xplrWifiWebServerDataPpCredentials_type {
-    char clientId[XPLR_WIFIWEBSERVER_PPID_SIZE];                          /**< point perfect client id. */
-    char rootCa[XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE];            /**< point perfect root ca certificate. */
-    char certificate[XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE];       /**< point perfect client certificate. */
-    char privateKey[XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE];        /**< point perfect client private key. */
-    char region[XPLR_WIFIWEBSERVER_PPREGION_SIZE];                        /**< point perfect region to parse correction data for.
+    char clientId[XPLR_WIFIWEBSERVER_PPID_SIZE];                          /**< PointPerfect client id. */
+    char rootCa[XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE];            /**< PointPerfect root ca certificate. */
+    char certificate[XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE];       /**< PointPerfect client certificate. */
+    char privateKey[XPLR_WIFIWEBSERVER_CERTIFICATE_MAX_FILE_SIZE];        /**< PointPerfect client private key. */
+    char region[XPLR_WIFIWEBSERVER_PPREGION_SIZE];                        /**< PointPerfect region to parse correction data for.
                                                                              Supported values: EU and US */
-    char plan[XPLR_WIFIWEBSERVER_PPPLAN_SIZE];                            /**< point perfect plan to parse correction data for.
+    char plan[XPLR_WIFIWEBSERVER_PPPLAN_SIZE];                            /**< PointPerfect plan to parse correction data for.
                                                                              Supported values: IP, LBAND and IP+LBAND */
     bool set;
 } xplrWifiWebServerDataPpCredentials_t;
@@ -90,12 +93,23 @@ typedef struct xplrWifiWebServerDataDiagnostics_type {
     char    *ip;                    /**< IP acquired. */
     char    *ssid;                  /**< SSID of AP to connect to. null if in AP mode. */
     char    *hostname;              /**< hostname of module when connected in STA mode. */
+    char    *plan;                  /**< PointPerfect plan configuration. */
     uint32_t gnssAccuracy;          /**< GNSS module current horizontal accuracy. */
     char    *mqttTraffic;           /**< total MQTT traffic. Num of msgs received and total bytes */
     char     *upTime;               /**< time since the module is online aka connected to wifi and thingstream. */
     char     *timeToFix;            /**< time it took for the module to get FIX. */
+    char     *sd;                   /**< SD info (free/used space). */
+    char     *gnssDr;               /**< Dead Reckoning status of GNSS module. */
+    char     *gnssDrCalibration;    /**< Dead Reckoning calibration status of GNSS module. */
     char     *version;              /**< firmware version. */
 } xplrWifiWebServerDataDiagnostics_t;
+
+/** Misc settings that configures other device options. */
+typedef struct xplrWifiWebServerMiscSettings_type {
+    bool sd;                /**< enable/disable SD logging. */
+    bool gnssDR;            /**< enable/disable dead reckoning mode of GNSS modules. */
+    bool gnssDRCalibration; /**< status of dead reckoning calibration. */
+} xplrWifiWebServerMiscSettings_t;
 
 /** Webserver data. */
 typedef struct xplrWifiWebServerData_type {
@@ -104,6 +118,7 @@ typedef struct xplrWifiWebServerData_type {
     xplrWifiWebServerDataLocation_t          location;
     xplrWifiWebServerDataDiagnostics_t       diagnostics;
     xplrWifiStarterScanList_t                wifiScan;
+    xplrWifiWebServerMiscSettings_t          misc;
 } xplrWifiWebServerData_t;
 
 /* ----------------------------------------------------------------

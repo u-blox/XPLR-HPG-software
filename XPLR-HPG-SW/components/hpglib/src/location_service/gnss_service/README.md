@@ -15,8 +15,8 @@ The main scope of this library is to make device initialization and data parsing
 
 ## Reference examples
 Please see one of the following examples:
-- [Correction Data over MQTT from Thingstream Point Perfect Service (manual)](../../../../../examples/cellular/02_hpg_cell_mqtt_correction_certs/)
-- [Correction Data over MQTT from Thingstream Point Perfect Service (ZTP)](../../../../../examples/cellular/03_hpg_cell_mqtt_correction_ztp/)
+- [Correction Data over MQTT from Thingstream PointPerfect Service (manual)](../../../../../examples/cellular/02_hpg_cell_mqtt_correction_certs/)
+- [Correction Data over MQTT from Thingstream PointPerfect Service (ZTP)](../../../../../examples/cellular/03_hpg_cell_mqtt_correction_ztp/)
 - [Correction data via Wi-Fi MQTT to ZED-F9R using certificates](../../../../../examples/shortrange/03_hpg_wifi_mqtt_correction_certs/)
 - [Correction data via Wi-Fi MQTT to ZED-F9R using Zero Touch Provisioning](../../../../../examples/shortrange/04_hpg_wifi_mqtt_correction_ztp/)
 - [ZED-F9R GNSS & NEO-D9S LBAND module configuration](../../../../../examples/positioning/01_hpg_gnss_config/)

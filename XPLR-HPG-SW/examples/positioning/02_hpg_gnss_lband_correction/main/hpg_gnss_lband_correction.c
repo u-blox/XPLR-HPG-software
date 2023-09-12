@@ -55,10 +55,23 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-#define  APP_SERIAL_DEBUG_ENABLED 1U /* used to print debug messages in console. Set to 0 for disabling */
-#if defined (APP_SERIAL_DEBUG_ENABLED)
+#define APP_PRINT_IMU_DATA         0U /* Disables/Enables imu data printing*/
+#define APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
+#define APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 0 for disabling*/
+#if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
 #define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)   esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
+#elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
+#define APP_CONSOLE(tag, message, ...)\
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
 #else
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -73,17 +86,29 @@
  */
 #define APP_LOCATION_PRINT_PERIOD  5
 
+#if 1 == APP_PRINT_IMU_DATA
+/**
+ * Period in seconds to print Dead Reckoning data
+ */
+#define APP_DEAD_RECKONING_PRINT_PERIOD 5
+#endif
+
 /**
  * GNSS and LBAND I2C address in hex
  */
-#define XPLR_GNSS_I2C_ADDR  0x42
-#define XPLR_LBAND_I2C_ADDR 0x43
+#define APP_GNSS_I2C_ADDR  0x42
+#define APP_LBAND_I2C_ADDR 0x43
 
 /**
  * Decryption keys distribution topic
  */
 #define APP_KEYS_TOPIC  "/pp/ubx/0236/Lb"
 #define APP_FREQ_TOPIC  "/pp/frequencies/Lb"
+
+/**
+ * Correction Data Region
+*/
+#define APP_REGION_FREQUENCY   XPLR_LBAND_FREQUENCY_EU
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -114,23 +139,51 @@ extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
  * -------------------------------------------------------------- */
 
 /**
+ * Location modules configs
+ */
+static xplrGnssDeviceCfg_t dvcGnssConfig;
+static xplrLbandDeviceCfg_t dvcLbandConfig;
+
+/**
+ * Gnss FSM state
+ */
+xplrGnssStates_t gnssState;
+
+/**
+ * Gnss and lband device profiles id
+ */
+const uint8_t gnssDvcPrfId = 0;
+const uint8_t lbandDvcPrfId = 0;
+
+/**
+ * Location data struct
+ */
+static xplrGnssLocation_t locData;
+
+#if 1 == APP_PRINT_IMU_DATA
+/**
+ * Dead Reckoning data structs
+ */
+xplrGnssImuAlignmentInfo_t imuAlignmentInfo;
+xplrGnssImuFusionStatus_t imuFusionStatus;
+xplrGnssImuVehDynMeas_t imuVehicleDynamics;
+#endif
+
+/**
  * You can use KConfig to set up these values.
  * CONFIG_XPLR_MQTTWIFI_CLIENT_ID and CONFIG_XPLR_MQTTWIFI_THINGSTREAM_HOSTNAME are taken from Thingstream.
  * In any case you can chose to overwrite those settings
- * by replacing CONFIG_XPLR_MQTTWIFI_CLIENT_ID and CONFIG_XPLR_MQTTWIFI_THINGSTREAM_HOSTNAME 
+ * by replacing CONFIG_XPLR_MQTTWIFI_CLIENT_ID and CONFIG_XPLR_MQTTWIFI_THINGSTREAM_HOSTNAME
  * with the strings of your choice.
  */
 static const char mqttClientId[] = CONFIG_XPLR_MQTTWIFI_CLIENT_ID;
 static const char mqttHost[] = CONFIG_XPLR_MQTTWIFI_THINGSTREAM_HOSTNAME;
 
-
 /**
- * Use frequency according your region
- * Valid Options:
- * XPLR_LBAND_FREQUENCY_EU
- * XPLR_LBAND_FREQUENCY_US
+ * GNSS device handler used by LBAND module
+ * to send correction data
  */
-static xplrLbandRegion lbandRegion = XPLR_LBAND_FREQUENCY_EU;
+uDeviceHandle_t *gnssHandler;
 
 /**
  * Frequency read from LBAND module
@@ -138,14 +191,18 @@ static xplrLbandRegion lbandRegion = XPLR_LBAND_FREQUENCY_EU;
 static uint32_t frequency;
 
 /**
- * Keeps time at "this" point of code execution.
- * Used to calculate elapse time.
+ * Keeps time at "this" point of variable
+ * assignment in code
+ * Used for periodic printing
  */
-static uint64_t timeNow;
+static uint64_t timePrevLoc;
+#if 1 == APP_PRINT_IMU_DATA
+static uint64_t timePrevDr;
+#endif
 
 /*
  * Fill this struct with your desired settings and try to connect
- * The data are taken from KConfig or you can overwrite the 
+ * The data are taken from KConfig or you can overwrite the
  * values as needed here.
  */
 static const char  wifiSsid[] = CONFIG_XPLR_WIFI_SSID;
@@ -163,7 +220,8 @@ static xplrWifiStarterOpts_t wifiOptions = {
 static esp_mqtt_client_config_t mqttClientConfig;
 static xplrMqttWifiClient_t mqttClient;
 static char *topicArray[] = {APP_KEYS_TOPIC,
-                             APP_FREQ_TOPIC};
+                             APP_FREQ_TOPIC
+                            };
 
 /**
  * A struct where we can store our received MQTT message
@@ -186,38 +244,111 @@ static bool keysSent;
 static esp_err_t espRet;
 static xplrWifiStarterError_t wifistarterErr;
 static xplrMqttWifiError_t mqttErr;
-
+/*INDENT-OFF*/
+/**
+ * Static log configuration struct and variables
+ */
+#if (1 == APP_SD_LOGGING_ENABLED)
+static xplrLog_t appLog, errorLog;
+static char appBuff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
+static char appLogFilename[] = "/APPLOG.TXT";                  /**< Follow the same format if changing the filename*/
+static char errorLogFilename[] = "/ERRORLOG.TXT";              /**< Follow the same format if changing the filename*/
+static uint8_t logFileMaxSize = 100;                           /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U)*/
+static xplrLog_size_t logFileMaxSizeType = XPLR_SIZE_MB;       /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB)*/
+#endif
+/*INDENT-ON*/
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
-
+static void appInitLog(void);
 static void appInitBoard(void);
 static void appInitLocationDevices(void);
 static void appPrintDeviceInfos(void);
 static void appInitWiFi(void);
+static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg);
+static void appConfigLbandSettings(xplrLbandDeviceCfg_t *lbandCfg);
 static void appMqttInit(void);
 static void appPrintLocation(uint8_t periodSecs);
+#if 1 == APP_PRINT_IMU_DATA
+static void appPrintDeadReckoning(uint8_t periodSecs);
+#endif
+static void appDeInitLog(void);
 static void appHaltExecution(void);
 
 void app_main(void)
 {
+    appInitLog();
     appInitBoard();
     appInitWiFi();
     xplrMqttWifiInitState(&mqttClient);
     appInitLocationDevices();
     appPrintDeviceInfos();
 
-    
-    timeNow = 0;
-
+    timePrevLoc = MICROTOSEC(esp_timer_get_time());
+#if 1 == APP_PRINT_IMU_DATA
+    timePrevDr = MICROTOSEC(esp_timer_get_time());
+#endif
     keysSent = false;
 
     while (1) {
+        xplrGnssFsm(gnssDvcPrfId);
+        gnssState = xplrGnssGetCurrentState(gnssDvcPrfId);
+
+        switch (gnssState) {
+            case XPLR_GNSS_STATE_DEVICE_READY:
+                if (dvcLbandConfig.destHandler == NULL) {
+                    gnssHandler = xplrGnssGetHandler(gnssDvcPrfId);
+                    if (gnssHandler != NULL) {
+                        espRet = xplrLbandSetDestGnssHandler(lbandDvcPrfId, gnssHandler);
+                        if (espRet == OK) {
+                            espRet = xplrLbandSendCorrectionDataAsyncStart(lbandDvcPrfId);
+                            if (espRet != ESP_OK) {
+                                APP_CONSOLE(E, "Failed to get start Lband Async sender!");
+                                appHaltExecution();
+                            } else {
+                                APP_CONSOLE(D, "Successfully started Lband Async sender!");
+                            }
+                        }
+                    } else {
+                        APP_CONSOLE(E, "Failed to get GNSS handler!");
+                        appHaltExecution();
+                    }
+                }
+                appPrintLocation(APP_LOCATION_PRINT_PERIOD);
+#if 1 == APP_PRINT_IMU_DATA
+                appPrintDeadReckoning(APP_DEAD_RECKONING_PRINT_PERIOD);
+#endif
+                break;
+
+            case XPLR_GNSS_STATE_DEVICE_RESTART:
+                if (dvcLbandConfig.destHandler != NULL) {
+                    espRet = xplrLbandSendCorrectionDataAsyncStop(lbandDvcPrfId);
+                    if (espRet != ESP_OK) {
+                        APP_CONSOLE(E, "Failed to get stop Lband Async sender!");
+                        appHaltExecution();
+                    } else {
+                        APP_CONSOLE(D, "Successfully stoped Lband Async sender!");
+                        gnssHandler = NULL;
+                    }
+                }
+                break;
+
+            case XPLR_GNSS_STATE_ERROR:
+                APP_CONSOLE(E, "GNSS in error state");
+                xplrLbandSendCorrectionDataAsyncStop(lbandDvcPrfId);
+                gnssHandler = NULL;
+                appHaltExecution();
+                break;
+
+            default:
+                break;
+        }
+
         wifistarterErr = xplrWifiStarterFsm();
 
         if (xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_CONNECT_OK) {
-            if (xplrMqttWifiGetCurrentState(&mqttClient) == XPLR_MQTTWIFI_STATE_UNINIT || 
+            if (xplrMqttWifiGetCurrentState(&mqttClient) == XPLR_MQTTWIFI_STATE_UNINIT ||
                 xplrMqttWifiGetCurrentState(&mqttClient) == XPLR_MQTTWIFI_STATE_DISCONNECTED_OK) {
                 appMqttInit();
                 xplrMqttWifiStart(&mqttClient);
@@ -232,10 +363,16 @@ void app_main(void)
              * Subscribe to some topics
              */
             case XPLR_MQTTWIFI_STATE_CONNECTED:
-                espRet = xplrMqttWifiSubscribeToTopicArray(&mqttClient, topicArray, ELEMENTCNT(topicArray), XPLR_MQTTWIFI_QOS_LVL_0);
-                if (espRet != ESP_OK) {
-                    APP_CONSOLE(E, "xplrMqttWifiSubscribeToTopicArray failed!");
-                    appHaltExecution();
+                gnssState = xplrGnssGetCurrentState(gnssDvcPrfId);
+                if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                    espRet = xplrMqttWifiSubscribeToTopicArray(&mqttClient,
+                                                               topicArray,
+                                                               ELEMENTCNT(topicArray),
+                                                               XPLR_MQTTWIFI_QOS_LVL_0);
+                    if (espRet != ESP_OK) {
+                        APP_CONSOLE(E, "xplrMqttWifiSubscribeToTopicArray failed!");
+                        appHaltExecution();
+                    }
                 }
                 break;
 
@@ -250,24 +387,31 @@ void app_main(void)
                  * If the user does not use it it will be discarded.
                  */
                 if (xplrMqttWifiReceiveItem(&mqttClient, &mqttMessage) == XPLR_MQTTWIFI_ITEM_OK) {
-                    if (strcmp(mqttMessage.topic, APP_KEYS_TOPIC) == 0) {
-                        espRet = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
-                        if (espRet != ESP_OK) {
-                           APP_CONSOLE(E, "Failed to send decryption keys!");
-                           appHaltExecution();
-                        } else {
-                            APP_CONSOLE(I, "Decryption keys sent successfully!");
-                            keysSent = true;
+                    /**
+                     * Do not send data if GNSS is not in ready state.
+                     * The device might not be initialized and the device handler
+                     * would be NULL
+                     */
+                    if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                        if (strcmp(mqttMessage.topic, APP_KEYS_TOPIC) == 0) {
+                            espRet = xplrGnssSendDecryptionKeys(gnssDvcPrfId, mqttMessage.data, mqttMessage.dataLength);
+                            if (espRet != ESP_OK) {
+                                APP_CONSOLE(E, "Failed to send decryption keys!");
+                                appHaltExecution();
+                            } else {
+                                APP_CONSOLE(I, "Decryption keys sent successfully!");
+                                keysSent = true;
+                            }
                         }
                     }
 
                     if (strcmp(mqttMessage.topic, APP_FREQ_TOPIC) == 0) {
-                        espRet = xplrLbandSetFrequencyFromMqtt(0, mqttMessage.data, lbandRegion);
+                        espRet = xplrLbandSetFrequencyFromMqtt(lbandDvcPrfId, mqttMessage.data, APP_REGION_FREQUENCY);
                         if (espRet != ESP_OK) {
-                           APP_CONSOLE(E, "Failed to set frequency!");
-                           appHaltExecution();
+                            APP_CONSOLE(E, "Failed to set frequency!");
+                            appHaltExecution();
                         } else {
-                            frequency = xplrLbandGetFrequency(0);
+                            frequency = xplrLbandGetFrequency(lbandDvcPrfId);
                             if (frequency == 0) {
                                 APP_CONSOLE(I, "No LBAND frequency is set");
                             }
@@ -280,13 +424,6 @@ void app_main(void)
             default:
                 break;
         }
-
-        /**
-         * Print location every APP_LOCATION_PRINT_PERIOD secs
-         */
-        appPrintLocation(APP_LOCATION_PRINT_PERIOD);
-
-
 
         /**
          * We lost WiFi connection.
@@ -304,11 +441,11 @@ void app_main(void)
          * If you request a hard disconnect then the client handler
          * and callback are destroyed and so is autoreconnect.
          */
-        if ((requestDc == false) && 
+        if ((requestDc == false) &&
             ((xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_DISCONNECT_OK) ||
              (xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_SCHEDULE_RECONNECT))) {
-        
-             if (mqttClient.handler != NULL) {
+
+            if (mqttClient.handler != NULL) {
                 xplrMqttWifiHardDisconnect(&mqttClient);
             }
 
@@ -325,6 +462,30 @@ void app_main(void)
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DESCRIPTORS
  * -------------------------------------------------------------- */
+
+static void appInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLog_error_t err = xplrLogInit(&errorLog,
+                                      XPLR_LOG_DEVICE_ERROR,
+                                      errorLogFilename,
+                                      logFileMaxSize,
+                                      logFileMaxSizeType);
+    if (err == XPLR_LOG_OK) {
+        errorLog.logEnable = true;
+        err = xplrLogInit(&appLog,
+                          XPLR_LOG_DEVICE_INFO,
+                          appLogFilename,
+                          logFileMaxSize,
+                          logFileMaxSizeType);
+    }
+    if (err == XPLR_LOG_OK) {
+        appLog.logEnable = true;
+    } else {
+        APP_CONSOLE(E, "Error initializing logging...");
+    }
+#endif
+}
 
 /*
  * Initialize XPLR-HPG kit using its board file
@@ -353,6 +514,78 @@ static void appInitWiFi(void)
 }
 
 /**
+ * Populates gnss settings
+ */
+static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
+{
+    /**
+    * Pin numbers are those of the MCU: if you
+    * are using an MCU inside a u-blox module the IO pin numbering
+    * for the module is likely different that from the MCU: check
+    * the data sheet for the module to determine the mapping
+    * DEVICE i.e. module/chip configuration: in this case a gnss
+    * module connected via UART
+    */
+    gnssCfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
+    gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.i2cAddress = APP_GNSS_I2C_ADDR;
+    gnssCfg->hw.dvcConfig.transportType = U_DEVICE_TRANSPORT_TYPE_I2C;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.i2c = 0;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.pinSda = BOARD_IO_I2C_PERIPHERALS_SDA;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.pinScl = BOARD_IO_I2C_PERIPHERALS_SCL;
+    gnssCfg->hw.dvcConfig.transportCfg.cfgI2c.clockHertz = 400000;
+
+    gnssCfg->hw.dvcNetwork.type = U_NETWORK_TYPE_GNSS;
+    gnssCfg->hw.dvcNetwork.moduleType = U_GNSS_MODULE_TYPE_M9;
+    gnssCfg->hw.dvcNetwork.devicePinPwr = -1;
+    gnssCfg->hw.dvcNetwork.devicePinDataReady = -1;
+
+    gnssCfg->dr.enable = CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE;
+    gnssCfg->dr.mode = XPLR_GNSS_IMU_CALIBRATION_AUTO;
+    gnssCfg->dr.vehicleDynMode = XPLR_GNSS_DYNMODE_AUTOMOTIVE;
+
+    gnssCfg->corrData.keys.size = 0;
+    gnssCfg->corrData.source = XPLR_GNSS_CORRECTION_FROM_LBAND;
+}
+
+/**
+ * Populates lband settings
+ */
+static void appConfigLbandSettings(xplrLbandDeviceCfg_t *lbandCfg)
+{
+    /**
+    * Pin numbers are those of the MCU: if you
+    * are using an MCU inside a u-blox module the IO pin numbering
+    * for the module is likely different that from the MCU: check
+    * the data sheet for the module to determine the mapping
+    * DEVICE i.e. module/chip configuration: in this case an lband
+    * module connected via UART
+    */
+    lbandCfg->hwConf.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
+    lbandCfg->hwConf.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
+    lbandCfg->hwConf.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
+    lbandCfg->hwConf.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
+    lbandCfg->hwConf.dvcConfig.deviceCfg.cfgGnss.i2cAddress = APP_LBAND_I2C_ADDR;
+    lbandCfg->hwConf.dvcConfig.transportType = U_DEVICE_TRANSPORT_TYPE_I2C;
+    lbandCfg->hwConf.dvcConfig.transportCfg.cfgI2c.i2c = 0;
+    lbandCfg->hwConf.dvcConfig.transportCfg.cfgI2c.pinSda = BOARD_IO_I2C_PERIPHERALS_SDA;
+    lbandCfg->hwConf.dvcConfig.transportCfg.cfgI2c.pinScl = BOARD_IO_I2C_PERIPHERALS_SCL;
+    lbandCfg->hwConf.dvcConfig.transportCfg.cfgI2c.clockHertz = 400000;
+
+    lbandCfg->hwConf.dvcNetwork.type = U_NETWORK_TYPE_GNSS;
+    lbandCfg->hwConf.dvcNetwork.moduleType = U_GNSS_MODULE_TYPE_M9;
+    lbandCfg->hwConf.dvcNetwork.devicePinPwr = -1;
+    lbandCfg->hwConf.dvcNetwork.devicePinDataReady = -1;
+
+    lbandCfg->destHandler = NULL;
+
+    lbandCfg->corrDataConf.freq = 0;
+    lbandCfg->corrDataConf.region = APP_REGION_FREQUENCY;
+}
+
+/**
  * Makes all required initializations for location
  * modules/devices
  */
@@ -367,26 +600,16 @@ static void appInitLocationDevices(void)
         appHaltExecution();
     }
 
-    APP_CONSOLE(D, "Waiting for GNSS device to come online!");
-    espRet = xplrGnssStartDeviceDefaultSettings(0, XPLR_GNSS_I2C_ADDR);
+    appConfigGnssSettings(&dvcGnssConfig);
+    espRet = xplrGnssStartDevice(gnssDvcPrfId, &dvcGnssConfig);
     if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "UbxLib init failed!");
-        appHaltExecution();
-    }
-    
-    /**
-     * Setting desired correction data source
-     */
-    espRet = xplrGnssSetCorrectionDataSource(0, XPLR_GNSS_CORRECTION_FROM_LBAND);
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "Failed to set correction data source!");
+        APP_CONSOLE(E, "Failed to start GNSS device!");
         appHaltExecution();
     }
 
     APP_CONSOLE(D, "Waiting for LBAND device to come online!");
-    espRet = xplrLbandStartDeviceDefaultSettings(0,
-                                                 XPLR_LBAND_I2C_ADDR,
-                                                 xplrGnssGetHandler(0));
+    appConfigLbandSettings(&dvcLbandConfig);
+    espRet = xplrLbandStartDevice(gnssDvcPrfId, &dvcLbandConfig);
     if (espRet != ESP_OK) {
         APP_CONSOLE(E, "Lband device config failed!");
         appHaltExecution();
@@ -400,13 +623,7 @@ static void appInitLocationDevices(void)
  */
 static void appPrintDeviceInfos(void)
 {
-    espRet = xplrGnssPrintDeviceInfo(0);
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "Failed to print GNSS device info!");
-        appHaltExecution();
-    }
-
-    espRet = xplrLbandPrintDeviceInfo(0);
+    espRet = xplrLbandPrintDeviceInfo(lbandDvcPrfId);
     if (espRet != ESP_OK) {
         APP_CONSOLE(E, "Failed to print LBAND device info!");
         appHaltExecution();
@@ -418,13 +635,18 @@ static void appPrintDeviceInfos(void)
  */
 static void appMqttInit(void)
 {
+    esp_err_t ret;
     /**
      * We declare how many slots a ring buffer should have.
      * You can chose to have more depending on the traffic of your broker.
      * If the ring buffer cannot keep up then you can increase this number
      * to better suit your case.
      */
-    mqttClient.ucd.ringBufferSlotsNumber = 3;
+    ret = xplrMqttWifiSetRingbuffSlotsCount(&mqttClient, 6);
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Failed to set MQTT ringbuffer slots!");
+        appHaltExecution();
+    }
 
     /**
      * Settings for MQTT client
@@ -440,7 +662,11 @@ static void appMqttInit(void)
     /**
      * Start MQTT Wi-Fi Client
      */
-    xplrMqttWifiInitClient(&mqttClient, &mqttClientConfig);
+    ret = xplrMqttWifiInitClient(&mqttClient, &mqttClientConfig);
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Failed to initialize Mqtt client!");
+        appHaltExecution();
+    }
 }
 
 /**
@@ -449,21 +675,78 @@ static void appMqttInit(void)
  */
 static void appPrintLocation(uint8_t periodSecs)
 {
-    if ((MICROTOSEC(esp_timer_get_time()) - timeNow >= periodSecs) && xplrGnssHasMessage(0)) {
-        espRet = xplrGnssPrintLocation(0);
+    if ((MICROTOSEC(esp_timer_get_time() - timePrevLoc) >= periodSecs) &&
+        xplrGnssHasMessage(gnssDvcPrfId)) {
+        espRet = xplrGnssGetLocationData(gnssDvcPrfId, &locData);
         if (espRet != ESP_OK) {
-            APP_CONSOLE(E, "Failed to print location!");
-            appHaltExecution();
+            APP_CONSOLE(W, "Could not get gnss location data!");
+        } else {
+            espRet = xplrGnssPrintLocationData(&locData);
+            if (espRet != ESP_OK) {
+                APP_CONSOLE(W, "Could not print gnss location data!");
+            }
         }
 
-        espRet = xplrGnssPrintGmapsLocation(0);
+        espRet = xplrGnssPrintGmapsLocation(gnssDvcPrfId);
         if (espRet != ESP_OK) {
-            APP_CONSOLE(E, "Failed to print GMaps location!");
-            appHaltExecution();
+            APP_CONSOLE(W, "Could not print Gmaps location!");
         }
 
-        timeNow = MICROTOSEC(esp_timer_get_time());
+        timePrevLoc = esp_timer_get_time();
     }
+}
+
+#if 1 == APP_PRINT_IMU_DATA
+/**
+ * Prints Dead Reckoning data over a period (seconds).
+ * Declare a period in seconds to print location.
+ */
+static void appPrintDeadReckoning(uint8_t periodSecs)
+{
+    if ((MICROTOSEC(esp_timer_get_time() - timePrevDr) >= periodSecs) &&
+        xplrGnssIsDrEnabled(gnssDvcPrfId)) {
+        espRet = xplrGnssGetImuAlignmentInfo(gnssDvcPrfId, &imuAlignmentInfo);
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(W, "Could not get Imu alignment info!");
+        }
+
+        espRet = xplrGnssPrintImuAlignmentInfo(&imuAlignmentInfo);
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(W, "Could not print Imu alignment data!");
+        }
+
+        espRet = xplrGnssGetImuAlignmentStatus(gnssDvcPrfId, &imuFusionStatus);
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(W, "Could not get Imu alignment status!");
+        }
+        espRet = xplrGnssPrintImuAlignmentStatus(&imuFusionStatus);
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(W, "Could not print Imu alignment status!");
+        }
+
+        if (xplrGnssIsDrCalibrated(gnssDvcPrfId)) {
+            espRet = xplrGnssGetImuVehicleDynamics(gnssDvcPrfId, &imuVehicleDynamics);
+            if (espRet != ESP_OK) {
+                APP_CONSOLE(W, "Could not get Imu vehicle dynamic data!");
+            }
+
+            espRet = xplrGnssPrintImuVehicleDynamics(&imuVehicleDynamics);
+            if (espRet != ESP_OK) {
+                APP_CONSOLE(W, "Could not print Imu vehicle dynamic data!");
+            }
+        }
+
+        timePrevDr = esp_timer_get_time();
+    }
+}
+#endif
+
+static void appDeInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLogDeInit(&appLog);
+    xplrLogDeInit(&errorLog);
+#endif
 }
 
 /**
@@ -471,6 +754,7 @@ static void appPrintLocation(uint8_t periodSecs)
  */
 static void appHaltExecution(void)
 {
+    appDeInitLog();
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

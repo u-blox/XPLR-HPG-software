@@ -1,0 +1,218 @@
+![u-blox](./../../../media/shared/logos/ublox_logo.jpg)
+
+<br>
+<br>
+
+# NTRIP Correction Data over Cellular
+
+## Description
+
+The example provided demonstrates how to connect to an NTRIP caster in order to get correction data for the **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module. The application depends on provided libraries for communicating with the NTRIP caster of your choice, accessing the correct mountpoint and retrieving RTCM correction data. To test this example you must have access to RTK correction service, the necessary credentials to connect to the NTRIP caster (username & password) and a mountpoint located within a ~50km radius.
+
+**NOTE**: If you currently don't have access to a NTRIP caster, you can use a free one like **[RTK2GO](http://www.rtk2go.com)**.
+
+Communication with the NTRIP caster is provided by [LARA-R6](https://www.u-blox.com/en/product/lara-r6-series) cellular module. Please make sure that you have a data plan activated on the inserted SIM card.
+
+<br>
+
+**NOTE**: In the current version **Dead Reckoning** does not support **Wheel Tick**. This will be added in a future release.
+
+
+When running the code, depending on the debug settings configured, messages are printed to the debug UART providing useful information to the user. Upon successful connection the NTRIP client and adequate GNSS signal, diagnostic messages are printed similar to the ones below:  
+**Dead Reckoning disabled**
+```
+======== Location Info ========
+Location type: 1
+Location fix type: 3D\DGNSS\RTK-FLOAT
+Location latitude: 38.048181 (raw: 380481806)
+Location longitude: 23.809044 (raw: 238090444)
+Location altitude: 227.760000 (m) | 227760 (mm)
+Location radius: 0.242000 (m) | 242 (mm)
+Speed: 0.082800 (km/h) | 0.023000 (m/s) | 23 (mm/s)
+Estimated horizontal accuracy: 0.2417 (m) | 241.70 (mm)
+Estimated vertical accuracy: 0.2298 (m) | 229.80 (mm)
+Satellite number: 28
+Time UTC: 09:57:35
+Date UTC: 06.06.2023
+Calendar Time UTC: Tue 06.06.2023 09:57:35
+===============================
+```
+**Dead Reckoning enabled and printing flag APP_PRINT_IMU_DATA is set**
+```
+...
+...
+...
+I [(131302) xplrGnss|xplrGnssPrintImuAlignmentInfo|1621|: Printing Imu Alignment Info.
+====== Imu Alignment Info ======
+Calibration Mode: Manual
+Calibration Status: user-defined
+Aligned yaw: 31.39
+Aligned pitch: 5.04
+Aligned roll: -178.85
+-------------------------------
+I [(131328) xplrGnss|xplrGnssPrintImuAlignmentStatus|1696|: Printing Imu Alignment Statuses.
+===== Imu Alignment Status ====
+Fusion mode: 0
+Number of sensors: 7
+-------------------------------
+Sensor type: Gyroscope Z Angular Rate
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Wheel Tick Single Tick
+Used: 0 | Ready: 0
+Sensor observation frequency: 0 Hz
+Sensor faults: Missing Meas
+-------------------------------
+Sensor type: Gyroscope Y Angular Rate
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Gyroscope X Angular Rate
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Accelerometer X Specific Force
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Accelerometer Y Specific Force
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Accelerometer Z Specific Force
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+I [(131441) xplrGnss|xplrGnssPrintImuVehicleDynamics|1778|: Printing vehicle dynamics
+======= Vehicle Dynamics ======
+----- Meas Validity Flags -----
+Gyro  X: 0 | Gyro  Y: 0 | Gyro  Z: 0
+Accel X: 0 | Accel Y: 0 | Accel Z: 0
+- Dynamics Compensated Values -
+X-axis angular rate: 0.000 deg/s
+Y-axis angular rate: 0.000 deg/s
+Z-axis angular rate: 0.000 deg/s
+X-axis acceleration (gravity-free): 0.00 m/s^2
+Y-axis acceleration (gravity-free): 0.00 m/s^2
+Z-axis acceleration (gravity-free): 0.00 m/s^2
+===============================
+...
+...
+...
+```
+
+**NOTE:** Vehicle dynamics will only be printed if the module has been calibrated.
+
+<br>
+
+## Build instructions
+Building this example requires to edit a minimum set of files in order to select the corresponding source files and configure cellular and NTRIP settings using Kconfig.
+Please follow the steps described bellow:
+
+1. Open the `XPLR-HPG-SW` folder in VS code.
+2. In [CMakeLists](./../../../CMakeLists.txt) select the `hpg_cell_ntrip_correction` project, making sure that all other projects are commented out:
+   ```
+   ...
+   # Cellular examples
+   #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_register")
+   #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_certs")
+   #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_ztp")
+   set(ENV{XPLR_HPG_PROJECT} "hpg_cell_ntrip_correction")
+   ...
+   ```
+3. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the debug UART.
+   ```
+   ...
+   #define XPLR_HPGLIB_SERIAL_DEBUG_ENABLED   (1U)
+   ...
+   #define XPLR_BOARD_DEBUG_ACTIVE            (1U)
+   #define XPLRCOM_DEBUG_ACTIVE               (1U)
+   ...
+   #define XPLRHELPERS_DEBUG_ACTIVE           (1U)
+   #define XPLRGNSS_DEBUG_ACTIVE              (1U)
+   ...
+   #define XPLRCELL_NTRIP_DEBUG_ACTIVE        (1U)
+   ...
+   ```
+4. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
+   For more information about the **logging service of hpglib** follow **[this guide](./../../../components/hpglib/src/log_service/README.md)**
+   ```
+   ...
+   #define XPLR_HPGLIB_LOG_ENABLED                         1U
+   ...
+   #define XPLRGNSS_LOG_ACTIVE                            (1U)
+   ...
+   #define XPLRCOM_LOG_ACTIVE                             (1U)
+   ...
+   #define XPLRLOCATION_LOG_ACTIVE                        (1U)
+   ...
+   #define XPLRCELL_NTRIP_LOG_ACTIVE                      (1U)
+   ...
+
+   ```
+5. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
+6. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
+7. Navigate to the `Board Options` section and select the board you wish to build the example for.
+8. Navigate to the [Dead Reckoning](./../../../docs/README_dead_reckoning.md) and Enable/Disable it according to your needs.
+9. Go to `XPLR HPG Options -> Cellular Settings -> APN value of cellular provider` and input the **APN** of your cellular provider.
+10.  Go to `XPLR HPG Options -> NTRIP Client settings` and configure as needed.
+11. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
+<br>
+
+## Kconfig/Build Definitions-Macros
+This is a description of definitions and macros configured by **[Kconfig](./../../../docs/README_kconfig.md)**.\
+In most case these values can be directly overwritten in the source code or just configured by running **[Kconfig](./../../../docs/README_kconfig.md)** before building the code.\
+**[Kconfig](./../../../docs/README_kconfig.md)** is used to make building easier and change certain variables to make app configuration easier, without the need of doing any modifications to the code.
+
+Name | Default value | Belongs to | Description | Manual overwrite notes
+--- | --- | --- | --- | ---
+**`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" | **[boards](./../../../components/boards)** | Board variant to build firmware for.|
+**`CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE`** | "Disabled" | **[hpg_gnss_lband_correction](./main/hpg_gnss_lband_correction.c)** | Enables or Disables Dead Reckoning functionality. |
+**`XPLR_CELL_APN`** | "internet" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | APN value of cellular provider to register. | You will have to replace this value with your specific APN of your cellular provider, either by directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.
+**`CONFIG_XPLR_CELL_NTRIP_HOST`** | "host" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster URL/IP address
+**`CONFIG_XPLR_CELL_NTRIP_PORT`** | "2101" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster port
+**`CONFIG_XPLR_CELL_NTRIP_MOUNTPOINT`** | "mountpoint" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster mountpoint
+**`CONFIG_XPLR_CELL_NTRIP_USERAGENT`** | "NTRIP_XPLR_HPG" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | User-Agent
+**`CONFIG_XPLR_CELL_NTRIP_USE_AUTH`** | "True" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Use authentication
+**`CONFIG_XPLR_CELL_NTRIP_USERNAME`** | "username" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Username
+**`CONFIG_XPLR_CELL_NTRIP_PASSWORD`** | "password" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Password
+<br>
+
+## Local Definitions-Macros
+This is a description of definitions and macros found in the sample which are only present in main files.\
+All definitions/macros below are meant to make variables more identifiable.\
+You can change local macros as you wish inside the app.
+
+Name | Description
+--- | ---
+**`APP_PRINT_IMU_DATA`** | Switches dead reckoning printing messages ON or OFF.
+**`APP_SERIAL_DEBUG_ENABLED`** | Switches debug printing messages ON or OFF.
+**`APP_SD_LOGGING_ENABLED`** | Switches logging of the application messages to the SD card ON or OFF.
+**`APP_GNSS_LOC_INTERVAL`** | Frequency, in seconds, of how often we want our print location function \[**`appPrintLocation(void)`**\] to execute. Can be changed as desired.
+**`APP_GNSS_DR_INTERVAL`** | Frequency, in seconds, of how often we want our print dead reckoning data function \[**`gnssDeadReckoningPrint(void)`**\] to execute. Can be changed as desired.
+**`APP_NTRIP_STATE_INTERVAL_SEC`** | Frequency of NTRIP client state logging to console in seconds.
+**`APP_RUN_TIME_SEC`** | Duration, in seconds, for which we want the application to run.
+**`APP_SERIAL_DEBUG_ENABLED`** | Switches application related debug messages ON or OFF.
+**`APP_GNSS_I2C_ADDR`** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
+<br>
+
+## Modules-Components used
+
+Name | Description
+--- | ---
+**[boards](./../../../components/boards)** | Board variant selection.
+**[hpglib/common](./../../../components/hpglib/src/common)** | Common functions.
+**[hpglib/com_service](./../../../components/hpglib/src/com_service/)** | XPLR communication service for cellular module.
+**[hpglib/ntripCellClient_service](./../../../components/hpglib/src/thingstream_service/)** | XPLR NTRIP cellular client.
+**[hpglib/location_services/xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)** | XPLR GNSS location device manager.
+**[hpglib/location_services/location_service_helpers](./../../../components/hpglib/src/location_service/location_service_helpers/)** | Internally used by **[xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)**.
+**[hpglib/log_service](./../../../components/hpglib/src/log_service/)** | XPLR logging service.
+**[hpglib/sd_service](./../../../components/hpglib/src/sd_service/)** | Internally used by **[log_service](./../../../components/hpglib/src/log_service/)**.
+<br>

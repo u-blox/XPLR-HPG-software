@@ -23,6 +23,7 @@
  * please keep #includes to your .c files. */
 
 #include <stdint.h>
+#include "./../../components/hpglib/src/log_service/xplr_log.h"
 
 /** @file
  * @brief This header file defines the types used in thingstream service API.
@@ -45,6 +46,9 @@ extern "C" {
 #define XPLR_THINGSTREAM_PP_TOPIC_NAME_SIZE_MAX (256U)
 #define XPLR_THINGSTREAM_PP_TOPIC_PATH_SIZE_MAX (128U)
 #define XPLR_THINGSTREAM_PP_DKEY_SIZE           (64U)
+#define XPLR_THINGSTREAM_USERNAME_MAX           (64U)
+#define XPLR_THINGSTREAM_PASSWORD_MAX           (128U)
+#define XPLR_THINGSTREAM_CLIENTID_MAX           (64U)
 
 /* ----------------------------------------------------------------
  * PUBLIC TYPES
@@ -74,18 +78,19 @@ typedef enum {
 /** Thingstream Subscription Plan types */
 typedef enum {
     XPLR_THINGSTREAM_PP_PLAN_INVALID = -1,       /**< invalid or not supported supported. */
-    XPLR_THINGSTREAM_PP_PLAN_IP,                 /**< Point Perfect IP data stream*/
-    XPLR_THINGSTREAM_PP_PLAN_LBAND,              /**< Point Perfect L-band data stream*/
-    XPLR_THINGSTREAM_PP_PLAN_IPLBAND             /**< Point Perfect L-band + IP data streams*/
+    XPLR_THINGSTREAM_PP_PLAN_IP,                 /**< PointPerfect IP data stream*/
+    XPLR_THINGSTREAM_PP_PLAN_LBAND,              /**< PointPerfect L-band data stream*/
+    XPLR_THINGSTREAM_PP_PLAN_IPLBAND             /**< PointPerfect L-band + IP data streams*/
 } xplr_thingstream_pp_plan_t;
 
 /** Thingstream Location Service region types. */
 typedef enum {
     XPLR_THINGSTREAM_PP_SERVER_INVALID = -1,    /**< invalid or not supported supported. */
-    XPLR_THINGSTREAM_PP_SERVER_ADDRESS,         /**< point perfect broker address. */
-    XPLR_THINGSTREAM_PP_SERVER_CERT,            /**< point perfect client certificate. */
-    XPLR_THINGSTREAM_PP_SERVER_KEY,             /**< point perfect client private key. */
-    XPLR_THINGSTREAM_PP_SERVER_ID               /**< point perfect client id. */
+    XPLR_THINGSTREAM_PP_SERVER_ADDRESS,         /**< PointPerfect broker address. */
+    XPLR_THINGSTREAM_PP_SERVER_CERT,            /**< PointPerfect client certificate. */
+    XPLR_THINGSTREAM_PP_SERVER_KEY,             /**< PointPerfect client private key. */
+    XPLR_THINGSTREAM_PP_SERVER_ID,              /**< PointPerfect client id. */
+    XPLR_THINGSTREAM_PP_SERVER_ROOTCA           /**< aws root ca certificate*/
 } xplr_thingstream_pp_serverInfo_type_t;
 
 /** Thingstream Location Service region types. */
@@ -103,6 +108,24 @@ typedef enum {
     XPLR_THINGSTREAM_PP_TOPIC_ALL_US,          /**< all us related topics. */
     XPLR_THINGSTREAM_PP_TOPIC_ALL              /**< all us related topics. */
 } xplr_thingstream_pp_topic_type_t;
+
+/** Thingstream Communication Thing Credential Types*/
+typedef enum {
+    XPLR_THINGSTREAM_COMM_CRED_INVALID = -1,   /**< invalid or not supported. */
+    XPLR_THINGSTREAM_COMM_CRED_SERVER_URL,     /**< Thingstream MQTT broker's url. */
+    XPLR_THINGSTREAM_COMM_CRED_DEVICE_ID,      /**< Communication Thing's Client ID. */
+    XPLR_THINGSTREAM_COMM_CRED_USERNAME,       /**< Communication Thing's Username. */
+    XPLR_THINGSTREAM_COMM_CRED_PASSWORD,       /**< Communication Thing's Password. */
+    XPLR_THINGSTREAM_COMM_CRED_CERT,           /**< Communication Thing's Client Certificate. */
+    XPLR_THINGSTREAM_COMM_CRED_KEY             /**< Communication Thing's Client Key. */
+} xplr_thingstream_comm_cred_type_t;
+
+/** Thingstream Connection types*/
+typedef enum {
+    XPLR_THINGSTREAM_PP_CONN_INVALID = -1,     /**< invalid or not supported*/
+    XPLR_THINGSTREAM_PP_CONN_WIFI,             /**< connection via WiFi*/
+    XPLR_THINGSTREAM_PP_CONN_CELL              /**< connection via cellular*/
+} xplr_thingstream_pp_conn_type_t;
 
 typedef struct __attribute__((packed)) xplr_thingstream_server_settings_type {
     char serverUrl[XPLR_THINGSTREAM_URL_SIZE_MAX];
@@ -166,9 +189,24 @@ typedef struct __attribute__((packed)) xplr_thingstream_pp_settings_type {
     size_t numOfTopics;
 } xplr_thingstream_pp_settings_t;
 
+typedef struct __attribute__((packed)) xplr_thingstream_comm_thing_type {
+    char brokerAddress[XPLR_THINGSTREAM_URL_SIZE_MAX];  /**< MQTT broker address. */
+    uint16_t brokerPort;                                /**< MQTT broker port. */
+    char deviceId[XPLR_THINGSTREAM_CLIENTID_MAX];       /**< Client ID to use in MQTT broker. */
+    char username[XPLR_THINGSTREAM_USERNAME_MAX];       /**< Username to use in MQTT broker */
+    char password[XPLR_THINGSTREAM_PASSWORD_MAX];       /**< Password to use in MQTT broker */
+    char clientKey[XPLR_THINGSTREAM_CERT_SIZE_MAX];     /**< client private key used in broker. */
+    char clientCert[XPLR_THINGSTREAM_CERT_SIZE_MAX];    /**< client certificate used in broker. */
+    xplr_thingstream_pp_topic_t topicList[XPLR_THINGSTREAM_PP_NUMOF_TOPICS_MAX];
+    size_t numOfTopics;
+    xplrLog_t *logCfg;                                  /**< Pointer to the log struct of the module. */
+} xplr_thingstream_comm_thing_t;
+
 typedef struct __attribute__((packed)) xplr_thingstream_type {
     xplr_thingstream_server_settings_t server;
     xplr_thingstream_pp_settings_t pointPerfect;
+    xplr_thingstream_pp_conn_type_t connType;
+    xplrLog_t *logCfg;
 } xplr_thingstream_t;
 
 #ifdef __cplusplus

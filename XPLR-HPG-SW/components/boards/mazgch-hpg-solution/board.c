@@ -52,7 +52,8 @@
 typedef enum board_gpio_config_type {
     BOARD_GPIO_CONFIG_INVALID = -1,
     BOARD_GPIO_CONFIG_LTE,
-    BOARD_GPIO_CONFIG_LEDS
+    BOARD_GPIO_CONFIG_LEDS,
+    BOARD_GPIO_CONFIG_SD
 } board_gpio_config_t;
 
 typedef struct board_details_type {
@@ -95,12 +96,13 @@ static xplr_board_error_t board_deconfig_default_gpios(board_gpio_config_t gpio_
 
 xplr_board_error_t xplrBoardInit(void)
 {
-    esp_err_t err[2];
+    esp_err_t err[3];
     xplr_board_error_t ret;
 
     err[0] = board_config_default_gpios(BOARD_GPIO_CONFIG_LEDS);
     err[1] = board_config_default_gpios(BOARD_GPIO_CONFIG_LTE);
-    for (int i = 0; i < 2; i++) {
+    err[2] = board_config_default_gpios(BOARD_GPIO_CONFIG_SD);
+    for (int i = 0; i < 3; i++) {
         if (err[i] != ESP_OK) {
             ret = XPLR_BOARD_ERROR;
             break;
@@ -274,6 +276,17 @@ xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode)
     return ret;
 }
 
+xplr_board_error_t xplrBoardDetectSd(void)
+{
+    /*Check if Card Detect Pin is Low*/
+    int lvl = gpio_get_level(BOARD_IO_SD_DETECT);
+    if (lvl == 0) {
+        return XPLR_BOARD_ERROR_OK;
+    } else {
+        return XPLR_BOARD_ERROR;
+    }
+}
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
@@ -343,7 +356,21 @@ static xplr_board_error_t board_config_default_gpios(board_gpio_config_t gpio_id
                 BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LTE reset failed", ret);
             }
             break;
-
+        case BOARD_GPIO_CONFIG_SD:
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            io_conf.mode = GPIO_MODE_INPUT;
+            io_conf.pin_bit_mask = (1ULL << BOARD_IO_SD_DETECT);
+            io_conf.pull_down_en = 0;
+            io_conf.pull_up_en = 0;
+            err = gpio_config(&io_conf);
+            if (err != ESP_OK) {
+                ret = XPLR_BOARD_ERROR;
+                break;
+            } else {
+                ret = XPLR_BOARD_ERROR_OK;
+            }
+            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "SD card detect pin config failed", ret);
+            break;
         default:
             ret = XPLR_BOARD_ERROR;
             BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "Config resource not found", ret);

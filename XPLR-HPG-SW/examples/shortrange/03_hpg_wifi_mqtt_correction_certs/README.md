@@ -7,21 +7,22 @@
 
 ## Description
 
-The example provided demonstrates how to connect to the **Thingstream** platform and access the **[Point Perfect](https://developer.thingstream.io/guides/location-services/pointperfect-getting-started)** service in order to get correction data for our **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
+The example provided demonstrates how to connect to the **[Thingstream](https://developer.thingstream.io/home)** platform and access the **[PointPerfect](https://developer.thingstream.io/guides/location-services/pointperfect-getting-started)** service in order to get correction data for our **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
 
 IP correction data can be used when no L-Band signal is available in order to get high precision geolocation data. You will have to provide a Wi-Fi connection with internet access.
 
-**[Point Perfect](https://developer.thingstream.io/guides/location-services/pointperfect-getting-started)** service is provided by **Thingstream** through an MQTT broker that we can connect to and subscribe to the required topics.\
+**[PointPerfect](https://developer.thingstream.io/guides/location-services/pointperfect-getting-started)** service is provided by **[Thingstream](https://developer.thingstream.io/home)** through an MQTT broker that we can connect to and subscribe to the required topics.\
 This example uses certificates to achieve a connection to the MQTT broker in contrast to **[Correction data via Wi-Fi MQTT to ZED-F9R using Zero Touch Provisioning](../04_hpg_wifi_mqtt_correction_ztp/)** which uses **Zero Touch Provisioning**.\
 This example is recommended as a starting point since it's quite easier (doesn't involve a ZTP post and setup). Some caveats to consider:
 1. consumes more memory
 2. the user has to download certificate files and copy paste them manually
 3. needs to setup MQTT topics manually
 
-**NOTE**: In the current implementation the GNSS module does **NOT** support **Dead Reckoning** since the internal accelerometer needs to go through a calibration procedure before being able to use that feature. This will be fixed in future release.
+**NOTE**: In the current version **Dead Reckoning** does not support **Wheel Tick**. This will be added in a future release.
 
 When running the code, depending on the debug settings configured, messages are printed to the debug UART providing useful information to the user. Upon MQTT connection and valid geolocation data a set of diagnostics are printed similar to the ones below:
 
+**Dead Reckoning disabled**
 ```
 I [(254200) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [267] bytes.
 I [(255481) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [5349] bytes.
@@ -56,6 +57,78 @@ Satellite number: 27
 Time UTC: 1671709853
 ===============================
 ```
+**Dead Reckoning enabled and printing flag APP_PRINT_IMU_DATA is set**
+```
+...
+...
+...
+I [(131302) xplrGnss|xplrGnssPrintImuAlignmentInfo|1621|: Printing Imu Alignment Info.
+====== Imu Alignment Info =====
+Calibration Mode: Manual
+Calibration Status: user-defined
+Aligned yaw: 31.39
+Aligned pitch: 5.04
+Aligned roll: -178.85
+-------------------------------
+I [(131328) xplrGnss|xplrGnssPrintImuAlignmentStatus|1696|: Printing Imu Alignment Statuses.
+===== Imu Alignment Status ====
+Fusion mode: 0
+Number of sensors: 7
+-------------------------------
+Sensor type: Gyroscope Z Angular Rate
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Wheel Tick Single Tick
+Used: 0 | Ready: 0
+Sensor observation frequency: 0 Hz
+Sensor faults: Missing Meas
+-------------------------------
+Sensor type: Gyroscope Y Angular Rate
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Gyroscope X Angular Rate
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Accelerometer X Specific Force
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Accelerometer Y Specific Force
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+Sensor type: Accelerometer Z Specific Force
+Used: 0 | Ready: 1
+Sensor observation frequency: 50 Hz
+Sensor faults: No Errors
+-------------------------------
+I [(131441) xplrGnss|xplrGnssPrintImuVehicleDynamics|1778|: Printing vehicle dynamics
+======= Vehicle Dynamics ======
+----- Meas Validity Flags -----
+Gyro  X: 0 | Gyro  Y: 0 | Gyro  Z: 0
+Accel X: 0 | Accel Y: 0 | Accel Z: 0
+- Dynamics Compensated Values -
+X-axis angular rate: 0.000 deg/s
+Y-axis angular rate: 0.000 deg/s
+Z-axis angular rate: 0.000 deg/s
+X-axis acceleration (gravity-free): 0.00 m/s^2
+Y-axis acceleration (gravity-free): 0.00 m/s^2
+Z-axis acceleration (gravity-free): 0.00 m/s^2
+===============================
+...
+...
+...
+```
+**NOTE:** Vehicle dynamics will only be printed if the module has been calibrated.
+
 <br>
 
 ## Build instructions
@@ -86,23 +159,38 @@ Please follow the steps described bellow:
    #define XPLRWIFISTARTER_DEBUG_ACTIVE       (1U)
    #define XPLRMQTTWIFI_DEBUG_ACTIVE          (1U)
    ```
-4. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
-5. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
-6. Navigate to the `Board Options` section and select the board you wish to build the example for.
-7. Download the 3 required files from **Thingstream** by following this **[guide](./../../../docs/README_thingstream_certificates.md)**:
+4. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
+   For more information about the **logging service of hpglib** follow **[this guide](./../../../components/hpglib/src/log_service/README.md)**
+   ```
+   ...
+   #define XPLR_HPGLIB_LOG_ENABLED             1U
+   ...
+   #define XPLRGNSS_LOG_ACTIVE                (1U)
+   ...
+   #define XPLRLOCATION_LOG_ACTIVE            (1U)
+   ...
+   #define XPLRWIFISTARTER_LOG_ACTIVE         (1U)
+   ...
+   #define XPLRMQTTWIFI_LOG_ACTIVE            (1U)
+   ...
+
+   ```
+5. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
+6. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
+7. Navigate to the `Board Options` section and select the board you wish to build the example for.
+8. Navigate to the [Dead Reckoning](./../../../docs/README_dead_reckoning.md) and Enable/Disable it according to your needs.
+9. Copy the MQTT **Hostname** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Broker Hostname` and configure your MQTT broker host as needed. Remember to put **`"mqtts://"`** in front.\
+    You can also skip this step since the correct **hostname** is already configured.
+10. Copy the MQTT **Client ID** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Client ID` and configure it as needed.
+11. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point SSID` and configure you **Access Point's SSID** as needed.
+12. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure you **Access Point's Password** as needed.
+13. Download the 3 required files from **Thingstream** by following this **[guide](./../../../docs/README_thingstream_certificates.md)**:
    - **Client Key**
    - **Client Certificate**
    - **Root Certificate**
-8. **Copy and Paste** the contents of **Client Key**, named **device-\[client_id\]-pp-key.pem**, into **client.key** located inside the main folder of the project. Replace everything inside the file.
-9. **Copy and Paste** the contents of **Client Certificate**, named **device-\[client_id\]-pp-cert.crt**, into **client.crt** located inside the main folder of the project. Replace everything inside the file.
-10. **Root Certificate** is already provided as a file **root.crt**. Check if the contents have changed and if yes then copy and Paste the contents of **Root Certificate** into **root.crt** located inside the main folder of the project. Replace everything inside the file.
-11. Copy the MQTT **Hostname** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Broker Hostname` and configure your MQTT broker host as needed. Remember to put **`"mqtts://"`** in front.\
-    You can also skip this step since the correct **hostname** is already configured.
-12. Copy the MQTT **Client ID** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Client ID` and configure it as needed.
-13. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point SSID` and configure you **Access Point's SSID** as needed.
-14. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure you **Access Point's Password** as needed.
-15. **`APP_KEYS_TOPIC "/pp/ubx/0236/Lb"`** Change topic, if needed, according to your correction data plan.
-16. **`APP_CORRECTION_DATA_TOPIC "/pp/Lb/eu"`** Change topic and region, if needed, according to your data plan and geographic location respectively.
+14. **Copy and Paste** the contents of **Client Key**, named **device-\[client_id\]-pp-key.pem**, into **client.key** located inside the main folder of the project. Replace everything inside the file.
+15. **Copy and Paste** the contents of **Client Certificate**, named **device-\[client_id\]-pp-cert.crt**, into **client.crt** located inside the main folder of the project. Replace everything inside the file.
+16. **Root Certificate** is already provided as a file **root.crt**. Check if the contents have changed and if yes then copy and Paste the contents of **Root Certificate** into **root.crt** located inside the main folder of the project. Replace everything inside the file.
 17. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
 
@@ -118,6 +206,7 @@ In most cases, these values can be directly overwritten in the source code or ju
 Name | Default value | Belongs to | Description | Manual overwrite notes
 --- | --- | --- | --- | ---
 **`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" | **[boards](./../../../components/boards)** | Board variant to build firmware for.|
+**`CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE`** | "Disabled" | **[hpg_gnss_lband_correction](./main/hpg_gnss_lband_correction.c)** | Enables or Disables Dead Reckoning functionality. |
 **`CONFIG_XPLR_WIFI_SSID`** | "ssid" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | AP SSID name to try and connect to. | You can replace this value by either directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.v
 **`CONFIG_XPLR_WIFI_PASSWORD`** | "password" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | AP password to try and connect to.| You can replace this value by either directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.
 **`CONFIG_XPLR_MQTTWIFI_CLIENT_ID`** | "MQTT Client ID" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | A unique MQTT client ID as taken from **Thingstream**. | You will have to replace this value to with your specific MQTT client ID, either directly editing source code in the app or using Kconfig.
@@ -131,22 +220,28 @@ You can change local macros as you wish inside the app.
 
 Name | Description 
 --- | --- 
-**`APP_SERIAL_DEBUG_ENABLED 1U`** | Switches debug printing messages ON or OFF
-**`KIB 1024U`** | Helper definition to denote a size of 1 KByte
-**`APP_MQTT_PAYLOAD_BUF_SIZE ((10U) * (KIB))`** | Definition of MQTT buffer size of 10 KBytes.
-**`APP_LOCATION_PRINT_PERIOD 5`** | Period in seconds on how often we want our print location function [**`appPrintLocation(uint8_t periodSecs)`**] to execute. Can be changed as desired.
-**`XPLR_GNSS_I2C_ADDR 0x42`** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
-**`APP_KEYS_TOPIC "/pp/ubx/0236/Lb"`** | Decryption keys distribution topic. Change this according to your needs if needed.
-**`APP_CORRECTION_DATA_TOPIC "/pp/Lb/eu"`** | Correction data distribution topic. Change this according to your needs if needed.
+**`APP_PRINT_IMU_DATA`** | Switches dead reckoning printing messages ON or OFF.
+**`APP_SERIAL_DEBUG_ENABLED `** | Switches debug printing messages ON or OFF.
+**`APP_SD_LOGGING_ENABLED   `** | Switches logging of the application messages to the SD card ON or OFF.
+**`KIB `** | Helper definition to denote a size of 1 KByte
+**`APP_MQTT_PAYLOAD_BUF_SIZE `** | Definition of MQTT buffer size of 10 KBytes.
+**`APP_LOCATION_PRINT_PERIOD `** | Period in seconds on how often we want our print location function \[**`appPrintLocation(uint8_t periodSecs)`**\] to execute. Can be changed as desired.
+**`APP_DEAD_RECKONING_PRINT_PERIOD `** | Period in seconds on how often we want our print dead reckoning data function \[**`appPrintDeadReckoning(uint8_t periodSecs)`**\] to execute. Can be changed as desired.
+**`APP_GNSS_I2C_ADDR `** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
+**`APP_ORIGIN_COUNTRY`** | Correction data region.
+**`APP_CORRECTION_TYPE`** | Thingstream subscription plan.
+**`APP_MAX_TOPICLEN`** | Maximum topic buffer size.
 <br>
 
 ## Modules-Components used
 
 Name | Description 
 --- | --- 
-**[boards](./../../../components/boards)** | Board variant selection
+**[boards](./../../../components/boards)** | Board variant selection.
 **[hpglib/common](./../../../components/hpglib/src/common)** | Common functions.
 **[xplr_wifi_starter](./../../../components/xplr_wifi_starter)** | XPLR Wi-Fi connection manager.
 **[xplr_mqtt](./../../../components/xplr_mqtt)** | XPLR MQTT manager.
 **[hpglib/location_services/xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)** | XPLR GNSS location device manager.
 **[hpglib/location_services/location_service_helpers](./../../../components/hpglib/src/location_service/location_service_helpers/)** | Internally used by **[xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)**.
+**[hpglib/log_service](./../../../components/hpglib/src/log_service/)** | XPLR logging service.
+**[hpglib/sd_service](./../../../components/hpglib/src/sd_service/)** | Internally used by **[log_service](./../../../components/hpglib/src/log_service/)**.

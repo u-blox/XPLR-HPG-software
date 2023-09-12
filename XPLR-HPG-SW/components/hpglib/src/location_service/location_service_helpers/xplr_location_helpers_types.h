@@ -24,33 +24,44 @@
 
 #include <stdint.h>
 #include "./../../../../components/ubxlib/ubxlib.h"
+#include "./../../../../components/hpglib/src/nvs_service/xplr_nvs.h"
 
 /** @file
  * @brief This header file defines the types used in location service service API, mostly
  * location device settings.
  */
 
+/*INDENT-OFF*/
+
+/** Location device NVS struct. 
+ * contains data to be stored in NVS under namespace <id>
+*/
+typedef struct xplrLocNvs_type {
+    xplrNvs_t   nvs;        /**< nvs module to handle operations */
+    char        id[15];     /**< nvs namespace */
+} xplrLocNvs_t;
+
 /**
  * Simple struct basic device settings.
  * It contains the absolute minimum to setup a device handler
  * Used both for GNSS and LBAND version M9 modules
  */
-typedef struct xplrGnssDevBase_type {
-    uDeviceHandle_t   dHandler; /**< ubxlib device handler */
-    uDeviceCfg_t      dConfig;  /**< ubxlib device settings */
-    uNetworkCfgGnss_t dNetwork; /**< ubxlib device network type */
-} xplrGnssDevBase_t;
+typedef struct xplrLocationDevConf_type {
+    uDeviceCfg_t      dvcConfig;  /**< ubxlib device settings */
+    uNetworkCfgGnss_t dvcNetwork; /**< ubxlib device network type */
+} xplrLocationDevConf_t;
 
 /**
  * Simple struct containing some device info
  */
-typedef struct xplrGnssDevInfo_type {
-    uint8_t i2cAddress; /**< I2C address in hex */
-    uint8_t i2cPort;    /**< I2C port as described by ESP-IDF */
-    uint8_t pinSda;     /**< SDA pin value */
-    uint8_t pinScl;     /**< SCL pin value */
-    uint8_t id[5];      /**< Device id array */
-    uGnssVersionType_t pVer;    /**< GNSS/LBAND device version struct */
-} xplrGnssDevInfo_t;
+typedef struct xplrLocDvcInfo_type {
+    uint8_t i2cAddress;     /**< I2C address in hex */
+    uint8_t i2cPort;        /**< I2C port as described by ESP-IDF */
+    uint8_t pinSda;         /**< SDA pin value */
+    uint8_t pinScl;         /**< SCL pin value */
+    uint8_t id[5];          /**< Device id array */
+    uGnssVersionType_t ver; /**< GNSS/LBAND device version struct */
+} xplrLocDvcInfo_t;
+/*INDENT-ON*/
 
 #endif

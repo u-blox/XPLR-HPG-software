@@ -19,6 +19,9 @@ Examples provided are tested and verified to run under Windows using the tools r
 * [ESP-IDF core](https://github.com/espressif/esp-idf/tree/v4.4.2) version 4.4.2
 * [ubxlib for HPG](https://github.com/u-blox/ubxlib/tree/hpg)
 * [CP210x USB-to-Serial driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers?tab=downloads)
+* **LARA** (cellular module) firmware should be: **00.13,A00.01**
+* **ZED-F9R** (GNSS module) firmware should be: **1.30**
+* **NEO-D9S** (LBAND module) firmware should be: **1.04**
 * In case of Wi-Fi dependent examples please make sure that you are using the **2.4GHz** band.
 
 
@@ -50,11 +53,11 @@ The project is structured similar to other ESP-IDF components and examples.
 Examples and components are using relative paths meaning that they are portable across different machines.
 
 ## ESP-IDF Framework
-[Esp-idf](https://www.espressif.com/en/products/sdks/esp-idf) is a software development framework that allows ESP32 users
+[ESP-IDF](https://www.espressif.com/en/products/sdks/esp-idf) is a software development framework that allows ESP32 users
 to start writing code without having to deal with low level drivers in order to access and configure their MCU.
 Furthermore it provides higher level functions and wrappers that enable developers to build a variety of network-connected products.
 
-The framework sits on top of a RTOS namely [freeRTOS](https://www.freertos.org/) thus making easy to create multithreaded applications without
+The framework sits on top of a RTOS namely [FreeRTOS](https://www.freertos.org/) thus making easy to create multithreaded applications without
 dealing with complex timing issues.<br>
 In order to pack everything together and build a project, the ESP-IDF relies on its own tools and compiler.<br>
 The tools provided by Espressif are making use of CMake and KConfig files which when combined together (along with the source code) they create what is known
@@ -64,8 +67,12 @@ as an "idf-component".
 According to Espressif each project contains one or more components which can be seen as libraries.<br>
 A component is any directory in the ```COMPONENT_DIRS``` which contains a ```CMAKELists.txt``` file.<br>
 XPLR-HPG-SW repository is structured as such all the components required to build any of the examples are placed under a common folder located in the root folder ([components](./components/)).<br>
-At the root of the repository you will find 2 files, namely [project.cmake](./project.cmake) and [project.mk](./project.mk). Both of these files register the [components](./components) folder to the ESP-IDF toolchain.<br>
+<!-- At the root of the repository you will find 2 files, namely [project.cmake](./project.cmake) and [project.mk](./project.mk). Both of these files register the [components](./components) folder to the ESP-IDF toolchain.<br>
 The difference is that ```.cmake``` file is used for registering the ```components``` folder in the CMake-based ESP-IDF [build system](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-guides/build-system.html) whereas the ``.mk`` file was used by the older, GNU Make based system.<br>
+For more info regarding the ESP-IDF components, it is strongly recommended to go through the "Component" sections of the [ESP-IDF build system](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-guides/build-system.html)<br> -->
+
+At the root of the repository you will find the [project.cmake](./project.cmake) file. This  file registers the [components](./components) folder to the ESP-IDF toolchain.<br>
+It is used for registering the ```components``` folder in the CMake-based ESP-IDF [build system](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-guides/build-system.html).<br>
 For more info regarding the ESP-IDF components, it is strongly recommended to go through the "Component" sections of the [ESP-IDF build system](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32/api-guides/build-system.html)<br>
 
 **Note:** In case you need to add more components in the XPLR-HPG-SW repo, remember to update the include  paths into these files.
@@ -74,7 +81,7 @@ For more info regarding the ESP-IDF components, it is strongly recommended to go
 ESP-IDF framework provides a graphical environment, known as ```MenuConfig```, in order to configure many of its components and the freeRTOS.<br>
 Before building any of the examples provided in this repo it is required to run the ```MenuConfig``` once, from the root of the [XPLR-HPG-SW](./) workspace.<br>
 Doing so will require to:
-1. Clone the [XPLR-HPG](https://github.com/u-blox/xplr-hpg) repository. Remember to update included submodules as well.
+1. Clone the [XPLR-HPG](https://github.com/u-blox/XPLR-HPG-software) repository. Remember to update included submodules as well.
 2. Navigate to it, right-click on the ```XPLR-HPG-SW``` folder and ```Open with Code``` (or open the ```VS code``` app and open the folder from the app menu).
 3. Open the [CMakeLists.txt](./CMakeLists.txt) located in the root of the project.
 4. Select the example you wish to build by activating the corresponding ```set(ENV{XPLR_HPG_PROJECT} <example_name>)``` command.

@@ -43,22 +43,36 @@
 /**
  * Debugging print macro
  */
-#if (1 == XPLRHELPERS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRHELPERS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRLOCATION_LOG_ACTIVE))
 #define XPLRHELPERS_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRHELPERS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
+#define XPLRHELPERS_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+    XPLRLOG(&locationLog,buff2Log);
+#elif ((0 == XPLRHELPERS_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
+#define XPLRHELPERS_CONSOLE(tag, message, ...) \
+    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    XPLRLOG(&locationLog,buff2Log)
 #else
 #define XPLRHELPERS_CONSOLE(message, ...) do{} while(0)
 #endif
+
+#define XPLRHELPERS_XTRA_DEBUG 0
 
 /* ----------------------------------------------------------------
  * STATIC TYPES
  * -------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------
+ * EXTERN VARIABLES
+ * -------------------------------------------------------------- */
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
+xplrLog_t locationLog = {0};
+char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL] = {0};
+#endif
+/* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
-
-static int32_t ubxRet;
-static esp_err_t espRet;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -74,55 +88,81 @@ static esp_err_t espRet;
 
 esp_err_t xplrHelpersUbxlibInit(void)
 {
-    ubxRet = uPortInit();
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "ubxlib init failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
+    if (!locationLog.logEnable) {
+        xplrLog_error_t err = xplrLogInit(&locationLog, XPLR_LOG_DEVICE_INFO, "/location.log", 100,
+                                          XPLR_SIZE_MB);
+        if (err == XPLR_LOG_OK) {
+            locationLog.logEnable = true;
+        } else {
+            locationLog.logEnable = false;
+        }
+    }
+#endif
+
+    intRet = uPortInit();
+    if (intRet != 0) {
+        XPLRHELPERS_CONSOLE(E, "ubxlib init failed with error code [%d]!", intRet);
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
     }
 
-    ubxRet = uPortI2cInit();
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "ubxlib I2C port init failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    if (ret == ESP_OK) {
+        intRet = uPortI2cInit();
+        if (intRet != 0) {
+            XPLRHELPERS_CONSOLE(E, "ubxlib I2C port init failed with error code [%d]!", intRet);
+            ret = ESP_FAIL;
+        }
     }
 
-    ubxRet = uDeviceInit();
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "ubxlib device init failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    if (ret == ESP_OK) {
+        intRet = uDeviceInit();
+        if (intRet != 0) {
+            XPLRHELPERS_CONSOLE(E, "ubxlib device init failed with error code [%d]!", intRet);
+            ret = ESP_FAIL;
+        }
     }
 
-    XPLRHELPERS_CONSOLE(D, "ubxlib init ok!");
-    return ESP_OK;
+    if (ret == ESP_OK) {
+        XPLRHELPERS_CONSOLE(D, "ubxlib init ok!");
+    }
+
+    return ret;
 }
 
-esp_err_t xplrHlprLocSrvcDeviceOpen(xplrGnssDevBase_t *dvcBase)
+esp_err_t xplrHlprLocSrvcDeviceOpen(xplrLocationDevConf_t *dvcConf, uDeviceHandle_t *dvcHandler)
 {
-    esp_err_t ret = ESP_OK;
+    esp_err_t ret;
     int32_t intRet = -1;
     uint8_t progCnt = 0;
     uint64_t lastActionTime = MICROTOSEC(esp_timer_get_time());
     uint64_t nowTime = lastActionTime;
 
-    if (dvcBase == NULL) {
-        XPLRHELPERS_CONSOLE(E, "Device pointer is NULL!");
-        ret = ESP_FAIL;
+    if (dvcConf == NULL) {
+        XPLRHELPERS_CONSOLE(E, "dvcConf pointer is NULL!");
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        ret = ESP_OK;
     }
 
     if (ret == ESP_OK) {
         XPLRHELPERS_CONSOLE(D, "Trying to open device.");
         while (((nowTime - lastActionTime) <= XPLR_HLPRLOCSRVC_DEVICE_ONLINE_TIMEOUT) && (intRet != 0)) {
             nowTime = MICROTOSEC(esp_timer_get_time());
-            intRet = uDeviceOpen(&dvcBase->dConfig, &dvcBase->dHandler);
+            intRet = uDeviceOpen(&dvcConf->dvcConfig, dvcHandler);
 
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(100));
             progCnt++;
             /**
              * Roughly print every second so the user knows routine is not stuck
              */
             if (progCnt >= 20) {
-                XPLRHELPERS_CONSOLE(D, 
-                                    "Trying to open device - elapsed time: %llu out of %llu seconds",
+                XPLRHELPERS_CONSOLE(D,
+                                    "Trying to open device - elapsed time: %llu out of %u seconds",
                                     nowTime - lastActionTime,
                                     XPLR_HLPRLOCSRVC_DEVICE_ONLINE_TIMEOUT);
                 progCnt = 0;
@@ -130,14 +170,14 @@ esp_err_t xplrHlprLocSrvcDeviceOpen(xplrGnssDevBase_t *dvcBase)
         }
 
         if (((nowTime - lastActionTime) > XPLR_HLPRLOCSRVC_DEVICE_ONLINE_TIMEOUT)) {
-            XPLRHELPERS_CONSOLE(E, 
-                                "ubxlib device open failed - timeout: [%llu] seconds | ubxlib error code [%d]", 
-                                nowTime - lastActionTime, 
+            XPLRHELPERS_CONSOLE(E,
+                                "ubxlib device open failed - timeout: [%llu] seconds | ubxlib error code [%d]",
+                                nowTime - lastActionTime,
                                 intRet);
             ret = ESP_ERR_TIMEOUT;
         } else {
             if (intRet == 0) {
-                intRet = uNetworkInterfaceUp(dvcBase->dHandler, U_NETWORK_TYPE_GNSS, &dvcBase->dNetwork);
+                intRet = uNetworkInterfaceUp(*dvcHandler, U_NETWORK_TYPE_GNSS, &dvcConf->dvcNetwork);
                 if (intRet == 0) {
                     XPLRHELPERS_CONSOLE(I, "ubxlib device opened!");
                     ret = ESP_OK;
@@ -145,7 +185,7 @@ esp_err_t xplrHlprLocSrvcDeviceOpen(xplrGnssDevBase_t *dvcBase)
                     XPLRHELPERS_CONSOLE(E, "ubxlib interface open failed with error code [%d]", intRet);
                     XPLRHELPERS_CONSOLE(E, "Trying to close device!");
 
-                    xplrHlprLocSrvcDeviceClose(dvcBase);
+                    xplrHlprLocSrvcDeviceClose(dvcHandler);
                     /**
                      * we do not check return for xplrHlprLocSrvcDeviceClose
                      * as long as we are here ret should be ESP_FAIL
@@ -158,270 +198,323 @@ esp_err_t xplrHlprLocSrvcDeviceOpen(xplrGnssDevBase_t *dvcBase)
         }
     }
 
-    XPLRHELPERS_CONSOLE(D, "ubxlib device opened!");
     return ret;
 }
 
-esp_err_t xplrHlprLocSrvcDeviceClose(xplrGnssDevBase_t *dvcBase)
+esp_err_t xplrHlprLocSrvcDeviceOpenNonBlocking(xplrLocationDevConf_t *dvcConf,
+                                               uDeviceHandle_t *dvcHandler)
 {
-    ubxRet = uDeviceClose(dvcBase->dHandler, false);
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "ubxlib device close failed with error code [%d]", ubxRet);
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+
+    if (dvcConf == NULL) {
+        XPLRHELPERS_CONSOLE(E, "dvcConf pointer is NULL!");
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        ret = ESP_OK;
     }
 
-    XPLRHELPERS_CONSOLE(I, "ubxlib device closed!");
-    return ESP_OK;
+    if ((ret == ESP_OK) && (dvcHandler == NULL)) {
+        XPLRHELPERS_CONSOLE(E, "dvcHandler pointer is NULL!");
+        ret = ESP_ERR_INVALID_ARG;
+    }
+
+    if (ret == ESP_OK) {
+        intRet = uDeviceOpen(&dvcConf->dvcConfig, dvcHandler);
+
+        if (intRet == 0) {
+            XPLRHELPERS_CONSOLE(I, "ubxlib device opened!");
+            intRet = uNetworkInterfaceUp(*dvcHandler, U_NETWORK_TYPE_GNSS, &dvcConf->dvcNetwork);
+            if (intRet == 0) {
+                XPLRHELPERS_CONSOLE(I, "Network interface opened!");
+                ret = ESP_OK;
+            } else {
+                ret = ESP_FAIL;
+            }
+        } else {
+            ret = ESP_FAIL;
+        }
+    }
+
+    return ret;
 }
 
-uDeviceHandle_t *xplrHlprLocSrvcGetHandler(xplrGnssDevBase_t *dvcBase)
+esp_err_t xplrHlprLocSrvcDeviceClose(uDeviceHandle_t *dvcHandler)
 {
-    return &dvcBase->dHandler;
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uDeviceClose(*dvcHandler, false);
+    if (intRet == 0) {
+        XPLRHELPERS_CONSOLE(D, "ubxlib device closed!");
+        ret = ESP_OK;
+    } else {
+        XPLRHELPERS_CONSOLE(E, "ubxlib device close failed with error code [%d]", intRet);
+        ret = ESP_FAIL;
+    }
+
+    return ret;
+}
+
+uDeviceHandle_t *xplrHlprLocSrvcGetHandler(uDeviceHandle_t *dvcHandler)
+{
+    return dvcHandler;
 }
 
 esp_err_t xplrHlprLocSrvcUbxlibDeinit(void)
 {
-    ubxRet = uDeviceDeinit();
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "ubxlib device deinit failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uDeviceDeinit();
+    if (intRet == 0) {
+        uPortI2cDeinit();
+        uPortDeinit();
+
+        XPLRHELPERS_CONSOLE(D, "ubxlib deinit ok!");
+        ret = ESP_OK;
+    } else {
+        XPLRHELPERS_CONSOLE(E, "ubxlib device deinit failed with error code [%d]!", intRet);
+        ret = ESP_FAIL;
     }
 
-    uPortI2cDeinit();
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "ubxlib I2C deinit failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
-    }
-
-    uPortDeinit();
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "ubxlib device deinit failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
-    }
-
-    XPLRHELPERS_CONSOLE(I, "ubxlib deinit ok!");
-    return ESP_OK;
+    return ret;
 }
 
-esp_err_t xplrHlprLocSrvcConfigAllDefault(xplrGnssDevBase_t *dvcBase, uint8_t i2cAddress)
-{
-    espRet = xplrHlprLocSrvcDeviceConfigDefault(dvcBase, i2cAddress);
-    if (espRet != ESP_OK) {
-        return ESP_FAIL;
-    }
-
-    espRet = xplrHlprLocSrvcNetworkConfigDefault(dvcBase);
-    if (espRet != ESP_OK) {
-        return ESP_FAIL;
-    }
-
-    XPLRHELPERS_CONSOLE(D, "All default configs set.");
-    return ESP_OK;
-}
-
-esp_err_t xplrHlprLocSrvcDeviceConfigDefault(xplrGnssDevBase_t *dvcBase, uint8_t i2cAddress)
-{
-    dvcBase->dConfig.deviceType = U_DEVICE_TYPE_GNSS;
-
-    dvcBase->dConfig.deviceCfg.cfgGnss.moduleType = U_GNSS_MODULE_TYPE_M9;
-    dvcBase->dConfig.deviceCfg.cfgGnss.pinEnablePower = -1;
-    dvcBase->dConfig.deviceCfg.cfgGnss.pinDataReady = -1;
-    dvcBase->dConfig.deviceCfg.cfgGnss.i2cAddress = i2cAddress;
-
-    dvcBase->dConfig.transportType = U_DEVICE_TRANSPORT_TYPE_I2C;
-
-    dvcBase->dConfig.transportCfg.cfgI2c.i2c = 0;
-    dvcBase->dConfig.transportCfg.cfgI2c.pinSda = BOARD_IO_I2C_PERIPHERALS_SDA;
-    dvcBase->dConfig.transportCfg.cfgI2c.pinScl = BOARD_IO_I2C_PERIPHERALS_SCL;
-    dvcBase->dConfig.transportCfg.cfgI2c.clockHertz = 400000;
-
-    XPLRHELPERS_CONSOLE(D, "Device config set.");
-    return ESP_OK;
-}
-
-esp_err_t xplrHlprLocSrvcNetworkConfigDefault(xplrGnssDevBase_t *dvcBase)
-{
-    dvcBase->dNetwork.type = U_NETWORK_TYPE_GNSS;
-    dvcBase->dNetwork.moduleType = U_GNSS_MODULE_TYPE_M9;
-    dvcBase->dNetwork.devicePinPwr = -1;
-    dvcBase->dNetwork.devicePinDataReady = -1;
-
-    XPLRHELPERS_CONSOLE(D, "Network config set.");
-    return ESP_OK;
-}
-
-esp_err_t xplrHlprLocSrvcSetDeviceConfig(xplrGnssDevBase_t *dvcBase, uDeviceCfg_t *sdConfig)
-{
-    if (sdConfig == NULL || dvcBase == NULL) {
-        XPLRHELPERS_CONSOLE(E, "One of the 2 structs is NULL!");
-        return ESP_FAIL;
-    }
-
-    memcpy(&dvcBase->dConfig, sdConfig, sizeof(uDeviceCfg_t));
-
-    XPLRHELPERS_CONSOLE(D, "Device config set.");
-    return ESP_OK;
-}
-
-esp_err_t xplrHlprLocSrvcSetNetworkConfig(xplrGnssDevBase_t *dvcBase, uNetworkCfgGnss_t *sdNetwork)
-{
-    if (sdNetwork == NULL || dvcBase == NULL) {
-        XPLRHELPERS_CONSOLE(E, "One of the 2 structs is NULL!");
-        return ESP_FAIL;
-    }
-
-    memcpy(&dvcBase->dNetwork, sdNetwork, sizeof(uNetworkCfgGnss_t));
-
-    XPLRHELPERS_CONSOLE(D, "Network config set.");
-    return ESP_OK;
-}
-
-esp_err_t xplrHlprLocSrvcOptionSingleValSet(xplrGnssDevBase_t *dvcBase,
+esp_err_t xplrHlprLocSrvcOptionSingleValSet(uDeviceHandle_t *dvcHandler,
                                             uint32_t keyId,
                                             uint64_t value,
                                             uGnssCfgValTransaction_t transaction,
-                                            uGnssCfgValLayer_t layer)
+                                            uint32_t layer)
 {
-    ubxRet = uGnssCfgValSet(dvcBase->dHandler, keyId, value, transaction, layer);
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(D, "SingleValSet error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uGnssCfgValSet(*dvcHandler, keyId, value, transaction, layer);
+    if (intRet == 0) {
+        XPLRHELPERS_CONSOLE(D, "Set configuration value.");
+        ret = ESP_OK;
+    } else if (intRet == U_ERROR_COMMON_TIMEOUT) {
+        XPLRHELPERS_CONSOLE(W, "SingleValSet timed out!");
+        ret = ESP_ERR_TIMEOUT;
+    } else {
+        XPLRHELPERS_CONSOLE(E, "SingleValSet error code [%d]!", intRet);
+        ret = ESP_FAIL;
     }
 
-    XPLRHELPERS_CONSOLE(D, "Set configuration value.");
-    return ESP_OK;
+    return ret;
 }
 
-esp_err_t xplrHlprLocSrvcOptionMultiValSet(xplrGnssDevBase_t *dvcBase,
-                                           const uGnssCfgVal_t *pList,
+esp_err_t xplrHlprLocSrvcOptionMultiValSet(uDeviceHandle_t *dvcHandler,
+                                           const uGnssCfgVal_t *list,
                                            size_t numValues,
                                            uGnssCfgValTransaction_t transaction,
-                                           uGnssCfgValLayer_t layer)
+                                           uint32_t layer)
 {
-    ubxRet = uGnssCfgValSetList(dvcBase->dHandler, pList, numValues, transaction, layer);
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(D, "MultiValSet error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uGnssCfgValSetList(*dvcHandler, list, numValues, transaction, layer);
+    if (intRet == 0) {
+        XPLRHELPERS_CONSOLE(D, "Set multiple configuration values.");
+        ret = ESP_OK;
+    } else if (intRet == U_ERROR_COMMON_TIMEOUT) {
+        XPLRHELPERS_CONSOLE(W, "MultiValSet timed out!");
+        ret = ESP_ERR_TIMEOUT;
+    } else {
+        XPLRHELPERS_CONSOLE(E, "MultiValSet error code [%d]!", intRet);
+        ret = ESP_FAIL;
     }
 
-    XPLRHELPERS_CONSOLE(D, "Set multiple configuration values.");
-    return ESP_OK;
+    return ret;
 }
 
-esp_err_t xplrHlprLocSrvcOptionSingleValGet(xplrGnssDevBase_t *dvcBase,
+esp_err_t xplrHlprLocSrvcOptionSingleValGet(uDeviceHandle_t *dvcHandler,
                                             uint32_t keyId,
-                                            void *pValue,
+                                            void *value,
                                             size_t size,
                                             uGnssCfgValLayer_t layer)
 {
-    ubxRet = uGnssCfgValGet(dvcBase->dHandler, keyId, pValue, size, layer);
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "SingleValGet error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uGnssCfgValGet(*dvcHandler, keyId, value, size, layer);
+    if (intRet == 0) {
+#if (1 == XPLRHELPERS_XTRA_DEBUG)
+        XPLRHELPERS_CONSOLE(D, "Got configuration value.");
+#endif
+        ret = ESP_OK;
+    } else if (intRet == U_ERROR_COMMON_TIMEOUT) {
+        XPLRHELPERS_CONSOLE(W, "SingleValGet timed out!");
+        ret = ESP_ERR_TIMEOUT;
+    } else {
+        XPLRHELPERS_CONSOLE(E, "SingleValGet error code [%d]!", intRet);
+        ret = ESP_FAIL;
     }
 
-    XPLRHELPERS_CONSOLE(D, "Got configuration value.");
-    return ESP_OK;
+    return ret;
 }
 
-esp_err_t xplrHlprLocSrvcOptionMultiValGet(xplrGnssDevBase_t *dvcBase,
-                                           const uint32_t *pKeyIdList,
+esp_err_t xplrHlprLocSrvcOptionMultiValGet(uDeviceHandle_t *dvcHandler,
+                                           const uint32_t *keyIdList,
                                            size_t numKeyIds,
-                                           uGnssCfgVal_t **pList,
+                                           uGnssCfgVal_t **list,
                                            uGnssCfgValLayer_t layer)
 {
-    ubxRet = uGnssCfgValGetListAlloc(dvcBase->dHandler, pKeyIdList, numKeyIds, pList, layer);
-    if (ubxRet < 0) {
-        XPLRHELPERS_CONSOLE(E, "MultiValGet error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uGnssCfgValGetListAlloc(*dvcHandler, keyIdList, numKeyIds, list, layer);
+
+    if (intRet == 0) {
+        XPLRHELPERS_CONSOLE(E, "MultiValGet error code [%d]!", intRet);
+        ret = ESP_FAIL;
+    } else if (intRet == U_ERROR_COMMON_TIMEOUT) {
+        XPLRHELPERS_CONSOLE(W, "MultiValGet timed out!");
+        ret = ESP_ERR_TIMEOUT;
+    } else {
+        XPLRHELPERS_CONSOLE(D, "Got multiple configuration values.");
+        ret = ESP_OK;
     }
 
-    XPLRHELPERS_CONSOLE(D, "Got multiple configuration values.");
-    return ESP_OK;
+    return ret;
 }
 
-esp_err_t xplrHlprLocSrvcGetDeviceInfo(xplrGnssDevBase_t *dvcBase,
-                                       xplrGnssDevInfo_t *dInfo)
+esp_err_t xplrHlprLocSrvcGetDeviceInfo(xplrLocationDevConf_t *dvcConf,
+                                       uDeviceHandle_t dvcHandler,
+                                       xplrLocDvcInfo_t *dvcInfo)
 {
-    dInfo->i2cAddress = dvcBase->dConfig.deviceCfg.cfgGnss.i2cAddress;
-    dInfo->i2cPort    = dvcBase->dConfig.transportCfg.cfgI2c.i2c;
-    dInfo->pinSda     = dvcBase->dConfig.transportCfg.cfgI2c.pinSda;
-    dInfo->pinScl     = dvcBase->dConfig.transportCfg.cfgI2c.pinScl;
+    esp_err_t ret;
+    int32_t intRet;
 
-    ubxRet = uGnssInfoGetVersions(dvcBase->dHandler, &dInfo->pVer);
-    if (ubxRet != 0) {
-        XPLRHELPERS_CONSOLE(E, "Getting version failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    dvcInfo->i2cAddress = dvcConf->dvcConfig.deviceCfg.cfgGnss.i2cAddress;
+    dvcInfo->i2cPort    = dvcConf->dvcConfig.transportCfg.cfgI2c.i2c;
+    dvcInfo->pinSda     = dvcConf->dvcConfig.transportCfg.cfgI2c.pinSda;
+    dvcInfo->pinScl     = dvcConf->dvcConfig.transportCfg.cfgI2c.pinScl;
+
+    intRet = uGnssInfoGetVersions(dvcHandler, &dvcInfo->ver);
+    if (intRet != 0) {
+        XPLRHELPERS_CONSOLE(E, "Getting version failed with error code [%d]!", intRet);
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
     }
 
-    ubxRet = uGnssInfoGetIdStr(dvcBase->dHandler, (char *)dInfo->id, sizeof(dInfo->id));
-    if (ubxRet < 0) {
-        XPLRHELPERS_CONSOLE(E, "Getting ID failed with error code [%d]!", ubxRet);
-        return ESP_FAIL;
+    if (ret == ESP_OK) {
+        intRet = uGnssInfoGetIdStr(dvcHandler, (char *)dvcInfo->id, sizeof(dvcInfo->id));
+        if (intRet < 0) {
+            XPLRHELPERS_CONSOLE(E, "Getting ID failed with error code [%d]!", intRet);
+            ret = ESP_FAIL;
+        }
     }
 
-    XPLRHELPERS_CONSOLE(D, "Got device info.");
-    return ESP_OK;
+    if (ret == ESP_OK) {
+        XPLRHELPERS_CONSOLE(I, "Got device info.");
+    }
+
+    return ret;
 }
 
-esp_err_t xplrHlprLocSrvcPrintDeviceInfo(xplrGnssDevInfo_t *dInfo)
+esp_err_t xplrHlprLocSrvcPrintDeviceInfo(xplrLocDvcInfo_t *dvcInfo)
 {
+    esp_err_t ret;
+
 #if (1 == XPLRHELPERS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
     char idBuff[16];
-    int snpRet;
+    int intRet;
 
-    snpRet = snprintf(idBuff, 16, "%02x%02x%02x%02x%02x", dInfo->id[0],
-                      dInfo->id[1],
-                      dInfo->id[2],
-                      dInfo->id[3],
-                      dInfo->id[4]);
-    if (snpRet < 0) {
+    intRet = snprintf(idBuff,
+                      16,
+                      "%02x%02x%02x%02x%02x",
+                      dvcInfo->id[0],
+                      dvcInfo->id[1],
+                      dvcInfo->id[2],
+                      dvcInfo->id[3],
+                      dvcInfo->id[4]);
+    if (intRet < 0) {
         XPLRHELPERS_CONSOLE(D, "Failed to write ID to buffer!");
-        return ESP_FAIL;
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
     }
 
-    printf("========= Device Info =========\n");
-    printf("Lband version: %s\nHardware: %s\nRom: %s\nFirmware: %s\nProtocol: %s\nModel: %s\nID: %s\n",
-           dInfo->pVer.ver,
-           dInfo->pVer.hw,
-           dInfo->pVer.rom,
-           dInfo->pVer.fw,
-           dInfo->pVer.prot,
-           dInfo->pVer.mod,
-           idBuff);
-    printf("-------------------------------\n");
-    printf("I2C Port: %d\nI2C Address: 0x%2x\nI2C SDA pin: %d\nI2C SCL pin: %d\n", dInfo->i2cPort,
-           dInfo->i2cAddress,
-           dInfo->pinSda,
-           dInfo->pinScl);
-    printf("===============================\n");
+    if (ret == ESP_OK) {
+        printf("========= Device Info =========\n");
+        printf("Module variant: %s\nModule version: %s\nHardware version: %s\nRom: %s\nFirmware: %s\nProtocol: %s\nID: %s\n",
+               dvcInfo->ver.mod,
+               dvcInfo->ver.ver,
+               dvcInfo->ver.hw,
+               dvcInfo->ver.rom,
+               dvcInfo->ver.fw,
+               dvcInfo->ver.prot,
+               idBuff);
+        printf("-------------------------------\n");
+        printf("I2C Port: %d\nI2C Address: 0x%2x\nI2C SDA pin: %d\nI2C SCL pin: %d\n",
+               dvcInfo->i2cPort,
+               dvcInfo->i2cAddress,
+               dvcInfo->pinSda,
+               dvcInfo->pinScl);
+        printf("===============================\n");
+    }
+#else
+    ret = ESP_OK;
 #endif
 
-    return ESP_OK;
+    return ret;
 }
 
-int32_t xplrHlprLocSrvcSendUbxFormattedCommand(uDeviceHandle_t *dHandler,
-                                               const char *pBuffer,
+int32_t xplrHlprLocSrvcSendUbxFormattedCommand(uDeviceHandle_t *dvcHandler,
+                                               const char *buffer,
                                                size_t size)
 {
-    ubxRet = uGnssMsgSend(*dHandler, pBuffer, size);
-    if (ubxRet < 0) {
-        XPLRHELPERS_CONSOLE(E, "Failed to send message!", ubxRet);
-        return ESP_FAIL;
+    int32_t ret;
+
+    ret = uGnssMsgSend(*dvcHandler, buffer, size);
+    if (ret < 0) {
+        XPLRHELPERS_CONSOLE(E, "Failed to send message with error code [%d]!", ret);
+    } else if (ret != size) {
+        XPLRHELPERS_CONSOLE(E, "Failed to send message send size [%d] mismatch [%d]!", ret, size);
+    } else {
+        XPLRHELPERS_CONSOLE(D, "Sent UBX data [%d] bytes.", ret);
     }
 
-    XPLRHELPERS_CONSOLE(D, "Sent UBX formatted command [%d] bytes.", ubxRet);
-    return ubxRet;
+    return ret;
+}
+
+esp_err_t xplrHlprLocSrvcSendRtcmFormattedCommand(uDeviceHandle_t *dvcHandler,
+                                                  const char *buffer,
+                                                  size_t size)
+{
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uGnssMsgSend(*dvcHandler, buffer, size);
+    if (intRet < 0) {
+        XPLRHELPERS_CONSOLE(E, "Failed to send message with error code [%d]!", intRet);
+        ret = ESP_FAIL;
+    } else if (intRet != size) {
+        XPLRHELPERS_CONSOLE(E, "Failed to send message send size [%d] mismatch [%d]!", intRet, size);
+        ret = ESP_FAIL;
+    } else {
+        XPLRHELPERS_CONSOLE(D, "Sent RTCM data [%d] bytes.", intRet);
+        ret = ESP_OK;
+    }
+
+    return ret;
 }
 
 bool xplrHlprLocSrvcCheckDvcProfileValidity(uint8_t dvcProfile, uint8_t maxDevLim)
 {
+    bool ret;
+
     if (dvcProfile > maxDevLim) {
         XPLRHELPERS_CONSOLE(E, "Device profile out of bounds! Max allowed [%d]", maxDevLim);
-        return false;
+        ret = false;
+    } else {
+        ret = true;
     }
 
-    return true;
+    return ret;
 }
 
 /* ----------------------------------------------------------------

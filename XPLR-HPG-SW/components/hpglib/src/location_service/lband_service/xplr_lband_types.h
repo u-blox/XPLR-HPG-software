@@ -26,21 +26,32 @@
 #include "./../../../../components/ubxlib/ubxlib.h"
 
 /** @file
- * @brief This header file defines the types used in lband service API, 
+ * @brief This header file defines the types used in lband service API,
  * mostly lband device settings.
  */
 
-/**
- * Device and network config
- */
-typedef struct xplrLbandDeviceCfg_type {
-    uDeviceCfg_t dvcSettings;        /**< Device config */
-    uNetworkCfgGnss_t dvcNetwork;    /**< Network config */
-} xplrLbandDeviceCfg_t;
-
+/*INDENT-OFF*/
 typedef enum {
     XPLR_LBAND_FREQUENCY_EU = 0,
     XPLR_LBAND_FREQUENCY_US
-} xplrLbandRegion;
+} xplrLbandRegion_t;
 
+/**
+ * Struct containing settings for LBAND Correction
+ * data settings such as frequency and region
+ */
+typedef struct xplrLbandCorrDataCfg_type {
+    xplrLbandRegion_t region; /**< Region configured for frequency */
+    uint32_t freq;            /**< Hardware specific settings. */
+} xplrLbandCorrDataCfg_t;
+
+/**
+ * Struct that contains location metrics
+ */
+typedef struct xplrLbandDeviceCfg_type {
+    xplrLocationDevConf_t hwConf;           /**< Hardware specific settings. */
+    xplrLbandCorrDataCfg_t corrDataConf;    /**< Correction data configuration. */
+    uDeviceHandle_t *destHandler;           /**< GNSS module destination handler to push data to. */
+} xplrLbandDeviceCfg_t;
+/*INDENT-ON*/
 #endif

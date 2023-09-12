@@ -30,7 +30,7 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_check.h"
-#include "xplr_ztp.h"
+#include "esp_crt_bundle.h"
 #include "./../../../../components/hpglib/xplr_hpglib_cfg.h"
 #if defined(XPLR_BOARD_SELECTED_IS_C214)
 #include "./../../../../../components/boards/xplr-hpg2-c214/board.h"
@@ -42,12 +42,13 @@
 #error "No board selected in xplr_hpglib_cfg.h"
 #endif
 #include "xplr_wifi_starter.h"
-#include "xplr_ztp_json_parser.h"
+#include "xplr_thingstream.h"
+#include "xplr_ztp.h"
 #include "./../../../components/hpglib/src/common/xplr_common.h"
 
 /**
- * If paths not found in VScode: 
- *      press keys --> <ctrl+shift+p> 
+ * If paths not found in VScode:
+ *      press keys --> <ctrl+shift+p>
  *      and select --> ESP-IDF: Add vscode configuration folder
  */
 
@@ -55,10 +56,22 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-#define  APP_SERIAL_DEBUG_ENABLED 1U /* used to print debug messages in console. Set to 0 for disabling */
-#if defined (APP_SERIAL_DEBUG_ENABLED)
+#define  APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
+#define  APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 1 for enabling*/
+#if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
 #define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)   esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
+#elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
+#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
+#define APP_CONSOLE(tag, message, ...)\
+    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
+    else XPLRLOG(&appLog,appBuff2Log);
 #else
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -70,31 +83,21 @@
 #define APP_ZTP_PAYLOAD_BUF_SIZE    ((10U) * (KIB))
 #define APP_KEYCERT_PARSE_BUF_SIZE  ((2U) * (KIB))
 
+/*
+ * Button for shutting down device
+ */
+#define APP_DEVICE_OFF_MODE_BTN     (BOARD_IO_BTN1)
+
+/*
+ * Device off press duration in sec
+ */
+#define APP_DEVICE_OFF_MODE_TRIGGER (3U)
+
 #define APP_TOPICS_ARRAY_MAX_SIZE   (25U)
 
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
-
-/**
- * Valid options for locations
- */
-typedef enum {
-    APP_REGION_EU,
-    APP_REGION_US
-} appRegions;
-
-/* ----------------------------------------------------------------
- * EXTERNAL VARIABLES
- * -------------------------------------------------------------- */
-
-/**
- * Populate the root.crt file according to your needs.
- * If you are using Thingstream then you can find all the needed
- * certificates inside your location thing settings.
- */
-extern const uint8_t server_root_crt_start[] asm("_binary_root_crt_start");
-extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -103,23 +106,17 @@ extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
 /**
  * Using EU as a region
  */
-static const appRegions region = APP_REGION_EU;
+static xplr_thingstream_pp_region_t ppRegion = XPLR_THINGSTREAM_PP_REGION_EU;
 
 /**
  * Required data to make a POST request to Thingstream
- * The data are taken from KConfig or you can overwrite the 
+ * The data are taken from KConfig or you can overwrite the
  * values as needed here.
  */
-static const char *ztpPostUrl = CONFIG_XPLR_TS_PP_ZTP_CREDENTIALS_URL;
-static xplrZtpDevicePostData_t devPostData = {
-    .dvcToken = CONFIG_XPLR_TS_PP_ZTP_TOKEN,
-    .dvcName = CONFIG_XPLR_TS_PP_DEVICE_NAME
-};
+xplr_thingstream_t thingstreamSettings;
 
-/**
- * Some buffers to experiment with
- */
-static char charbuf[APP_KEYCERT_PARSE_BUF_SIZE];
+static const char *urlAwsRootCa = CONFIG_XPLR_AWS_ROOTCA_URL;
+static const char *ztpToken = CONFIG_XPLR_TS_PP_ZTP_TOKEN;
 
 /**
  * ZTP data we got from post
@@ -130,35 +127,9 @@ static xplrZtpData_t ztpData = {
     .payloadLength = APP_ZTP_PAYLOAD_BUF_SIZE
 };
 
-
-/**
- * Topics we get from ZTP JSON parser.
- * We deliberately declare more than needed (25) topics to
- * show how the struct works.
- * populatedCount shows how many topics we really got from
- * the parser.
- * maxCount limits the number of topics.
- */
-static xplrTopic topics[APP_TOPICS_ARRAY_MAX_SIZE];
-static xplrZtpStyleTopics_t ztpStyleTopics = {
-    .topic = topics,
-    .maxCount = APP_TOPICS_ARRAY_MAX_SIZE,
-    .populatedCount = 0
-};
-
-/**
- * Dynamic keys storage
- */
-static xplrDynamicKeys_t dynamicKeys;
-
-/**
- * A cJSON object to store JSON reply from ZTP POST
- */
-static cJSON *json;
-
 /*
  * Fill this struct with your desired settings and try to connect
- * The data are taken from KConfig or you can overwrite the 
+ * The data are taken from KConfig or you can overwrite the
  * values as needed here.
  */
 static const char wifiSsid[] = CONFIG_XPLR_WIFI_SSID;
@@ -170,36 +141,48 @@ static xplrWifiStarterOpts_t wifiOptions = {
     .webserver = false
 };
 
-/**
- * Boolean flags for different functions
- */
-static bool gotZtp;
-static bool mqttFlag;
+static uint32_t bufferStackPointer = 0;
 
 /**
  * Error return types
  */
-static esp_err_t ret;
 xplrWifiStarterError_t wifistarterErr;
-
+/*INDENT-OFF*/
+/**
+ * Static log configuration struct and variables
+ */
+#if (1 == APP_SD_LOGGING_ENABLED)
+static xplrLog_t appLog, errorLog;
+static char appBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
+static char appLogFilename[] = "/APPLOG.TXT";               /**< Follow the same format if changing the filename*/
+static char errorLogFilename[] = "/ERRORLOG.TXT";           /**< Follow the same format if changing the filename*/
+static uint8_t logFileMaxSize = 100;                        /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U)*/
+static xplrLog_size_t logFileMaxSizeType = XPLR_SIZE_MB;    /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB)*/
+#endif
+/*INDENT-ON*/
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
-static void appInitBoard(void);
+static esp_err_t appInitBoard(void);
 static void appInitWiFi(void);
-static void appZtpJsonParse(void);
-static void appZtpMqttCertificateParse(void);
-static void appZtpMqttClientIdParse(void);
-static void appZtpDeallocateJSON(void);
-static void appZtpMqttSubscriptionsParse(void);
-static void appZtpMqttSupportParse(void);
-static void appZtpMqttDynamicKeysParse(void);
+static esp_err_t appGetRootCa(void);
+static void appApplyThingstreamCreds(void);
+static void appInitLog(void);
+static void appDeInitLog(void);
 static void appHaltExecution(void);
+static void appDeviceOffTask(void *arg);
+/* ---------------------------------------------------------------
+ * CALLBACK FUNCTION PROTOTYPES
+ * -------------------------------------------------------------- */
+static esp_err_t httpClientEventCB(esp_http_client_event_handle_t evt);
 
 void app_main(void)
 {
-    gotZtp = false;
+    bool gotZtp = false;
+    xplrWifiStarterError_t wifistarterErr;
+    esp_err_t ret;
+    xplr_thingstream_error_t tsErr;
 
     appInitBoard();
     appInitWiFi();
@@ -214,25 +197,28 @@ void app_main(void)
             case XPLR_WIFISTARTER_STATE_CONNECT_OK:
                 if (!gotZtp) {
                     APP_CONSOLE(I, "Performing HTTPS POST request.");
-                    ret = xplrZtpGetPayload((const char *)server_root_crt_start, 
-                                            ztpPostUrl, 
-                                            &devPostData, 
-                                            &ztpData);
-                    if (ret != ESP_OK) {
-                        APP_CONSOLE(E, "Performing HTTPS POST failed!");
-                    } else {
-                        if (ztpData.httpReturnCode == HttpStatus_Ok) {
-                            appZtpJsonParse();
-                            appZtpMqttCertificateParse();
-                            appZtpMqttClientIdParse();
-                            appZtpMqttSubscriptionsParse();
-                            appZtpMqttSupportParse();
-                            appZtpMqttDynamicKeysParse();
-                            appZtpDeallocateJSON();
-                            xplrWifiStarterDisconnect();
+                    thingstreamSettings.connType = XPLR_THINGSTREAM_PP_CONN_WIFI;
+                    tsErr = xplrThingstreamInit(ztpToken, &thingstreamSettings);
+                    if (tsErr == XPLR_THINGSTREAM_OK) {
+                        ret = appGetRootCa();
+                        if (ret == ESP_OK) {
+                            ret = xplrZtpGetPayloadWifi(&thingstreamSettings,
+                                                        &ztpData);
+                            if (ret != ESP_OK) {
+                                APP_CONSOLE(E, "Performing HTTPS POST failed!");
+                            } else {
+                                if (ztpData.httpReturnCode == HttpStatus_Ok) {
+                                    appApplyThingstreamCreds();
+                                    xplrWifiStarterDisconnect();
+                                } else {
+                                    APP_CONSOLE(W, "HTTPS request returned code: %d", ztpData.httpReturnCode);
+                                }
+                            }
                         } else {
-                            APP_CONSOLE(W, "HTTPS request returned code: %d", ztpData.httpReturnCode);
+                            APP_CONSOLE(E, "Error in fetching Root CA certificate");
                         }
+                    } else {
+                        APP_CONSOLE(E, "error in xplr_thingstream_init");
                     }
                     gotZtp = true;
                 }
@@ -258,20 +244,46 @@ void app_main(void)
     }
 
     APP_CONSOLE(I, "ALL DONE!!!");
+    appDeInitLog();
 }
 
 
 /*
  * Initialize XPLR-HPG kit using its board file
  */
-static void appInitBoard(void)
+static esp_err_t appInitBoard(void)
 {
+    gpio_config_t io_conf = {0};
+    esp_err_t ret;
+
+    appInitLog();
     APP_CONSOLE(I, "Initializing board.");
     ret = xplrBoardInit();
     if (ret != ESP_OK) {
         APP_CONSOLE(E, "Board initialization failed!");
         appHaltExecution();
+    } else {
+        /* config boot0 pin as input */
+        io_conf.pin_bit_mask = 1ULL << APP_DEVICE_OFF_MODE_BTN;
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pull_up_en = 1;
+        ret = gpio_config(&io_conf);
     }
+
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Failed to set boot0 pin in input mode");
+    } else {
+        if (xTaskCreate(appDeviceOffTask, "deviceOffTask", 2 * 2048, NULL, 10, NULL) == pdPASS) {
+            APP_CONSOLE(D, "Boot0 pin configured as button OK");
+            APP_CONSOLE(D, "Board Initialized");
+        } else {
+            APP_CONSOLE(D, "Failed to start deviceOffTask task");
+            APP_CONSOLE(E, "Board initialization failed!");
+            ret = ESP_FAIL;
+        }
+    }
+
+    return ret;
 }
 
 /*
@@ -279,6 +291,7 @@ static void appInitBoard(void)
  */
 static void appInitWiFi(void)
 {
+    esp_err_t ret;
     APP_CONSOLE(I, "Starting WiFi in station mode.");
     ret = xplrWifiStarterInitConnection(&wifiOptions);
     if (ret != ESP_OK) {
@@ -286,115 +299,215 @@ static void appInitWiFi(void)
     }
 }
 
-/*
- * Allocation for JSON parsing.
- * From this object we can take all the data we are interested in.
- * Remember to deallocate the json object after we are done processing it.
- * In case the JSON object is invalid then the returned item will be NULL.
- */
-static void appZtpJsonParse(void)
+/**
+ * HTTP GET request to fetch the Root CA certificate
+*/
+static esp_err_t appGetRootCa(void)
 {
-    json = cJSON_Parse(ztpData.payload);
-    if (json == NULL) {
-        APP_CONSOLE(E, "cJSON parsing failed!");
-        APP_CONSOLE(E, "Seems like the JSON payload is not valid!");
-        appHaltExecution();
-    }
-}
+    int UNUSED_PARAM(len);
+    esp_err_t ret;
+    esp_http_client_handle_t client = NULL;
+    char rootCa[APP_KEYCERT_PARSE_BUF_SIZE];
+    xplrZtpData_t userData = {
+        .payload = rootCa,
+        .payloadLength = APP_KEYCERT_PARSE_BUF_SIZE
+    };
 
-/*
- * Getting key-certificate value
- * We will use the key-certificate just for printing
- */
-static void appZtpMqttCertificateParse(void)
-{
-    if (xplrJsonZtpGetMqttCertificate(json, charbuf, APP_KEYCERT_PARSE_BUF_SIZE) == XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(I, "Parsed Certificate:\n%s", charbuf);
+    //Configure http client
+    esp_http_client_config_t clientConfig = {
+        .url = urlAwsRootCa,
+        .method = HTTP_METHOD_GET,
+        .event_handler = httpClientEventCB,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .transport_type = HTTP_TRANSPORT_OVER_SSL,
+        .user_data = &userData
+    };
+
+    client = esp_http_client_init(&clientConfig);
+    if (client != NULL) {
+        ret = esp_http_client_set_header(client, "Accept", "text/html");
+        if (ret == ESP_OK) {
+            ret = esp_http_client_perform(client); //Blocking no need for retries or while loop
+            if (ret == ESP_OK) {
+                userData.httpReturnCode = esp_http_client_get_status_code(client);
+                if (userData.httpReturnCode == 200) {
+                    len = esp_http_client_get_content_length(client);
+                    APP_CONSOLE(I,
+                                "HTTPS GET request OK: code [%d] - payload size [%d].",
+                                userData.httpReturnCode,
+                                len);
+                } else {
+                    APP_CONSOLE(E, "HTTPS GET request failed with code [%d]", userData.httpReturnCode);
+                }
+            } else {
+                APP_CONSOLE(E, "Error in GET request");
+            }
+        } else {
+            APP_CONSOLE(E, "Failed to set HTTP headers");
+        }
+        esp_http_client_cleanup(client);
     } else {
-        APP_CONSOLE(E, "Parsing Certificate failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Returns Client ID for MQTT
- */
-static void appZtpMqttClientIdParse(void)
-{
-    if (xplrJsonZtpGetMqttClientId(json, charbuf, APP_KEYCERT_PARSE_BUF_SIZE) == XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(I, "Parsed MQTT client ID: %s", charbuf);
-    } else {
-        APP_CONSOLE(E, "Parsing MQTT client ID failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Fetches array with topics to subscribe
- */
-static void appZtpMqttSubscriptionsParse(void)
-{
-    char strLoc[3];
-
-    memset(strLoc, 0x00, ELEMENTCNT(strLoc));
-
-    if (region == APP_REGION_EU) {
-        strcpy(strLoc, XPLR_ZTP_REGION_EU);
-    } else {
-        strcpy(strLoc, XPLR_ZTP_REGION_US);
+        APP_CONSOLE(E, "Could not initiate HTTP client");
+        ret = ESP_FAIL;
     }
 
-    APP_CONSOLE(D, "Configured region: %s", strLoc);
-
-    ztpStyleTopics.populatedCount = 0;
-    if (xplrJsonZtpGetRequiredTopicsByRegion(json, &ztpStyleTopics,
-                                             strLoc) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing required MQTT topics failed!");
-        appHaltExecution();
+    if (rootCa != NULL) {
+        memcpy(thingstreamSettings.server.rootCa, rootCa, APP_KEYCERT_PARSE_BUF_SIZE);
     }
-}
-
-/*
- * Checks if MQTT is supported
- */
-static void appZtpMqttSupportParse(void)
-{
-    if (xplrJsonZtpSupportsMqtt(json, &mqttFlag) == XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(I, "Is MQTT supported: %s", mqttFlag ? "true" : "false");
-    } else {
-        APP_CONSOLE(E, "Parsing MQTT support flag failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Parses dynamic keys
- */
-static void appZtpMqttDynamicKeysParse()
-{
-    if (xplrJsonZtpGetDynamicKeys(json, &dynamicKeys) != XPLR_JSON_PARSER_OK) {
-        APP_CONSOLE(E, "Parsing MQTT support flag failed!");
-        appHaltExecution();
-    }
-}
-
-/*
- * Deallocate JSON after we are done
- */
-static void appZtpDeallocateJSON(void)
-{
-    if (json != NULL) {
-        APP_CONSOLE(I, "Deallocating JSON object.");
-        cJSON_Delete(json);
-    }
+    return ret;
 }
 
 /**
- * A dummy function to pause on error
+ * Function responsible to parse the ZTP payload data and populate the xplr_thingstream_t struct
+*/
+static void appApplyThingstreamCreds(void)
+{
+    xplr_thingstream_error_t tsErr;
+
+    tsErr = xplrThingstreamPpConfig(ztpData.payload, ppRegion, &thingstreamSettings);
+    if (tsErr != XPLR_THINGSTREAM_OK) {
+        APP_CONSOLE(E, "Error in ZTP payload parsing");
+        appHaltExecution();
+    } else {
+        APP_CONSOLE(I, "ZTP Payload parsed successfully");
+    }
+    /*INDENT-ON*/
+}
+
+/**
+ * Function responsible to initialize the logging service
+*/
+static void appInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLog_error_t err = xplrLogInit(&errorLog,
+                                      XPLR_LOG_DEVICE_ERROR,
+                                      errorLogFilename,
+                                      logFileMaxSize,
+                                      logFileMaxSizeType);
+    if (err == XPLR_LOG_OK) {
+        errorLog.logEnable = true;
+        err = xplrLogInit(&appLog,
+                          XPLR_LOG_DEVICE_INFO,
+                          appLogFilename,
+                          logFileMaxSize,
+                          logFileMaxSizeType);
+    }
+    if (err == XPLR_LOG_OK) {
+        appLog.logEnable = true;
+    } else {
+        APP_CONSOLE(E, "Error initializing logging...");
+    }
+#endif
+}
+
+/**
+ * CALLBACK FUNCTION
+*/
+static esp_err_t httpClientEventCB(esp_http_client_event_handle_t evt)
+{
+    switch (evt->event_id) {
+        case HTTP_EVENT_ON_CONNECTED:
+            APP_CONSOLE(D, "HTTP_EVENT_ON_CONNECTED!");
+            break;
+
+        case HTTP_EVENT_HEADERS_SENT:
+            break;
+
+        case HTTP_EVENT_ON_HEADER:
+            break;
+
+        case HTTP_EVENT_ON_DATA:
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                xplrZtpData_t *tempData = (xplrZtpData_t *)evt->user_data;
+                if (bufferStackPointer < tempData->payloadLength) {
+                    memcpy(tempData->payload + bufferStackPointer, evt->data, evt->data_len);
+                    bufferStackPointer += evt->data_len;
+                    tempData->payload[bufferStackPointer] = 0;
+                } else {
+                    APP_CONSOLE(E, "Payload buffer not big enough. Could not copy all data from HTTP!");
+                }
+            }
+            break;
+
+        case HTTP_EVENT_ERROR:
+            /*
+             * How does the following ESP_LOG work?
+             * We are currently receiving data from the internet.
+             * We are not sure if the payload is null terminated.
+             * We need to define the length of the string to print.
+             * The following "%.*s" --> expands to: print string s as many chars as dataLength.
+             * It's the equivalent of writing
+             *      ESP_LOGE("HTTP_EVENT_ERROR: %.6f", float);
+             * which is more intuitive to understand; we define a constant number of decimal places.
+             * In our case the number of characters is defined on runtime by ".*"
+             * You can see how it works on:
+             * https://embeddedartistry.com/blog/2017/07/05/printf-a-limited-number-of-characters-from-a-string/
+             */
+            APP_CONSOLE(E, "HTTP_EVENT_ERROR: %.*s", evt->data_len, (char *)evt->data);
+            break;
+
+        case HTTP_EVENT_ON_FINISH:
+            APP_CONSOLE(D, "HTTP_EVENT_ON_FINISH");
+            break;
+
+        default:
+            break;
+    }
+
+    return ESP_OK;
+}
+
+/**
+ * Function responsible to terminate/deinitialize the logging service
+*/
+static void appDeInitLog(void)
+{
+#if (1 == APP_SD_LOGGING_ENABLED)
+    xplrLogDeInit(&appLog);
+    xplrLogDeInit(&errorLog);
+#endif
+}
+
+/*
+ * Function to halt app execution
  */
 static void appHaltExecution(void)
 {
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+static void appDeviceOffTask(void *arg)
+{
+    uint32_t btnStatus;
+    uint32_t currTime, prevTime;
+    uint32_t btnPressDuration = 0;
+
+    for (;;) {
+        btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
+        currTime = MICROTOSEC(esp_timer_get_time());
+
+        if (btnStatus != 1) { //check if pressed
+            prevTime = MICROTOSEC(esp_timer_get_time());
+            while (btnStatus != 1) { //wait for btn release.
+                btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                currTime = MICROTOSEC(esp_timer_get_time());
+            }
+
+            btnPressDuration = currTime - prevTime;
+
+            if (btnPressDuration >= APP_DEVICE_OFF_MODE_TRIGGER) {
+                APP_CONSOLE(W, "Device OFF triggered");
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                xplrBoardSetPower(XPLR_PERIPHERAL_LTE_ID, false);
+                btnPressDuration = 0;
+                appHaltExecution();
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100)); //wait for btn release.
     }
 }

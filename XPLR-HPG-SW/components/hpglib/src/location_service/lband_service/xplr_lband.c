@@ -34,27 +34,34 @@
 /**
  * Debugging print macro
  */
-#if (1 == XPLRLBAND_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRLBAND_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRLOCATION_LOG_ACTIVE))
 #define XPLRLBAND_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRLBAND_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
+#define XPLRLBAND_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+    XPLRLOG(&locationLog,buff2Log);
+#elif ((0 == XPLRLBAND_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
+#define XPLRLBAND_CONSOLE(tag, message, ...)\
+    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    XPLRLOG(&locationLog,buff2Log)
 #else
 #define XPLRLBAND_CONSOLE(message, ...) do{} while(0)
 #endif
-
-#define XPLRLBAND_FREQ_REGION_EU    "eu"
-#define XPLRLBAND_FREQ_REGION_US    "us"
 
 /* ----------------------------------------------------------------
  * STATIC TYPES
  * -------------------------------------------------------------- */
 
+/*INDENT-OFF*/
+
 /**
  * You should not change these given values in any case or your LBAND
  * module will not function properly.
  */
-static const uGnssCfgVal_t pLbandSettings[] = {
-        {0x10b10016, 0},
-        {0x30b10015, 0x6959},
-        {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_RXM_PMP_I2C_U1, 1}
+static const uGnssCfgVal_t lbandSettings[] = {
+    {0x10b10016, 0},
+    {0x30b10015, 0x6959},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_RXM_PMP_I2C_U1, 1}
 };
 
 /**
@@ -70,55 +77,57 @@ static const uGnssMessageId_t messageIdLBand = {
  * Struct that contains extra info needed only for
  * specific device type: LBAND
  */
-typedef struct xplrGnssDevXtra_t {
-    bool    msgAvailable;  /**< check if message is available for reading */
+typedef struct xplrLbandAsyncIds_type {
     int32_t ahCorrData;    /**< ubxlib async handler */
-} xplrGnssDevXtra_t;
+} xplrLbandAsyncIds_t;
+
+typedef struct xplrLbandRunContext_type {
+    uDeviceHandle_t dvcHandler;     /**< ubxlib device handler */
+    xplrLbandAsyncIds_t asyncIds;   /**< async id handers */
+} xplrLbandRunContext_t;
 
 /**
  * Setting struct for LBAND devices
  */
 typedef struct xplrLband_type {
-    xplrGnssDevBase_t dvcBase;
-    xplrGnssDevXtra_t dvcXtra;
+    xplrLbandDeviceCfg_t *dvcCfg;
+    xplrLbandRunContext_t options;
+    xplrLog_t dvcLog;
 } xplrLband_t;
+/*INDENT-ON*/
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
 
 static const char *freqRegions[] = {
-    XPLRLBAND_FREQ_REGION_EU,
-    XPLRLBAND_FREQ_REGION_US
+    "eu",
+    "us"
 };
 
 static xplrLband_t lbandDvcs[XPLRLBAND_NUMOF_DEVICES] = {NULL};
-static int32_t ubxRet;
-static int32_t espRet;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
-static esp_err_t xplrLbandPrivateDeviceOpen(uint8_t dvcProfile);
-static esp_err_t xplrLbandPrivateDeviceClose(uint8_t dvcProfile);
-static esp_err_t xplrLbandPrivateConfigAllDefault(uint8_t dvcProfile, uint8_t i2cAddress);
-static esp_err_t xplrLbandPrivateSetDeviceConfig(uint8_t dvcProfile, uDeviceCfg_t *deviceSettings);
-static esp_err_t xplrLbandPrivateSetNetworkConfig(uint8_t dvcProfile, uNetworkCfgGnss_t *deviceNetwork);
-static int32_t   xplrLbandPrivateAsyncStopper(uint8_t dvcProfile, int32_t handler);
-static esp_err_t xplrLbandParseFrequencyFromMqtt(uint8_t dvcProfile,
-                                                 char *mqttPayload,
-                                                 xplrLbandRegion region,
-                                                 uint32_t *parsedFrequency);
+static esp_err_t lbandDeviceOpen(uint8_t dvcProfile);
+static esp_err_t lbandDeviceClose(uint8_t dvcProfile);
+static int32_t   lbandAsyncStopper(uint8_t dvcProfile, int32_t handler);
+static esp_err_t lbandSetFreqFromPrm(uint8_t dvcProfile, uint32_t freq);
+static esp_err_t lbandSetFreqFromCfg(uint8_t dvcProfile);
+static esp_err_t lbandParseFrequencyFromMqtt(uint8_t dvcProfile,
+                                             char *mqttPayload);
+static bool lbandIsDvcProfileValid(uint8_t dvcProfile);
 
 /* ----------------------------------------------------------------
  * STATIC CALLBACK FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
 static void xplrLbandMessageReceivedCB(uDeviceHandle_t gnssHandle,
-                                       const uGnssMessageId_t *pMessageId,
+                                       const uGnssMessageId_t *messageId,
                                        int32_t errorCodeOrLength,
-                                       void *pCallbackParam);
+                                       void *callbackParam);
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
@@ -126,225 +135,278 @@ static void xplrLbandMessageReceivedCB(uDeviceHandle_t gnssHandle,
 
 esp_err_t xplrLbandUbxlibInit(void)
 {
-    return xplrHelpersUbxlibInit();
+    esp_err_t ret;
+    ret = xplrHelpersUbxlibInit();
+    return ret;
 }
 
 esp_err_t xplrLbandUbxlibDeinit(void)
 {
-    return xplrHlprLocSrvcUbxlibDeinit();
+    esp_err_t ret;
+    ret = xplrHlprLocSrvcUbxlibDeinit();
+    return ret;
 }
 
-esp_err_t xplrLbandStartDeviceDefaultSettings(uint8_t dvcProfile, 
-                                              uint8_t i2cAddress,
-                                              uDeviceHandle_t *destHandler)
+esp_err_t xplrLbandStartDevice(uint8_t dvcProfile,
+                               xplrLbandDeviceCfg_t *dvcCfg)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (!boolRet) {
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        ret = ESP_OK;
     }
 
-    lbandDvcs[dvcProfile].dvcXtra.ahCorrData = -1;
-
-    espRet = xplrLbandPrivateConfigAllDefault(dvcProfile, i2cAddress);
-    if (espRet != ESP_OK) {
-        return espRet;
+    if ((ret == ESP_OK) && (dvcCfg == NULL)) {
+        XPLRLBAND_CONSOLE(E, "dvcCfg pointer is NULL!");
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    espRet = xplrLbandPrivateDeviceOpen(dvcProfile);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
+    if (ret == ESP_OK) {
+        lbandDvcs[dvcProfile].options.asyncIds.ahCorrData = -1;
+        lbandDvcs[dvcProfile].dvcCfg = dvcCfg;
 
-    espRet = xplrLbandOptionMultiValSet(dvcProfile, 
-                                        pLbandSettings, 
-                                        ELEMENTCNT(pLbandSettings),
-                                        U_GNSS_CFG_VAL_LAYER_RAM);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
+        ret = lbandDeviceOpen(dvcProfile);
 
-    if (destHandler != NULL) {
-        espRet = xplrLbandSendCorrectionDataAsyncStart(dvcProfile, destHandler);
-        if (espRet != ESP_OK) {
-            return espRet;
+        if (ret == ESP_OK) {
+            ret = xplrLbandOptionMultiValSet(dvcProfile, 
+                                             lbandSettings, 
+                                             ELEMENTCNT(lbandSettings),
+                                             U_GNSS_CFG_VAL_LAYER_RAM);
+            if (ret == ESP_OK) {
+                if (lbandDvcs[dvcProfile].dvcCfg->destHandler != NULL) {
+                    XPLRLBAND_CONSOLE(D, "GNSS destination handler found in config. Starting async sender.");
+                    ret = xplrLbandSendCorrectionDataAsyncStart(dvcProfile);
+                } else {
+                    XPLRLBAND_CONSOLE(D, "GNSS destination handler is not set. Skipping async sender start.");
+                }
+
+                if ((ret == ESP_OK) &&
+                    (lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq != 0)) {
+                    XPLRLBAND_CONSOLE(D, "GNSS destination handler found in config. Starting async sender.");
+                    ret = lbandSetFreqFromCfg(dvcProfile);
+                }
+
+                if (ret == ESP_OK) {
+                    XPLRLBAND_CONSOLE(D, "LBAND module started successfully.");
+                } else {
+                    XPLRLBAND_CONSOLE(E, "Failed to start LBAND module!");
+                }
+            } else {
+                XPLRLBAND_CONSOLE(E, "Failed to set LBAND options!");
+            }
+        } else {
+            XPLRLBAND_CONSOLE(E, "Failed to open LBAND module!");
         }
-    }
-
-    return ESP_OK;
-}
-
-esp_err_t xplrLbandStartDevice(uint8_t dvcProfile, 
-                               xplrLbandDeviceCfg_t *dvcCfg,
-                               uDeviceHandle_t *destHandler)
-{
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
-    }
-
-    lbandDvcs[dvcProfile].dvcXtra.ahCorrData = -1;
-
-    espRet = xplrLbandPrivateSetDeviceConfig(dvcProfile, &dvcCfg->dvcSettings);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    espRet = xplrLbandPrivateSetNetworkConfig(dvcProfile, &dvcCfg->dvcNetwork);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    espRet = xplrLbandPrivateDeviceOpen(dvcProfile);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    espRet = xplrLbandOptionMultiValSet(dvcProfile, 
-                                        pLbandSettings, 
-                                        ELEMENTCNT(pLbandSettings),
-                                        U_GNSS_CFG_VAL_LAYER_RAM);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    if (destHandler != NULL) {
-        espRet = xplrLbandSendCorrectionDataAsyncStart(dvcProfile, destHandler);
-        if (espRet != ESP_OK) {
-            return espRet;
-        }
-    }
-
-    return ESP_OK;
+    } 
+    
+    return ret;
 }
 
 esp_err_t xplrLbandStopDevice(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRGNSS_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = xplrLbandSendCorrectionDataAsyncStop(dvcProfile);
+        if (ret == ESP_OK) {
+            ret = lbandDeviceClose(dvcProfile);
+            if (ret == ESP_OK) {
+                XPLRLBAND_CONSOLE(D, "Successfully stoped LBAND module!");
+            } else {
+                XPLRLBAND_CONSOLE(E, "Failed to close LBAND module!");
+            }
+        } else {
+            XPLRLBAND_CONSOLE(E, "Failed to stop async data sender!");
+        }
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    espRet = xplrLbandSendCorrectionDataAsyncStop(dvcProfile);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    espRet = xplrLbandPrivateDeviceClose(dvcProfile);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    return ESP_OK;
+    return ret;
 }
 
 uDeviceHandle_t *xplrLbandGetHandler(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (!boolRet) {
         return NULL;
     }
 
-    return &lbandDvcs[dvcProfile].dvcBase.dHandler;
+    return &lbandDvcs[dvcProfile].options.dvcHandler;
+}
+
+esp_err_t xplrLbandSetDestGnssHandler(uint8_t dvcProfile,
+                                      uDeviceHandle_t *destHandler)
+{
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = ESP_OK;
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
+    }
+
+    if ((ret == ESP_OK) && (destHandler == NULL)) {
+        XPLRLBAND_CONSOLE(E, "destHandler pointer is NULL! Cannot set GNSS destination handler.");
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        lbandDvcs[dvcProfile].dvcCfg->destHandler = destHandler;
+        XPLRLBAND_CONSOLE(D, "Successfully set GNSS device handler.");
+        XPLRLBAND_CONSOLE(D, "Stored GNSS device handler in config.");
+    }
+
+    return ret;
 }
 
 esp_err_t xplrLbandOptionSingleValSet(uint8_t dvcProfile,
                                       uint32_t keyId,
                                       uint64_t value,
-                                      uint32_t layer)
+                                      uGnssCfgValLayer_t layer)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = xplrHlprLocSrvcOptionSingleValSet(&lbandDvcs[dvcProfile].options.dvcHandler,
+                                                keyId,
+                                                value,
+                                                U_GNSS_CFG_VAL_TRANSACTION_NONE,
+                                                layer);
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    return xplrHlprLocSrvcOptionSingleValSet(&lbandDvcs[dvcProfile].dvcBase,
-                                             keyId,
-                                             value,
-                                             U_GNSS_CFG_VAL_TRANSACTION_NONE,
-                                             layer);
+    return ret;
 }
 
 esp_err_t xplrLbandOptionMultiValSet(uint8_t dvcProfile,
-                                     const uGnssCfgVal_t *pList,
+                                     const uGnssCfgVal_t *list,
                                      size_t numValues,
-                                     uint32_t layer)
+                                     uGnssCfgValLayer_t layer)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = xplrHlprLocSrvcOptionMultiValSet(&lbandDvcs[dvcProfile].options.dvcHandler,
+                                               list,
+                                               numValues,
+                                               U_GNSS_CFG_VAL_TRANSACTION_NONE,
+                                               layer);
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    return xplrHlprLocSrvcOptionMultiValSet(&lbandDvcs[dvcProfile].dvcBase,
-                                            pList,
-                                            numValues,
-                                            U_GNSS_CFG_VAL_TRANSACTION_NONE,
-                                            layer);
+    return ret;
 }
 
 esp_err_t xplrLbandOptionSingleValGet(uint8_t dvcProfile,
                                       uint32_t keyId,
-                                      void *pValue,
+                                      void *value,
                                       size_t size,
                                       uGnssCfgValLayer_t layer)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = xplrHlprLocSrvcOptionSingleValGet(&lbandDvcs[dvcProfile].options.dvcHandler,
+                                                keyId,
+                                                value,
+                                                size,
+                                                layer);
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    return xplrHlprLocSrvcOptionSingleValGet(&lbandDvcs[dvcProfile].dvcBase,
-                                             keyId,
-                                             pValue,
-                                             size,
-                                             layer);
+    return ret;
 }
 
 esp_err_t xplrLbandOptionMultiValGet(uint8_t dvcProfile,
-                                     const uint32_t *pKeyIdList,
+                                     const uint32_t *keyIdList,
                                      size_t numKeyIds,
-                                     uGnssCfgVal_t **pList,
+                                     uGnssCfgVal_t **list,
                                      uGnssCfgValLayer_t layer)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = xplrHlprLocSrvcOptionMultiValGet(&lbandDvcs[dvcProfile].options.dvcHandler,
+                                               keyIdList,
+                                               numKeyIds,
+                                               list,
+                                               layer);
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    return xplrHlprLocSrvcOptionMultiValGet(&lbandDvcs[dvcProfile].dvcBase,
-                                            pKeyIdList,
-                                            numKeyIds,
-                                            pList,
-                                            layer);
+    return ret;
 }
 
 esp_err_t xplrLbandSetFrequency(uint8_t dvcProfile, uint32_t frequency)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = lbandSetFreqFromPrm(dvcProfile, frequency);
+        if (ret == ESP_OK) {
+            lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq = frequency;
+            XPLRLBAND_CONSOLE(D, "Stored frequency into LBAND config!");
+        } else {
+            XPLRLBAND_CONSOLE(E, "Could net set LBAND frequency!");
+        }
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    espRet = xplrLbandOptionSingleValSet(dvcProfile,
-                                         U_GNSS_CFG_VAL_KEY_ID_PMP_CENTER_FREQUENCY_U4, 
-                                         frequency,
-                                         U_GNSS_CFG_VAL_LAYER_RAM);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
-
-    return ESP_OK;
+    return ret;
 }
 
-esp_err_t xplrLbandSetFrequencyFromMqtt(uint8_t dvcProfile, char *mqttPayload, xplrLbandRegion region)
+esp_err_t xplrLbandSetFrequencyFromMqtt(uint8_t dvcProfile, char *mqttPayload, xplrLbandRegion_t freqRegion)
 {
-    esp_err_t ret = ESP_OK;
-    uint32_t frequency = 0;
-    
-    ret = xplrLbandParseFrequencyFromMqtt(dvcProfile, mqttPayload, region, &frequency);
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
 
-    if (ret != ESP_OK || frequency == 0) {
-        XPLRLBAND_CONSOLE(E, "Could not parse frequency!");
-        ret = ESP_FAIL;
+    if (!boolRet) {
+        ret = ESP_ERR_INVALID_ARG;
     } else {
-        ret = xplrLbandSetFrequency(dvcProfile, frequency);
-        if (ret == ESP_OK) {
-            XPLRLBAND_CONSOLE(D, 
-                              "Set LBAND location: %s frequency: %d Hz successfully!", 
-                              freqRegions[region], 
-                              frequency);
+        ret = ESP_OK;
+    }
+
+    if ((ret == ESP_OK) && (mqttPayload == NULL)) {
+        XPLRLBAND_CONSOLE(E, "mqttPayload pointer is NULL!");
+        ret = ESP_ERR_INVALID_ARG;
+    }
+
+    if (ret == ESP_OK) {
+        lbandDvcs[dvcProfile].dvcCfg->corrDataConf.region = freqRegion;
+
+        ret = lbandParseFrequencyFromMqtt(dvcProfile, mqttPayload);
+
+        if (ret != ESP_OK || lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq == 0) {
+            XPLRLBAND_CONSOLE(E, "Could not parse frequency!");
+            ret = ESP_FAIL;
         } else {
-            XPLRLBAND_CONSOLE(E, "Could not set LBAND location: %s frequency: %d Hz!", frequency);
+            ret = lbandSetFreqFromCfg(dvcProfile);
+            if (ret == ESP_OK) {
+                XPLRLBAND_CONSOLE(D,
+                                  "Set LBAND location: %s frequency: %d Hz successfully!",
+                                  freqRegions[lbandDvcs[dvcProfile].dvcCfg->corrDataConf.region],
+                                  lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq);
+            } else {
+                XPLRLBAND_CONSOLE(E,
+                                  "Could not set LBAND location: %s frequency: %d Hz!",
+                                  freqRegions[lbandDvcs[dvcProfile].dvcCfg->corrDataConf.region],
+                                  lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq);
+            }
         }
     }
 
@@ -353,220 +415,293 @@ esp_err_t xplrLbandSetFrequencyFromMqtt(uint8_t dvcProfile, char *mqttPayload, x
 
 uint32_t xplrLbandGetFrequency(uint8_t dvcProfile)
 {
+    esp_err_t espRet;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
     uint32_t ret = 0;
-    esp_err_t espRet = ESP_OK;
 
-    espRet = xplrLbandOptionSingleValGet(dvcProfile,
-                                         U_GNSS_CFG_VAL_KEY_ID_PMP_CENTER_FREQUENCY_U4,
-                                         &ret,
-                                         sizeof(ret),
-                                         U_GNSS_CFG_VAL_LAYER_RAM);
+    if (boolRet) {
+        espRet = xplrLbandOptionSingleValGet(dvcProfile,
+                                             U_GNSS_CFG_VAL_KEY_ID_PMP_CENTER_FREQUENCY_U4,
+                                             &ret,
+                                             sizeof(ret),
+                                             U_GNSS_CFG_VAL_LAYER_RAM);
 
-    if (espRet != ESP_OK) {
-        XPLRLBAND_CONSOLE(E, "Could not read frequency from LBAND module!");
-        ret = 0;
+        if (espRet != ESP_OK) {
+            XPLRLBAND_CONSOLE(E, "Could not read frequency from LBAND module!");
+            ret = 0;
+        }
     }
 
     return ret;
 }
 
-int32_t xplrLbandSendFormattedCommand(uint8_t dvcProfile, const char *pBuffer, size_t size)
+esp_err_t xplrLbandSendFormattedCommand(uint8_t dvcProfile, const char *buffer, size_t size)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    int32_t intRet;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        intRet = xplrHlprLocSrvcSendUbxFormattedCommand(&lbandDvcs[dvcProfile].options.dvcHandler,
+                                                        buffer,
+                                                        size);
+        if (intRet < 1) {
+            ret = ESP_FAIL;
+        } else {
+            ret = ESP_OK;
+        }
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    return xplrHlprLocSrvcSendUbxFormattedCommand(&lbandDvcs[dvcProfile].dvcBase.dHandler,
-                                                  pBuffer,
-                                                  size);
+    return ret;
 }
 
-esp_err_t xplrLbandSendCorrectionDataAsyncStart(uint8_t dvcProfile, uDeviceHandle_t *destHandler)
+esp_err_t xplrLbandSendCorrectionDataAsyncStart(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (!boolRet) {
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        ret = ESP_OK;
     }
 
-    if (lbandDvcs[dvcProfile].dvcXtra.ahCorrData >= 0) {
-        XPLRLBAND_CONSOLE(I, "Looks like LBAND Send Correction Data async is already running!");
-        return ESP_OK;
+    if (ret == ESP_OK) {
+        if (lbandDvcs[dvcProfile].dvcCfg->destHandler != NULL) {
+            if (lbandDvcs[dvcProfile].options.asyncIds.ahCorrData >= 0) {
+                XPLRLBAND_CONSOLE(D, "Looks like LBAND Send Correction Data async is already running!");
+            } else {
+                lbandDvcs[dvcProfile].options.asyncIds.ahCorrData = uGnssMsgReceiveStart(
+                                                                        lbandDvcs[dvcProfile].options.dvcHandler,
+                                                                        &messageIdLBand,
+                                                                        xplrLbandMessageReceivedCB,
+                                                                        lbandDvcs[dvcProfile].dvcCfg->destHandler);
+                if (lbandDvcs[dvcProfile].options.asyncIds.ahCorrData < 0) {
+                    XPLRLBAND_CONSOLE(E,
+                                      "LBAND Send Correction Data async failed to start with error code [%d]",
+                                      lbandDvcs[dvcProfile].options.asyncIds.ahCorrData);
+                    lbandDvcs[dvcProfile].options.asyncIds.ahCorrData = -1;
+                    ret = ESP_FAIL;
+                } else {
+                    XPLRLBAND_CONSOLE(D, "Started LBAND Send Correction Data async.");
+                }
+            }
+        } else {
+            XPLRLBAND_CONSOLE(W,
+                              "Gnss destination handler is not initialized [NULL]. Cannot start async sender.");
+            ret = ESP_OK;
+        }
     }
 
-    lbandDvcs[dvcProfile].dvcXtra.ahCorrData = uGnssMsgReceiveStart(lbandDvcs[dvcProfile].dvcBase.dHandler,
-                                                                    &messageIdLBand,
-                                                                    xplrLbandMessageReceivedCB,
-                                                                    destHandler);
-    if (lbandDvcs[dvcProfile].dvcXtra.ahCorrData < 0) {
-        XPLRLBAND_CONSOLE(E, 
-                          "LBAND Send Correction Data async failed to start with error code [%d]",
-                          lbandDvcs[dvcProfile].dvcXtra.ahCorrData);
-        return ESP_FAIL;
-    }
-
-    XPLRLBAND_CONSOLE(D, "Started LBAND Send Correction Data async.");
-    return ESP_OK;
+    return ret;
 }
 
 esp_err_t xplrLbandSendCorrectionDataAsyncStop(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
-    }
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+    int32_t intRet;
 
-    XPLRLBAND_CONSOLE(I, "Trying to stop LBAND Send Correction Data async.");
-    ubxRet = xplrLbandPrivateAsyncStopper(dvcProfile, lbandDvcs[dvcProfile].dvcXtra.ahCorrData);
+    if (boolRet) {
+        XPLRLBAND_CONSOLE(I, "Trying to stop LBAND Send Correction Data async.");
+        if (lbandDvcs[dvcProfile].options.asyncIds.ahCorrData < 0) {
+            XPLRLBAND_CONSOLE(I, "Looks like Correction data async sender is not running. Nothing to do.");
+            ret = ESP_OK;
+        } else {
+            intRet = lbandAsyncStopper(dvcProfile, lbandDvcs[dvcProfile].options.asyncIds.ahCorrData);
 
-    if (ubxRet == 0) {
-        lbandDvcs[dvcProfile].dvcXtra.ahCorrData = -1;
+            if (intRet == 0) {
+                lbandDvcs[dvcProfile].options.asyncIds.ahCorrData = -1;
+                ret = ESP_OK;
+            } else {
+                ret = ESP_FAIL;
+            }
+        }
     } else {
-        return ESP_FAIL;
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    return ESP_OK;
+    return ret;
 }
 
-esp_err_t xplrLbandGetDeviceInfo(uint8_t dvcProfile, xplrGnssDevInfo_t *devInfo)
+bool xplrLbandIsSendCorrectionDataAsyncRunning(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    bool ret;
+
+    if (lbandDvcs[dvcProfile].options.asyncIds.ahCorrData != -1) {
+        ret = true;
+    } else {
+        ret = false;
     }
 
-    return xplrHlprLocSrvcGetDeviceInfo(&lbandDvcs[dvcProfile].dvcBase, devInfo);
+    return ret;
+}
+
+esp_err_t xplrLbandGetDeviceInfo(uint8_t dvcProfile, xplrLocDvcInfo_t *dvcInfo)
+{
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (!boolRet) {
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        ret = ESP_OK;
+    }
+
+    if ((ret == ESP_OK) && (dvcInfo == NULL)) {
+        XPLRLBAND_CONSOLE(E, "dvcInfo pointer is NULL");
+        ret = ESP_ERR_INVALID_ARG;
+    }
+
+    if (ret == ESP_OK) {
+        ret = xplrHlprLocSrvcGetDeviceInfo(&lbandDvcs[dvcProfile].dvcCfg->hwConf,
+                                           lbandDvcs[dvcProfile].options.dvcHandler,
+                                           dvcInfo);
+    }
+
+    return ret;
 }
 
 esp_err_t xplrLbandPrintDeviceInfo(uint8_t dvcProfile)
 {
-    xplrGnssDevInfo_t pDevInfo;
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+    xplrLocDvcInfo_t dvcInfo;
 
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    if (boolRet) {
+        ret = xplrLbandGetDeviceInfo(dvcProfile, &dvcInfo);
+        if (ret == ESP_OK) {
+            ret = xplrHlprLocSrvcPrintDeviceInfo(&dvcInfo);
+        }
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
-    espRet = xplrLbandGetDeviceInfo(dvcProfile, &pDevInfo);
-    if (espRet != ESP_OK) {
-        return espRet;
-    }
+    return ret;
+}
 
-    return xplrHlprLocSrvcPrintDeviceInfo(&pDevInfo);
+/**
+ * Checks if input device profile is valid
+ */
+static bool lbandIsDvcProfileValid(uint8_t dvcProfile)
+{
+    bool ret;
+    ret = xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES);
+    return ret;
 }
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
 
-static esp_err_t xplrLbandPrivateDeviceOpen(uint8_t dvcProfile)
+static esp_err_t lbandDeviceOpen(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
-    }
-
-    return xplrHlprLocSrvcDeviceOpen(&lbandDvcs[dvcProfile].dvcBase);
+    esp_err_t ret;
+    ret = xplrHlprLocSrvcDeviceOpen(&lbandDvcs[dvcProfile].dvcCfg->hwConf,
+                                    &lbandDvcs[dvcProfile].options.dvcHandler);
+    return ret;
 }
 
-static esp_err_t xplrLbandPrivateDeviceClose(uint8_t dvcProfile)
+static esp_err_t lbandDeviceClose(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
-    }
-
-    return xplrHlprLocSrvcDeviceClose(&lbandDvcs[dvcProfile].dvcBase);
+    esp_err_t ret;
+    ret = xplrHlprLocSrvcDeviceClose(&lbandDvcs[dvcProfile].options.dvcHandler);
+    return ret;
 }
 
-esp_err_t xplrLbandPrivateConfigAllDefault(uint8_t dvcProfile, uint8_t i2cAddress)
+static int32_t lbandAsyncStopper(uint8_t dvcProfile, int32_t handler)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
+    int32_t intRet;
+    intRet = uGnssMsgReceiveStop(lbandDvcs[dvcProfile].options.dvcHandler, handler);
+    if (intRet < 0) {
+        XPLRLBAND_CONSOLE(E, "Failed to stop async function with error code [%d]!", intRet);
+    } else {
+        XPLRLBAND_CONSOLE(D, "Successfully stoped async function.");
     }
-
-    return xplrHlprLocSrvcConfigAllDefault(&lbandDvcs[dvcProfile].dvcBase, i2cAddress);
+    return intRet;
 }
 
-esp_err_t xplrLbandPrivateSetDeviceConfig(uint8_t dvcProfile, uDeviceCfg_t *deviceSettings)
+static esp_err_t lbandSetFreqFromPrm(uint8_t dvcProfile, uint32_t freq)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
-    }
+    esp_err_t ret;
 
-    return xplrHlprLocSrvcSetDeviceConfig(&lbandDvcs[dvcProfile].dvcBase, deviceSettings);
+    ret = xplrLbandOptionSingleValSet(dvcProfile,
+                                      U_GNSS_CFG_VAL_KEY_ID_PMP_CENTER_FREQUENCY_U4,
+                                      (uint64_t)freq,
+                                      U_GNSS_CFG_VAL_LAYER_RAM);
+
+    return ret;
 }
 
-esp_err_t xplrLbandPrivateSetNetworkConfig(uint8_t dvcProfile, uNetworkCfgGnss_t *deviceNetwork)
+static esp_err_t lbandSetFreqFromCfg(uint8_t dvcProfile)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        return ESP_FAIL;
-    }
+    esp_err_t ret;
 
-    return xplrHlprLocSrvcSetNetworkConfig(&lbandDvcs[dvcProfile].dvcBase, deviceNetwork);
+    ret = xplrLbandOptionSingleValSet(dvcProfile,
+                                      U_GNSS_CFG_VAL_KEY_ID_PMP_CENTER_FREQUENCY_U4,
+                                      (uint64_t)lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq,
+                                      U_GNSS_CFG_VAL_LAYER_RAM);
+
+    return ret;
 }
 
-static int32_t xplrLbandPrivateAsyncStopper(uint8_t dvcProfile, int32_t handler)
+static esp_err_t lbandParseFrequencyFromMqtt(uint8_t dvcProfile,
+                                             char *mqttPayload)
 {
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRGNSS_NUMOF_DEVICES)) {
-        return ESP_FAIL;
-    }
-
-    ubxRet = uGnssMsgReceiveStop(lbandDvcs[dvcProfile].dvcBase.dHandler, handler);
-                                 
-    if (ubxRet < 0) {
-        XPLRLBAND_CONSOLE(E, "Failed to stop async function with error code [%d]!", ubxRet);
-        return ubxRet;
-    }
-
-    XPLRLBAND_CONSOLE(I, "Successfully stoped async function.");
-    return ubxRet;
-}
-
-static esp_err_t xplrLbandParseFrequencyFromMqtt(uint8_t dvcProfile,
-                                                 char *mqttPayload,
-                                                 xplrLbandRegion region,
-                                                 uint32_t *parsedFrequency)
-{
-    esp_err_t ret = ESP_OK;
+    esp_err_t ret;
     cJSON *json, *freqs, *jregion, *current, *frequency;
     double tmpfreq = 0;
 
-    if (!xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES)) {
-        ret = ESP_FAIL;
+    if (mqttPayload == NULL) {
+        XPLRLBAND_CONSOLE(E, "mqttPayload pointer is NULL");
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        ret = ESP_OK;
     }
 
     if (ret == ESP_OK) {
         json = cJSON_Parse(mqttPayload);
 
-        if (cJSON_HasObjectItem(json, "frequencies")){
+        if (cJSON_HasObjectItem(json, "frequencies")) {
             freqs = cJSON_GetObjectItem(json, "frequencies");
-            if (cJSON_HasObjectItem(freqs, freqRegions[region])) {
-                jregion = cJSON_GetObjectItem(freqs, freqRegions[region]);
+            if (cJSON_HasObjectItem(freqs, freqRegions[lbandDvcs[dvcProfile].dvcCfg->corrDataConf.region])) {
+                jregion = cJSON_GetObjectItem(freqs,
+                                              freqRegions[lbandDvcs[dvcProfile].dvcCfg->corrDataConf.region]);
                 if (cJSON_HasObjectItem(jregion, "current")) {
                     current = cJSON_GetObjectItem(jregion, "current");
                     if (cJSON_HasObjectItem(current, "value")) {
                         frequency = cJSON_GetObjectItem(current, "value");
                         sscanf(cJSON_GetStringValue(frequency), "%lf", &tmpfreq);
-                        *parsedFrequency = (uint32_t)((1e+6) * tmpfreq);
+                        lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq = (uint32_t)((1e+6) * tmpfreq);
                     } else {
                         XPLRLBAND_CONSOLE(E, "Theres no frequency \"value\" object.");
-                        *parsedFrequency = 0;
+                        lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq = 0;
                         ret = ESP_FAIL;
                     }
                 } else {
                     XPLRLBAND_CONSOLE(E, "Theres no \"current\" object.");
-                    *parsedFrequency = 0;
+                    lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq = 0;
                     ret = ESP_FAIL;
                 }
             } else {
-                XPLRLBAND_CONSOLE(E, "Theres no \"%s\" location object.", freqRegions[region]);
-                *parsedFrequency = 0;
+                XPLRLBAND_CONSOLE(E,
+                                  "Theres no \"%s\" location object.",
+                                  freqRegions[lbandDvcs[dvcProfile].dvcCfg->corrDataConf.region]);
+                lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq = 0;
                 ret = ESP_FAIL;
             }
         } else {
             XPLRLBAND_CONSOLE(E, "Theres no \"frequencies\" object.");
-            *parsedFrequency = 0;
+            lbandDvcs[dvcProfile].dvcCfg->corrDataConf.freq = 0;
             ret = ESP_FAIL;
         }
 
         cJSON_Delete(json);
     }
-    
-    return ESP_OK;
+
+    return ret;
 }
 
 /* ----------------------------------------------------------------
@@ -574,38 +709,41 @@ static esp_err_t xplrLbandParseFrequencyFromMqtt(uint8_t dvcProfile,
  * -------------------------------------------------------------- */
 
 static void xplrLbandMessageReceivedCB(uDeviceHandle_t gnssHandle,
-                                       const uGnssMessageId_t *pMessageId,
+                                       const uGnssMessageId_t *messageId,
                                        int32_t errorCodeOrLength,
-                                       void *pCallbackParam)
+                                       void *callbackParam)
 {
     /**
      * Standard is 536 bytes.
      * We allocate  32 bytes extra for future proofing if needed
      */
-    char pBuffer[568];
+    char buffer[568];
     int32_t intRet;
+    int32_t lbandCbRead;
 
-    if ((errorCodeOrLength > 0) && (errorCodeOrLength <= ELEMENTCNT(pBuffer))) {
-        int32_t lbandCbRead = uGnssMsgReceiveCallbackRead(gnssHandle, pBuffer, errorCodeOrLength);
+    if ((errorCodeOrLength > 0) && (errorCodeOrLength <= ELEMENTCNT(buffer))) {
+        lbandCbRead = uGnssMsgReceiveCallbackRead(gnssHandle, buffer, errorCodeOrLength);
 
-        intRet = xplrHlprLocSrvcSendUbxFormattedCommand((uDeviceHandle_t *)pCallbackParam, 
-                                                        pBuffer,
+        intRet = xplrHlprLocSrvcSendUbxFormattedCommand((uDeviceHandle_t *)callbackParam,
+                                                        buffer,
                                                         lbandCbRead);
 
         if (intRet < 0 || intRet != lbandCbRead) {
             XPLRLBAND_CONSOLE(E,
-                                "Error sending LBAND correction data to LBAND, size mismatch: was [%d] bytes | sent [%d] bytes!",
-                                intRet, 
-                                lbandCbRead);
+                              "Error sending LBAND correction data to LBAND, size mismatch: was [%d] bytes | sent [%d] bytes!",
+                              intRet,
+                              lbandCbRead);
         } else {
-            XPLRLBAND_CONSOLE(I,
-                                "Sent LBAND correction data size [%d]",
-                                lbandCbRead, 
-                                intRet);
+            XPLRLBAND_CONSOLE(D,
+                              "Sent LBAND correction data size [%d]",
+                              intRet);
+            if (lbandDvcs[0].dvcLog.logEnable) {
+                XPLRLOG(&lbandDvcs[0].dvcLog, buffer);
+            }
         }
     } else {
         XPLRLBAND_CONSOLE(W,
                           "Message received [%d bytes] which is invalid! Length must be between [1] and [%d] bytes!",
-                          errorCodeOrLength, ELEMENTCNT(pBuffer));
+                          errorCodeOrLength, ELEMENTCNT(buffer));
     }
 }

@@ -6,7 +6,7 @@
 # Communication Service (cellular)
 
 ## Description
-Provided library makes interface with ublox [LARA-R6](https://www.u-blox.com/en/product/lara-r6-series) cellular  module as easy as possible offering to the user high level functions for:
+Provided library makes interface with u-blox [LARA-R6](https://www.u-blox.com/en/product/lara-r6-series) cellular  module as easy as possible offering to the user high level functions for:
 - configuring network parameters.
 - registering to a cellular provider.
 <br>

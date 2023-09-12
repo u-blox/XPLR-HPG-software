@@ -53,8 +53,8 @@
 #endif
 
 /**
- * If paths not found in VScode: 
- *      press keys --> <ctrl+shift+p> 
+ * If paths not found in VScode:
+ *      press keys --> <ctrl+shift+p>
  *      and select --> ESP-IDF: Add vscode configuration folder
  */
 
@@ -87,13 +87,13 @@ void app_main(void)
 {
     printf("XPLR-HPG kit Demo\n");
 
-    /* 
-     * Initialize HPG-XPLR-HPG kit using its board file 
+    /*
+     * Initialize HPG-XPLR-HPG kit using its board file
      */
     xplrBoardInit();
 
-    /* 
-     * Check that board has been initialized 
+    /*
+     * Check that board has been initialized
      */
     if (xplrBoardIsInit()) {
         printf("XPLR-HPG kit has already initialized. \n");
@@ -101,8 +101,8 @@ void app_main(void)
         printf("XPLR-HPG kit has not been initialized. \n");
     }
 
-    /* 
-     * Print board info 
+    /*
+     * Print board info
      */
     xplrBoardGetInfo(XPLR_BOARD_INFO_NAME, buff_to_print);
     printf("Board Info Name: %s \n", buff_to_print);

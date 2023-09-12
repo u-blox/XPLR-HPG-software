@@ -71,7 +71,7 @@ xplr_thingstream_error_t xplrThingstreamApiMsgCreate(xplr_thingstream_api_t cmd,
                                                      xplr_thingstream_t *instance);
 
 /**
- * @brief Configure thingstream point perfect settings.
+ * @brief Configure thingstream PointPerfect settings.
  *        Data provided must include the ztp response payload.
  *
  * @param  data         configuration payload from thingstream.
@@ -81,10 +81,10 @@ xplr_thingstream_error_t xplrThingstreamApiMsgCreate(xplr_thingstream_api_t cmd,
  */
 xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
                                                  xplr_thingstream_pp_region_t region,
-                                                 xplr_thingstream_pp_settings_t *settings);
+                                                 xplr_thingstream_t *settings);
 
 /**
- * @brief Returns point perfect server info based on given argument
+ * @brief Returns PointPerfect server info based on given argument
  *
  * @param data          thingstream data payload.
  * @param value         char array to store required info.
@@ -119,7 +119,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseMqttSupport(const char *data,
                                                            bool *mqtt);
 
 /**
- * @brief Returns point perfect related topic info for given type
+ * @brief Returns PointPerfect related topic info for given type
  *
  * @param data      thingstream data payload.
  * @param region    thingstream location service region type
@@ -135,7 +135,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
                                                          xplr_thingstream_pp_topic_t *topic);
 
 /**
- * @brief Returns minimum required point perfect topics info by region
+ * @brief Returns minimum required PointPerfect topics info by region
  *
  * @param data      thingstream data payload.
  * @param region    thingstream location service region type
@@ -149,7 +149,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegion(const char *da
                                                                   xplr_thingstream_pp_topic_t *topics);
 
 /**
- * @brief Returns all region related point perfect topics info
+ * @brief Returns all region related PointPerfect topics info
  *
  * @param data      thingstream data payload.
  * @param region    thingstream location service region type
@@ -163,7 +163,7 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char 
                                                                      xplr_thingstream_pp_topic_t *topics);
 
 /**
- * @brief Returns all point perfect topics info
+ * @brief Returns all PointPerfect topics info
  *
  * @param data      thingstream data payload.
  * @param type      topic type to parse info from.
@@ -270,8 +270,67 @@ bool xplrThingstreamPpMsgIsFrequency(const char *name, const xplr_thingstream_t 
  * @param instance  thingstream instance.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
 */
-xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_region_t region, xplr_thingstream_pp_plan_t plan,
+xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_region_t region,
+                                                       xplr_thingstream_pp_plan_t plan,
                                                        xplr_thingstream_t *instance);
+
+/**
+ * @brief Configure thingstream PointPerfect settings.
+ *        Data provided must include the payload read
+ *        from the configuration file of the SD card.
+ *
+ * @param  data         configuration payload from SD card.
+ * @param  region       thingstream location service region type
+ * @param  instance     thingstream instance to be configured.
+ * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
+ */
+xplr_thingstream_error_t xplrThingstreamPpConfigFromFile(char *data,
+                                                         xplr_thingstream_pp_region_t region,
+                                                         xplr_thingstream_t *instance);
+
+/**
+ * @brief Configure thingstream communication thing settings.
+ *        Data provided must include the payload read
+ *        from the configuration file of the SD card.
+ *
+ * @param  data         configuration payload from SD card.
+ * @param  instance     thingstream communication thing instance to be configured.
+ * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
+ */
+xplr_thingstream_error_t xplrThingstreamCommConfigFromFile(char *data,
+                                                           xplr_thingstream_comm_thing_t *instance);
+
+/**
+ * @brief Function that halts the logging of the thingstream module
+ * 
+ * @param  instance     thingstream instance to be configured.
+ * @return true if succeeded to halt the module or false otherwise.
+*/
+bool xplrThingstreamPpHaltLogModule(xplr_thingstream_t *instance);
+
+/**
+ * @brief Function that starts the logging of the thingstream module
+ * 
+ * @param  instance     thingstream instance to be configured.
+ * @return true if succeeded to start the module or false otherwise
+*/
+bool xplrThingstreamPpStartLogModule(xplr_thingstream_t *instance);
+
+/**
+ * @brief Function that halts the logging of the thingstream module
+ * 
+ * @param  instance     thingstream communication thing instance to be configured.
+ * @return true if succeeded to halt the module or false otherwise.
+*/
+bool xplrThingstreamCommHaltLogModule(xplr_thingstream_comm_thing_t *instance);
+
+/**
+ * @brief Function that starts the logging of the thingstream module
+ * 
+ * @param  instance     thingstream communication thing instance to be configured.
+ * @return true if succeeded to start the module or false otherwise
+*/
+bool xplrThingstreamCommStartLogModule(xplr_thingstream_comm_thing_t *instance);
 
 #ifdef __cplusplus
 }

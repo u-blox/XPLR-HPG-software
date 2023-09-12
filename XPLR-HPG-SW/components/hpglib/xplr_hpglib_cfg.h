@@ -56,8 +56,13 @@ extern "C" {
 /**
  * Enable debug log output to serial for hpglib modules.
  */
-#define XPLR_HPGLIB_SERIAL_DEBUG_ENABLED    1U
+#define XPLR_HPGLIB_SERIAL_DEBUG_ENABLED    (1U)
 #define XPLR_HPGLIB_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
+
+/**
+ * Enable logging to SD card for hpglib modules.
+*/
+#define XPLR_HPGLIB_LOG_ENABLED    1U
 
 /**
  * Select in which modules to activate debug serial output.
@@ -72,11 +77,33 @@ extern "C" {
 #define XPLRGNSS_DEBUG_ACTIVE                          (1U)
 #define XPLRLBAND_DEBUG_ACTIVE                         (1U)
 #define XPLRZTP_DEBUG_ACTIVE                           (1U)
-#define XPLRZTPJSONPARSER_DEBUG_ACTIVE                 (1U)
 #define XPLRWIFISTARTER_DEBUG_ACTIVE                   (1U)
 #define XPLRWIFIDNS_DEBUG_ACTIVE                       (1U)
 #define XPLRWIFIWEBSERVER_DEBUG_ACTIVE                 (1U)
 #define XPLRMQTTWIFI_DEBUG_ACTIVE                      (1U)
+#define XPLRLOG_DEBUG_ACTIVE                           (0U)         /*< These debug messages are off by default. Please read the readme of log_service before enabling them*/
+#define XPLRSD_DEBUG_ACTIVE                            (0U)         /*< These debug messages are off by default. Please read the readme of log_service before enabling them*/
+#define XPLRCELL_NTRIP_DEBUG_ACTIVE                    (1U)
+#define XPLRWIFI_NTRIP_DEBUG_ACTIVE                    (1U)
+
+
+/**
+ * Select in which modules to activate the logging in the SD card
+*/
+#define XPLRGNSS_LOG_ACTIVE                            (1U)
+#define XPLRLBAND_LOG_ACTIVE                           (1U)
+#define XPLRCOM_LOG_ACTIVE                             (1U)
+#define XPLRCELL_HTTP_LOG_ACTIVE                       (1U)
+#define XPLRCELL_MQTT_LOG_ACTIVE                       (1U)
+#define XPLRLOCATION_LOG_ACTIVE                        (1U)
+#define XPLRNVS_LOG_ACTIVE                             (1U)
+#define XPLR_THINGSTREAM_LOG_ACTIVE                    (1U)
+#define XPLRWIFISTARTER_LOG_ACTIVE                     (1U)
+#define XPLRWIFIWEBSERVER_LOG_ACTIVE                   (1U)
+#define XPLRMQTTWIFI_LOG_ACTIVE                        (1U)
+#define XPLRZTP_LOG_ACTIVE                             (1U)
+#define XPLRWIFI_NTRIP_LOG_ACTIVE                      (1U)
+#define XPLRCELL_NTRIP_LOG_ACTIVE                      (1U)
 
 /**
  * Configure hpg module settings
@@ -87,9 +114,23 @@ extern "C" {
 #define XPLRLBAND_NUMOF_DEVICES                        (1U)
 #define XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_NAME           (64U)
 #define XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_PAYLOAD        (10U * 1024U)
+#define XPLRZTP_PAYLOAD_SIZE_MAX                       (6U * 1024U)
 #if (XPLRCELL_MQTT_NUMOF_CLIENTS > 1)
 #error "Only one (1) MQTT client is currently supported from ubxlib."
 #endif
+#define XPLRCELL_NTRIP_RECEIVE_DATA_SIZE (2U * 1024U)
+#define XPLRCELL_NTRIP_GGA_INTERVAL_S (20)
+#define XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE (2U * 1024U)
+#define XPLRWIFI_NTRIP_GGA_INTERVAL_S (20)
+
+/**
+ * Sizes for the logging buffers, used to format the logging messages
+ * Normally, the small size buffer should be enough, however, when logging
+ * large strings such as certificates or json payloads large buffer size
+ * might be needed.
+*/
+#define XPLRLOG_BUFFER_SIZE_SMALL                      (512U)
+#define XPLRLOG_BUFFER_SIZE_LARGE                      (5U * 1024U)
 
 /**
  * Macro definition to "surpress" any compiler warning message regarding "unused variables".

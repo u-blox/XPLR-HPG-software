@@ -36,6 +36,17 @@ To build the example please follow the steps described bellow:
 6. Navigate to the `Board Options` section and select the board you wish to build the example for.
 7. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
+<br>
+
+## Kconfig/Build Definitions-Macros
+This is a description of definitions and macros configured by **[Kconfig](./../../../docs/README_kconfig.md)**.\
+In most cases, these values can be directly overwritten in the source code or just configured by running **[Kconfig](./../../../docs/README_kconfig.md)** before building.\
+**[Kconfig](./../../../docs/README_kconfig.md)** is used for easy/fast parameter configuration and building, without the need of modifying the source code.
+
+Name | Default value | Belongs to | Description | Manual overwrite notes
+--- | --- | --- | --- | ---
+**`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" | **[boards](./../../../components/boards)** | Board variant to build firmware for.|
+<br>
 
 ## Modules-Components used
 

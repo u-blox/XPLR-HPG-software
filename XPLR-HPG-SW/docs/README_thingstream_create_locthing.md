@@ -6,7 +6,7 @@
 # Thingstream - Creating a PointPerfect location thing
 
 ## Description 
-A **Location thing** is a device that communicates with **Point Perfect** (and/or other services such as **CloudLocate** and **CellLocate/AssistNow**) services and has the ability to get correction data.\
+A **Location thing** is a device that communicates with **PointPerfect** (and/or other services such as **CloudLocate** and **CellLocate/AssistNow**) services and has the ability to get correction data.\
 Inside a **PointPerfect location thing** page you can also find all the needed **credential settings** and **MQTT** topics to setup a communication.\
 We show 2 ways of creating a **PointPerfect location thing**:
 - Using paid subscriptions
@@ -48,11 +48,11 @@ The steps to create one from the **Location Things** menu is exactly the same wi
 
 ### Video - Using paid services
 Follow the video below for a more detailed explanation of the steps above:\
-[![Thingstream - Creating a device profile for Point Perfect](./../media/shared/misc/vid_rsz.jpg)](https://youtu.be/2ffHDBouWTY)
+[![Thingstream - Creating a device profile for PointPerfect](./../media/shared/misc/vid_rsz.jpg)](https://youtu.be/2ffHDBouWTY)
 
 ### Video - Using promo code
 Follow the video below for a more detailed explanation of the steps above:\
-[![Thingstream - Creating a device profile for Point Perfect](./../media/shared/misc/vid_rsz.jpg)](https://youtu.be/XqxAFHrvEUE)
+[![Thingstream - Creating a device profile for PointPerfect](./../media/shared/misc/vid_rsz.jpg)](https://youtu.be/XqxAFHrvEUE)
 
 <br>
 

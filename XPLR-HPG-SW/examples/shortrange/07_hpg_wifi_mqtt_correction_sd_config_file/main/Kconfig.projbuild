@@ -1,0 +1,32 @@
+menu "XPLR HPG Options"
+
+    menu "Dead Reckoning"
+        choice XPLR_GNSS_DEADRECKONING_ENABLE
+            prompt "Dead reckoning state"
+            config XPLR_DR_OPT_DISABLE
+                bool "Disable"
+            config XPLR_DR_OPT_ENABLE
+                bool "Enable"
+        endchoice
+        
+        config XPLR_GNSS_DEADRECKONING_ENABLE
+            int
+            default 0 if XPLR_DR_OPT_DISABLE
+            default 1 if XPLR_DR_OPT_ENABLE
+    endmenu
+
+    menu "Wi-Fi Settings"
+        config XPLR_WIFI_SSID
+            string "Access Point SSID"
+            default "ssid"
+            help
+                Fill in the AP SSID you wish to connect to.
+
+        config XPLR_WIFI_PASSWORD
+            string "Access Point Password"
+            default "password"
+            help
+                Fill in the AP SSID you wish to connect to.
+    endmenu
+
+endmenu

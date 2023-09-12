@@ -24,13 +24,23 @@
 #include "xplr_nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "xplr_log.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-#if (1 == XPLRNVS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRNVS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRNVS_LOG_ACTIVE))
 #define XPLRNVS_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRNVS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
+#define XPLRNVS_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    if (nvsLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+        XPLRLOG(&nvsLog,buff2Log);}
+#elif ((0 == XPLRNVS_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
+#define XPLRNVS_CONSOLE(tag, message, ...) if (nvsLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+        XPLRLOG(&nvsLog,buff2Log);}
 #else
 #define XPLRNVS_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -43,6 +53,11 @@
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
 const char nvsPartitionName[] = "nvs";  /* partition name to store configuration settings */
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
+static xplrLog_t nvsLog;
+static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
+#endif
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -61,6 +76,24 @@ xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *namespace)
     const esp_partition_t *nvs_partition;
     esp_err_t err;
     xplrNvs_error_t ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
+    /* initialize logging*/
+    xplrLog_error_t logErr;
+    /* We check if the SD struct is null (indicating first comer). If yes initialize log module, 
+       else return OK */
+    if (nvsLog.sd == NULL) {
+        logErr = xplrLogInit(&nvsLog, XPLR_LOG_DEVICE_INFO, "/nvs.log", 100, XPLR_SIZE_MB);
+        if (logErr == XPLR_LOG_OK) {
+            nvsLog.logEnable = true;
+        } else {
+            nvsLog.logEnable = false;
+        }
+    } else {
+        logErr = XPLR_LOG_OK;
+        XPLRNVS_CONSOLE(W, "Logging to NVS already initialized.");
+    }
+    nvs->logCfg = &nvsLog;
+#endif
 
     /* initialize nvs */
     err = nvs_flash_init();
@@ -280,7 +313,7 @@ xplrNvs_error_t xplrNvsReadU32(xplrNvs_t *nvs, const char *key, uint32_t *value)
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
         } else {
             ret = XPLR_NVS_OK;
-            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lu>", key,  nvs->tag, *value);
+            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%u>", key,  nvs->tag, *value);
         }
     }
 
@@ -410,7 +443,7 @@ xplrNvs_error_t xplrNvsReadI64(xplrNvs_t *nvs, const char *key, int64_t *value)
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
         } else {
             ret = XPLR_NVS_OK;
-            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, *value);
+            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lld>", key,  nvs->tag, *value);
         }
     }
 
@@ -464,7 +497,7 @@ xplrNvs_error_t xplrNvsReadStringHex(xplrNvs_t *nvs, const char *key, char *valu
                             nvs->tag);
         } else {
             ret = XPLR_NVS_OK;
-            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <0x%x>", key,  nvs->tag, value);
+            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <0x%x>", key,  nvs->tag, (unsigned int)value);
         }
     }
 
@@ -559,7 +592,7 @@ xplrNvs_error_t xplrNvsWriteU32(xplrNvs_t *nvs, const char *key, uint32_t value)
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
             } else {
                 ret = XPLR_NVS_OK;
-                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lu>", key,  nvs->tag, value);
+                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lu>", key,  nvs->tag, (long unsigned int)value);
             }
         }
     }
@@ -719,7 +752,7 @@ xplrNvs_error_t xplrNvsWriteI64(xplrNvs_t *nvs, const char *key, int64_t value)
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
             } else {
                 ret = XPLR_NVS_OK;
-                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, value);
+                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lld>", key,  nvs->tag, (int64_t)value);
             }
         }
     }
@@ -785,13 +818,54 @@ xplrNvs_error_t xplrNvsWriteStringHex(xplrNvs_t *nvs, const char *key, const cha
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
             } else {
                 ret = XPLR_NVS_OK;
-                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <0x%x>", key,  nvs->tag, value);
+                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <0x%x>", key,  nvs->tag, (unsigned int)value);
             }
         }
     }
 
     ret = nvsClose(nvs);
 
+    return ret;
+}
+
+bool xplrNvsHaltLogModule(xplrNvs_t *nvs)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
+    if(nvs->logCfg != NULL) {
+        nvs->logCfg->logEnable = false;
+        ret = true;
+    } else {
+        /* log module is not initialized thus do nothing and return false*/
+        ret = false;
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrNvsStartLogModule(xplrNvs_t *nvs)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
+    xplrLog_error_t logErr;
+    if(nvs->logCfg != NULL) {
+        nvs->logCfg->logEnable = true;
+        ret = true;
+    } else {
+        logErr = xplrLogInit(&nvsLog, XPLR_LOG_DEVICE_INFO, "/nvs.log", 100, XPLR_SIZE_MB);
+        if (logErr == XPLR_LOG_OK) {
+            nvsLog.logEnable = true;
+        } else {
+            nvsLog.logEnable = false;
+        }
+        nvs->logCfg = &nvsLog;
+        ret = nvsLog.logEnable;
+    }
+#else 
+    ret = false;
+#endif
     return ret;
 }
 

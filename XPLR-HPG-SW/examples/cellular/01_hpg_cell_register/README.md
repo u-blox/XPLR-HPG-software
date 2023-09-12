@@ -48,11 +48,18 @@ Please follow the steps described bellow:<br>
    #define XPLRCOM_DEBUG_ACTIVE                           (1U)
    ...
    ```
-4. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
-5. In case you have already compiled another project and the `sdkconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
-6. Navigate to the `Board Options` section and select the board you wish to build the example for.
-7. Go to the `XPLR HPG Options -> Cellular Settings -> APN value of cellular provider` section and type in the APN value of your network provider.
-8. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
+4. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
+   For more information about the **logging service of hpglib** follow **[this guide](./../../../components/hpglib/src/log_service/README.md)**
+   ```
+   ...
+   #define XPLRCOM_LOG_ACTIVE                             (1U)
+   ...
+   ```
+5. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
+6. In case you have already compiled another project and the `sdkconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
+7. Navigate to the `Board Options` section and select the board you wish to build the example for.
+8. Go to the `XPLR HPG Options -> Cellular Settings -> APN value of cellular provider` section and type in the APN value of your network provider.
+9. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
 <br>
 
@@ -63,7 +70,7 @@ In most cases, these values can be directly overwritten in the source code or ju
 
 Name | Default value | Belongs to | Description | Manual overwrite notes
 --- | --- | --- | --- | ---
-**`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" |  **[boards](./../../../components/boards)** | Board variant to build firmware for .|
+**`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" |  **[boards](./../../../components/boards)** | Board variant to build firmware for.|
 **`CONFIG_XPLR_CELL_APN`** | "internet" |  **[hpg_cell_register](./../01_hpg_cell_register/main/hpg_cell_register.c)** | APN value of the cellular provider in use. | You can replace this value freely in the app.
 <br>
 
@@ -74,7 +81,8 @@ You can change local macros as you wish inside the app.
 
 Name | Description
 --- | ---
-**```APP_SERIAL_DEBUG_ENABLED 1U```** | Switches app specific debug printing messages ON or OFF
+**`APP_SERIAL_DEBUG_ENABLED`** | Switches app specific debug printing messages ON or OFF
+**`APP_SD_LOGGING_ENABLED`** | Switches logging of the application messages to the SD card ON or OFF.
 <br>
 
 ## Modules-Components used
@@ -85,4 +93,6 @@ Name | Description
 **[boards](./../../../components/boards)** | Board variant selection
 **[hpglib/common](./../../../components/hpglib/src/common)** | Common functions.
 **[hpglib/communication service](./../../../components/hpglib/src/com_service)** | cellular communication library
+**[hpglib/log_service](./../../../components/hpglib/src/log_service/)** | XPLR logging service.
+**[hpglib/sd_service](./../../../components/hpglib/src/sd_service/)** | Internally used by **[log_service](./../../../components/hpglib/src/log_service/)**.
 <br>

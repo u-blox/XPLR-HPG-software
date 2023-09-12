@@ -38,4 +38,4 @@ Name | Description
 --- | --- 
 **[boards](./../../components/boards/)** | Board variant selection
 **[hpglib/common](./../../components/hpglib/src/common)** | Common functions.
-**[hpglib/xplr_ztp_json_parser/](./../xplr_ztp_json_parser/)** | Parser for Zero Touch Provisioning data. Used here in order to be able to pass ZTP style topics.
+**[hpglib/thingstream_service/](./../../components/hpglib/src/thingstream_service)** | Parser for Zero Touch Provisioning data. Used here in order to be able to pass ZTP style topics.

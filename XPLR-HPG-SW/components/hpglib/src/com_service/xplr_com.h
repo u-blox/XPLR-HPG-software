@@ -159,6 +159,33 @@ xplrCom_error_t xplrComCellPowerDown(int8_t dvcProfile);
  */
 void xplrComCellPowerResume(int8_t dvcProfile);
 
+/**
+ * @brief Retrieve device info.
+ *
+ * @param  dvcProfile device profile id. Stored in xplrCom_cell_config_t
+ * @param  model buffer holding device model. Must be at least 32 bytes long
+ * @param  fw buffer holding device fw. Must be at least 32 bytes long
+ * @param  imei buffer holding device imei. Must be at least 32 bytes long
+ * @return XPLR_COM_OK on success, XPLR_COM_ERROR otherwise.
+ */
+xplrCom_error_t xplrComCellGetDeviceInfo(int8_t dvcProfile, char *model, char *fw, char *imei);
+
+/**
+ * @brief Function that halts the logging of the com module
+ * 
+ * @param dvcProfile device profile id. Stored in xplrCom_cell_config_t
+ * @return true if succeeded to halt the module or false otherwise.
+*/
+bool xplrComHaltLogModule(int8_t dvcProfile);
+
+/**
+ * @brief Function that starts the logging of the com module
+ * 
+ * @param dvcProfile device profile id. Stored in xplrCom_cell_config_t
+ * @return true if succeeded to start the module or false otherwise
+*/
+bool xplrComStartLogModule(int8_t dvcProfile);
+
 #ifdef __cplusplus
 }
 #endif

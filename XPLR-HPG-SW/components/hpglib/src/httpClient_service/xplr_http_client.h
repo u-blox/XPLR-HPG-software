@@ -135,6 +135,25 @@ xplrCell_http_error_t xplrCellHttpGetRequest(int8_t dvcProfile,
                                              int8_t clientId,
                                              xplrCell_http_dataTransfer_t *data);
 
+/**
+ * @brief Function that halts the logging of the http cell module
+ * 
+ * @param dvcProfile   device profile id. Stored in xplrCom_cell_config_t
+ * @param clientId     HTTP client index to perform get request.
+ * @return true if succeeded to halt the module or false otherwise.
+ * 
+*/
+bool xplrCellHttpHaltLogModule(int8_t dvcProfile, int8_t clientId);
+
+/**
+ * @brief Function that starts the logging of the http cell module
+ * 
+ * @param dvcProfile   device profile id. Stored in xplrCom_cell_config_t
+ * @param clientId     HTTP client index to perform get request.
+ * @return true if succeeded to start the module or false otherwise
+*/
+bool xplrCellHttpStartLogModule(int8_t dvcProfile, int8_t clientId);
+
 #ifdef __cplusplus
 }
 #endif

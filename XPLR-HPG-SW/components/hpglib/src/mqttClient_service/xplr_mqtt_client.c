@@ -44,8 +44,17 @@
 #define XPLRCELL_MQTT_PP_TOKEN_LENGTH           (XPLRCELL_MQTT_TOKEN_LENGTH - 7)
 #define XPLRCELL_MQTT_PP_MD5_LENGTH             (33)
 
-#if (1 == XPLRCELL_MQTT_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRCELL_MQTT_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRCELL_MQTT_LOG_ACTIVE))
 #define XPLRCELL_MQTT_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRCELL_MQTT_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
+#define XPLRCELL_MQTT_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    if (cellMqttLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+        XPLRLOG(&cellMqttLog,buff2Log);}
+#elif ((0 == XPLRCELL_MQTT_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
+#define XPLRCELL_MQTT_CONSOLE(tag, message, ...) if (cellMqttLog.logEnable){\
+        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+        XPLRLOG(&cellMqttLog,buff2Log);}
 #else
 #define XPLRCELL_MQTT_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -76,6 +85,10 @@ typedef struct xplrCell_Mqtt_type {
 
 static const char nvsNamespace[] = "mqttCell_";
 static xplrCell_mqtt_t mqtt[XPLRCOM_NUMOF_DEVICES];
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
+static xplrLog_t cellMqttLog;
+static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
+#endif
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -122,6 +135,19 @@ xplrCell_mqtt_error_t xplrCellMqttInit(int8_t dvcProfile,
     uDeviceHandle_t  handler = xplrComGetDeviceHandler(dvcProfile);
     xplrCell_mqtt_error_t ret;
 
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
+    xplrLog_error_t err = xplrLogInit(&cellMqttLog,
+                                      XPLR_LOG_DEVICE_INFO,
+                                      "/cellmqtt.log",
+                                      200,
+                                      XPLR_SIZE_MB);
+    if (err == XPLR_LOG_OK) {
+        cellMqttLog.logEnable = true;
+    } else {
+        cellMqttLog.logEnable = false;
+    }
+    client->logCfg = &cellMqttLog;
+#endif
     if (dvcProfile < XPLRCELL_MQTT_NUMOF_CLIENTS) {
         /* Check tha selected mqtt service is supported by the module */
         if (client->settings.useFlexService) {
@@ -309,10 +335,13 @@ int32_t xplrCellMqttUpdateTopicList(int8_t dvcProfile, int8_t clientId)
     int32_t ubxErrorCode;
     bool isConnected;
     char name[XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_NAME] = {0};
+    char namePrev[XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_NAME] = {0};
     char buffer[XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_PAYLOAD] = {0};
     size_t  bufferSizeOut;
     uint32_t numOfBytesRead = 0;
     uint8_t numOfMsgAvailable = 0;
+    int32_t topicBufIdx = 0;
+    bool isMsgSegmented;
     int32_t ret;
 
     isConnected = uMqttClientIsConnected(ubxClientPrv);
@@ -324,6 +353,9 @@ int32_t xplrCellMqttUpdateTopicList(int8_t dvcProfile, int8_t clientId)
             ret = 0;
             for (uint8_t msg = 0; msg < numOfMsgAvailable; msg++) {
                 bufferSizeOut = XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_PAYLOAD;
+                if (strlen(name) > 0) {
+                    memcpy(namePrev, name, strlen(name));
+                }
                 ubxErrorCode = uMqttClientMessageRead(ubxClientPrv,
                                                       name,
                                                       XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_NAME,
@@ -332,29 +364,60 @@ int32_t xplrCellMqttUpdateTopicList(int8_t dvcProfile, int8_t clientId)
                                                       NULL);
 
                 if (ubxErrorCode < 0) {
-                    XPLRCELL_MQTT_CONSOLE(E, "Client %d failed to read topic %s with code (%d).",
-                                          clientId, name, ubxErrorCode);
+                    XPLRCELL_MQTT_CONSOLE(E,
+                                          "Client %d failed to read topic %s with code (%d).",
+                                          clientId,
+                                          name,
+                                          ubxErrorCode);
                     ret = -1;
                 } else {
                     numOfBytesRead = bufferSizeOut;
-                    XPLRCELL_MQTT_CONSOLE(D, "Client %d read %d bytes from topic %s.",
-                                          clientId, numOfBytesRead, name);
+                    XPLRCELL_MQTT_CONSOLE(D,
+                                          "Client %d read %d bytes from topic %s.",
+                                          clientId,
+                                          numOfBytesRead,
+                                          name);
+                    if (memcmp(namePrev, name, strlen(name)) == 0) {
+                        isMsgSegmented = true;
+                    } else {
+                        isMsgSegmented = false;
+                    }
                     ret = numOfBytesRead;
                 }
 
                 if (numOfBytesRead > 0) {
                     for (uint8_t i = 0; i < client->numOfTopics; i++) {
                         if (strstr(client->topicList[i].name, name) != NULL) {
-                            if (client->topicList[i].rxBufferSize >= numOfBytesRead) {
-                                memcpy(client->topicList[i].rxBuffer, buffer, numOfBytesRead);
-                                client->topicList[i].msgSize = numOfBytesRead;
-                                client->topicList[i].msgAvailable = true;
-                                XPLRCELL_MQTT_CONSOLE(D, "Client %d, topic %s updated. Msg size %d bytes",
-                                                      clientId, client->topicList[i].name, numOfBytesRead);
+                            /* topic name read matches topic list.
+                            Check if topic name matches an ip or lband correction data and reconstruct it to a single message.
+                            In any other case just copy the message to related buffer */
+                            if ((isMsgSegmented) ||
+                                (strlen(name) <= strlen("/aa/bb/cc")) ||
+                                (strlen(name) <= strlen("/aa/bbbbb/cc"))) {
+                                if (client->topicList[i].rxBufferSize >= numOfBytesRead + topicBufIdx) {
+                                    memcpy(&client->topicList[i].rxBuffer[0 + topicBufIdx], buffer, numOfBytesRead);
+                                    topicBufIdx += numOfBytesRead;
+                                    client->topicList[i].msgSize = topicBufIdx;
+                                    client->topicList[i].msgAvailable = true;
+                                    XPLRCELL_MQTT_CONSOLE(D, "Client %d, topic %s updated.\nSegment size %d bytes\nMsg size %d bytes",
+                                                          clientId, client->topicList[i].name, numOfBytesRead, topicBufIdx);
+                                } else {
+                                    XPLRCELL_MQTT_CONSOLE(W, "Client %d, topic %s is out of space.",
+                                                          clientId, client->topicList[i].name);
+                                    ret = -2;
+                                }
                             } else {
-                                XPLRCELL_MQTT_CONSOLE(W, "Client %d, topic %s is out of space.",
-                                                      clientId, client->topicList[i].name);
-                                ret = -2;
+                                if (client->topicList[i].rxBufferSize >= numOfBytesRead) {
+                                    memcpy(client->topicList[i].rxBuffer, buffer, numOfBytesRead);
+                                    client->topicList[i].msgSize = numOfBytesRead;
+                                    client->topicList[i].msgAvailable = true;
+                                    XPLRCELL_MQTT_CONSOLE(D, "Client %d, topic %s updated. Msg size %d bytes",
+                                                          clientId, client->topicList[i].name, numOfBytesRead);
+                                } else {
+                                    XPLRCELL_MQTT_CONSOLE(W, "Client %d, topic %s is out of space.",
+                                                          clientId, client->topicList[i].name);
+                                    ret = -2;
+                                }
                             }
                             break;
                         }
@@ -566,6 +629,53 @@ xplrCell_mqtt_error_t xplrCellMqttFsmRun(int8_t dvcProfile, int8_t clientId)
     return ret;
 }
 
+bool xplrCellMqttHaltLogModule(int8_t dvcProfile, int8_t clientId)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
+    if(mqtt[dvcProfile].client[clientId]->logCfg != NULL) {
+        mqtt[dvcProfile].client[clientId]->logCfg->logEnable = false;
+        ret = true;
+    } else {
+        ret = false;
+        /* log module is not initialized thus do nothing*/
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrCellMqttStartLogModule(int8_t dvcProfile, int8_t clientId)
+{
+    bool ret;
+
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
+    xplrLog_error_t err;
+    if(mqtt[dvcProfile].client[clientId]->logCfg != NULL) {
+        mqtt[dvcProfile].client[clientId]->logCfg->logEnable = true;
+        ret = true;
+    } else {
+        /* log module is not initialized thus initialize it*/
+        err = xplrLogInit(&cellMqttLog,
+                          XPLR_LOG_DEVICE_INFO,
+                          "/cellmqtt.log",
+                          200,
+                          XPLR_SIZE_MB);
+        if (err == XPLR_LOG_OK) {
+            cellMqttLog.logEnable = true;
+        } else {
+            cellMqttLog.logEnable = false;
+        }
+        mqtt[dvcProfile].client[clientId]->logCfg = &cellMqttLog;
+        ret = cellMqttLog.logEnable;
+    }
+#else 
+    ret = false;
+#endif
+    return ret;
+}
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
@@ -682,9 +792,9 @@ xplrCell_mqtt_error_t mqttClientNvsReadConfig(int8_t dvcProfile, int8_t clientId
 
     if (ret == XPLR_CELL_MQTT_OK) {
         XPLRCELL_MQTT_CONSOLE(D, "id: <%s>", storage->id);
-        XPLRCELL_MQTT_CONSOLE(D, "ppRootCa: <0x%x>", storage->md5RootCa);
-        XPLRCELL_MQTT_CONSOLE(D, "ppCert: <0x%x>", storage->md5PpCert);
-        XPLRCELL_MQTT_CONSOLE(D, "ppKey: <0x%x>", storage->md5PpKey);
+        XPLRCELL_MQTT_CONSOLE(D, "ppRootCa: <0x%x>", (unsigned int)storage->md5RootCa);
+        XPLRCELL_MQTT_CONSOLE(D, "ppCert: <0x%x>", (unsigned int) storage->md5PpCert);
+        XPLRCELL_MQTT_CONSOLE(D, "ppKey: <0x%x>", (unsigned int) storage->md5PpKey);
     }
 
     return ret;
@@ -780,7 +890,7 @@ xplrCell_mqtt_error_t mqttClientCheckRoot(int8_t dvcProfile, int8_t clientId)
         res = xplrCommonMd5Get((const unsigned char *)client->credentials.rootCa,
                                strlen(client->credentials.rootCa),
                                (unsigned char *)appMd5);
-        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of rootCa (user) is <0x%x>", appMd5);
+        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of rootCa (user) is <0x%x>", (unsigned int) appMd5);
 
         /* fetch md5 hash from modules' memory (will be different).
         * needed to see if there is a certificate stored in modules memory.
@@ -833,7 +943,7 @@ xplrCell_mqtt_error_t mqttClientCheckCert(int8_t dvcProfile, int8_t clientId)
         res = xplrCommonMd5Get((const unsigned char *)client->credentials.cert,
                                strlen(client->credentials.cert),
                                (unsigned char *)appMd5);
-        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of client cert (user) is <0x%x>", appMd5);
+        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of client cert (user) is <0x%x>", (unsigned int) appMd5);
 
         /* fetch md5 hash from modules' memory (will be different).
         * needed to see if there is a certificate stored in modules memory.
@@ -886,7 +996,7 @@ xplrCell_mqtt_error_t mqttClientCheckKey(int8_t dvcProfile, int8_t clientId)
         res = xplrCommonMd5Get((const unsigned char *)client->credentials.key,
                                strlen(client->credentials.key),
                                (unsigned char *)appMd5);
-        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of client key (user) is <0x%x>", appMd5);
+        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of client key (user) is <0x%x>", (unsigned int)appMd5);
 
         /* fetch md5 hash from modules' memory (will be different).
         * needed to see if there is a certificate stored in modules memory.
@@ -948,7 +1058,7 @@ xplrCell_mqtt_error_t mqttClientWriteRoot(int8_t dvcProfile, int8_t clientId)
                                        NULL, md5);
 
         if (res == 0) {
-            XPLRCELL_MQTT_CONSOLE(D, "Root certificate stored in memory, md5 is <0x%x> ", md5);
+            XPLRCELL_MQTT_CONSOLE(D, "Root certificate stored in memory, md5 is <0x%x> ", (unsigned int) md5);
             ret = XPLR_CELL_MQTT_OK;
         } else {
             XPLRCELL_MQTT_CONSOLE(E, "Error while storing Root certificate in memory.");
@@ -985,7 +1095,7 @@ xplrCell_mqtt_error_t mqttClientWriteCert(int8_t dvcProfile, int8_t clientId)
                                    NULL, md5);
 
     if (res == 0) {
-        XPLRCELL_MQTT_CONSOLE(D, "Client certificate stored in memory, md5 is <0x%x> ", md5);
+        XPLRCELL_MQTT_CONSOLE(D, "Client certificate stored in memory, md5 is <0x%x> ", (unsigned int) md5);
         ret = XPLR_CELL_MQTT_OK;
     } else {
         XPLRCELL_MQTT_CONSOLE(E, "Error while storing client certificate in memory.");
@@ -1016,7 +1126,7 @@ xplrCell_mqtt_error_t mqttClientWriteKey(int8_t dvcProfile, int8_t clientId)
                                    NULL, md5);
 
     if (res == 0) {
-        XPLRCELL_MQTT_CONSOLE(D, "Client key stored in memory, md5 is <0x%x> ", md5);
+        XPLRCELL_MQTT_CONSOLE(D, "Client key stored in memory, md5 is <0x%x> ", (unsigned int) md5);
         ret = XPLR_CELL_MQTT_OK;
     } else {
         XPLRCELL_MQTT_CONSOLE(E, "Error while storing client key in memory.");

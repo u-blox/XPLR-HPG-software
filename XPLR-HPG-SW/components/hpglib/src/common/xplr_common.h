@@ -43,6 +43,11 @@
  */
 #define MICROTOSEC(X)   ((X) / 1000000ULL)
 
+/*
+ * Converts microseconds to milliseconds
+ */
+#define MICROTOMILL(X)  ((X) / 1000ULL)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -119,7 +124,7 @@ int32_t xplrGetDeviceMac(uint8_t *mac);
  * @param maxLen     buffer max length.
  * @return           zero on success, negative error code otherwise.
  */
-esp_err_t timestampToDate(int64_t timeStamp, char *res, uint8_t maxLen);
+esp_err_t xplrTimestampToDate(int64_t timeStamp, char *res, uint8_t maxLen);
 
 /**
  * @brief Convert epoch timestamp (secs) to human readable time.
@@ -129,7 +134,7 @@ esp_err_t timestampToDate(int64_t timeStamp, char *res, uint8_t maxLen);
  * @param maxLen     buffer max length.
  * @return           zero on success, negative error code otherwise.
  */
-esp_err_t timestampToTime(int64_t timeStamp, char *res, uint8_t maxLen);
+esp_err_t xplrTimestampToTime(int64_t timeStamp, char *res, uint8_t maxLen);
 
 /**
  * @brief Convert epoch timestamp (secs) to human readable date-time.
@@ -139,7 +144,15 @@ esp_err_t timestampToTime(int64_t timeStamp, char *res, uint8_t maxLen);
  * @param maxLen     buffer max length.
  * @return           zero on success, negative error code otherwise.
  */
-esp_err_t timestampToDateTime(int64_t timeStamp, char *res, uint8_t maxLen);
+esp_err_t xplrTimestampToDateTime(int64_t timeStamp, char *res, uint8_t maxLen);
+
+/**
+ * @brief Function that periodically prints the complete list of tasks and also prints
+ *        the current, minimum and maximum value of heap memory.
+ *
+ * @param periodSecs time in seconds for the periodic print of memory usage.
+*/
+void xplrMemUsagePrint(uint8_t periodSecs);
 
 #ifdef __cplusplus
 }

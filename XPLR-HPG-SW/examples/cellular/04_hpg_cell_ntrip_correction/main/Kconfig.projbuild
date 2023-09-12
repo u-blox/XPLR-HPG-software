@@ -1,0 +1,75 @@
+menu "XPLR HPG Options"
+
+    menu "Dead Reckoning"
+        choice XPLR_GNSS_DEADRECKONING_ENABLE
+            prompt "Dead reckoning state"
+            config XPLR_DR_OPT_DISABLE
+                bool "Disable"
+            config XPLR_DR_OPT_ENABLE
+                bool "Enable"
+        endchoice
+        
+        config XPLR_GNSS_DEADRECKONING_ENABLE
+            int
+            default 0 if XPLR_DR_OPT_DISABLE
+            default 1 if XPLR_DR_OPT_ENABLE
+    endmenu
+
+    menu "Cellular Settings"
+        config XPLR_CELL_APN
+            string "APN value of cellular provider"
+            default "internet"
+            help
+                type in the APN of your cellular provider.
+    endmenu
+
+    menu "NTRIP Client Settings"
+        config XPLR_CELL_NTRIP_HOST
+            string "NTRIP caster URL/IP address"
+            default "host"
+            help
+                URL/IP adress of your NTRIP caster
+
+        config XPLR_CELL_NTRIP_PORT
+            int "NTRIP caster port"
+            default 2101
+            help
+                Which port to use in order to access the NTRIP caster
+
+        config XPLR_CELL_NTRIP_MOUNTPOINT
+            string "NTRIP caster mountpoint"
+            default "mountpoint"
+            help
+                Which mountpoint to use
+
+        config XPLR_CELL_NTRIP_USERAGENT
+            string "User-Agent"
+            default "NTRIP_XPLR_HPG"
+            help
+                User-Agent to identify the device
+            
+        config XPLR_CELL_NTRIP_GGA_MSG
+            bool "Send GGA message"
+            default y
+            help
+                Select only if your caster requires the client to send periodic GGA message
+
+        config XPLR_CELL_NTRIP_USE_AUTH
+            bool "Use authentication"
+            default y
+            help
+                Select only if your caster requires authentication
+
+        config XPLR_CELL_NTRIP_USERNAME
+            string "Username"
+            default "username"
+            help
+                Will use only if "Use authentication" option is set to True
+
+        config XPLR_CELL_NTRIP_PASSWORD
+            string "Password"
+            default "password"
+            help
+                Will use only if "Use authentication" option is set to True
+    endmenu
+endmenu

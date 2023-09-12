@@ -43,9 +43,16 @@
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
-
-#if (1 == XPLRWIFISTARTER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRWIFISTARTER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRWIFISTARTER_LOG_ACTIVE))
 #define XPLRWIFISTARTER_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRWIFISTARTER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
+#define XPLRWIFISTARTER_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+    XPLRLOG(&wifiStarterLog,wifiBuff2Log);
+#elif ((0 == XPLRWIFISTARTER_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
+#define XPLRWIFISTARTER_CONSOLE(tag, message, ...) \
+    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    XPLRLOG(&wifiStarterLog,wifiBuff2Log)
 #else
 #define XPLRWIFISTARTER_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -84,6 +91,11 @@
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
+/* ----------------------------------------------------------------
+ * EXTERN VARIABLES
+ * ---------------------------------------------------------------*/
+xplrLog_t wifiStarterLog = {0};
+char wifiBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE] = {0};
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -292,7 +304,7 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                 webserverData.diagnostics.connected = -1;
                 webserverData.diagnostics.ready = -1;
             } else {
-                webserverData.diagnostics.configured = 0;
+                webserverData.diagnostics.configured = -1;
                 webserverData.diagnostics.connected = 0;
                 webserverData.diagnostics.ready = -1;
             }
@@ -323,9 +335,10 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                 esp_ret = esp_wifi_set_config(WIFI_IF_STA, &wifiConfig);
             } else {
                 wifiGetMac();
-                if((strstr(BOARD_NAME, "HPG2-C214") != NULL) || (strstr(BOARD_NAME, "MAZGCH-HPG-SOLUTION") != NULL)) {
+                if ((strstr(BOARD_NAME, "HPG2-C214") != NULL) ||
+                    (strstr(BOARD_NAME, "MAZGCH-HPG-SOLUTION") != NULL)) {
                     snprintf(apSsid, 16, "%s-%x%x", "xplr-hpg-2", macAdr[4], macAdr[5]);
-                } else if(strstr(BOARD_NAME, "HPG1-C213") != NULL) {
+                } else if (strstr(BOARD_NAME, "HPG1-C213") != NULL) {
                     snprintf(apSsid, 16, "%s-%x%x", "xplr-hpg-1", macAdr[4], macAdr[5]);
                 } else {
                     snprintf(apSsid, 16, "%s-%x%x", "xplr-hpg", macAdr[4], macAdr[5]);
@@ -366,7 +379,11 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                     wifiApPrintInfo();
                     xplrWifiWebserverStart(&webserverData);
 #if (XPLR_CFG_ENABLE_WEBSERVERDNS == 1)
-                    xplrWifiDnsStart();
+                    staHostname = xplrWifiStaDnsStart();
+                    webserverData.diagnostics.hostname = staHostname;
+                    XPLRWIFISTARTER_CONSOLE(D, "Webserver hostname:%s", staHostname);
+                    xplrWifiStarterWebserverOptionsSet(XPLR_WIFISTARTER_SERVEOPTS_SD, &userOptions.storage.sdLog);
+                    xplrWifiStarterWebserverOptionsSet(XPLR_WIFISTARTER_SERVEOPTS_DR, &userOptions.storage.gnssDR);
 #endif
                     xplrWifiStarterPrivateUpdateNextState(XPLR_WIFISTARTER_STATE_WIFI_WAIT_CONFIG);
                 } else {
@@ -375,6 +392,10 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                         xplrWifiWebserverStart(&webserverData);
 #if (XPLR_CFG_ENABLE_WEBSERVERDNS == 1)
                         staHostname = xplrWifiStaDnsStart();
+                        webserverData.diagnostics.hostname = staHostname;
+                        XPLRWIFISTARTER_CONSOLE(D, "Webserver hostname:%s", staHostname);
+                        xplrWifiStarterWebserverOptionsSet(XPLR_WIFISTARTER_SERVEOPTS_SD, &userOptions.storage.sdLog);
+                        xplrWifiStarterWebserverOptionsSet(XPLR_WIFISTARTER_SERVEOPTS_DR, &userOptions.storage.gnssDR);
 #endif
                     }
                     xplrWifiStarterPrivateUpdateNextState(XPLR_WIFISTARTER_STATE_CONNECT_WIFI);
@@ -387,7 +408,7 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
             break;
 
         case XPLR_WIFISTARTER_STATE_WIFI_WAIT_CONFIG:
-            if ((webserverData.wifi.set) && (webserverData.pointPerfect.set)) {
+            if (webserverData.wifi.set) {
                 memset(userOptions.storage.ssid,
                        0x00,
                        XPLR_WIFISTARTER_NVS_SSID_LENGTH_MAX);
@@ -402,14 +423,9 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                        webserverData.wifi.password,
                        strlen(webserverData.wifi.password));
 
-                userOptions.storage.rootCa = webserverData.pointPerfect.rootCa;
-                userOptions.storage.ppClientId = webserverData.pointPerfect.clientId;
-                userOptions.storage.ppClientCert = webserverData.pointPerfect.certificate;
-                userOptions.storage.ppClientKey = webserverData.pointPerfect.privateKey;
-                userOptions.storage.ppClientRegion = webserverData.pointPerfect.region;
                 userOptions.storage.set = true;
 
-                esp_ret = wifiNvsUpdate(0); //update all
+                esp_ret = wifiNvsUpdate(1); //update wifi settings
 
                 if (esp_ret != ESP_OK) {
                     ret = XPLR_WIFISTARTER_STATE_ERROR;
@@ -455,6 +471,7 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                     webserverData.diagnostics.ssid = userOptions.storage.ssid;
                     webserverData.diagnostics.hostname = staHostname;
                     webserverData.diagnostics.ip = staIpString;
+                    webserverData.diagnostics.plan = userOptions.storage.ppClientPlan;
                     diagnosticsInfoUpdated = true;
                 }
             }
@@ -488,18 +505,21 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                 xplrWifiStarterPrivateUpdateNextStateToError();
                 XPLRWIFISTARTER_CONSOLE(E, "WiFi disconnect failed!");
             }
-
+            ret = XPLR_WIFISTARTER_OK;
             break;
 
         case XPLR_WIFISTARTER_STATE_DISCONNECT_OK:
-
+            ret = XPLR_WIFISTARTER_OK;
             break;
 
         case XPLR_WIFISTARTER_STATE_TIMEOUT:
         case XPLR_WIFISTARTER_STATE_ERROR:
             if (!cleanup) {
                 xplrWifiStarterPrivateUpdateNextState(XPLR_WIFISTARTER_STATE_STOP_WIFI);
+                ret = XPLR_WIFISTARTER_OK;
                 cleanup = true;
+            } else {
+                ret = XPLR_WIFISTARTER_ERROR;
             }
             break;
 
@@ -526,7 +546,19 @@ esp_err_t xplrWifiStarterInitConnection(xplrWifiStarterOpts_t *wifiOptions)
 
     /* get wifi user options from app */
     memcpy(&userOptions, wifiOptions, sizeof(xplrWifiStarterOpts_t));
-
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
+    xplrLog_error_t err = xplrLogInit(&wifiStarterLog,
+                                      XPLR_LOG_DEVICE_INFO,
+                                      "/wifi.log",
+                                      200,
+                                      XPLR_SIZE_MB);
+    if (err != XPLR_LOG_OK) {
+        wifiStarterLog.logEnable = false;
+    } else {
+        wifiStarterLog.logEnable = true;
+    }
+    wifiOptions->logCfg = &wifiStarterLog;
+#endif
     if (strlen(userOptions.ssid) > (ELEMENTCNT(wifiConfig.sta.ssid) - 1)) {
         return ESP_FAIL;
     } else {
@@ -549,12 +581,21 @@ esp_err_t xplrWifiStarterInitConnection(xplrWifiStarterOpts_t *wifiOptions)
     wifiFsm[0] = XPLR_WIFISTARTER_STATE_CONFIG_WIFI;
 
     return ESP_OK;
+
 }
 
 esp_err_t xplrWifiStarterDisconnect(void)
 {
+    xplrWifiStarterError_t err;
+    esp_err_t ret;
     xplrWifiStarterPrivateUpdateNextState(XPLR_WIFISTARTER_STATE_STOP_WIFI);
-    return ESP_OK;
+    err = xplrWifiStarterFsm();
+    if (err == XPLR_WIFISTARTER_OK) {
+        ret = ESP_OK;
+    } else {
+        ret = ESP_FAIL;
+    }
+    return ret;
 }
 
 xplrWifiStarterFsmStates_t xplrWifiStarterGetCurrentFsmState(void)
@@ -728,6 +769,24 @@ xplrWifiStarterError_t xplrWifiStarterDeviceForceSaveThingstream(uint8_t opts)
     return ret;
 }
 
+xplrWifiStarterError_t xplrWifiStarterDeviceForceSaveMiscOptions(uint8_t opts)
+{
+    esp_err_t res;
+    xplrWifiStarterError_t ret;
+
+    res = wifiNvsUpdate(2 + 8 + opts);
+
+    if (res != ESP_OK) {
+        ret = XPLR_WIFISTARTER_ERROR;
+        XPLRWIFISTARTER_CONSOLE(E, "Failed to save Misc options (%u) in NVS.", opts);
+    } else {
+        ret = XPLR_WIFISTARTER_OK;
+        XPLRWIFISTARTER_CONSOLE(W, "NVS Misc options (%u) saved.", opts);
+    }
+
+    return ret;
+}
+
 char *xplrWifiStarterWebserverDataGet(xplrWifiStarterServerData_t opt)
 {
     char *ret;
@@ -815,12 +874,182 @@ xplrWifiStarterError_t xplrWifiStarterWebserverDiagnosticsSet(xplrWifiStarterSer
                 webserverData.diagnostics.mqttTraffic = cStr;
                 ret = XPLR_WIFISTARTER_OK;
                 break;
+            case XPLR_WIFISTARTER_SERVERDIAG_SDSTATS:
+                cStr = (char *) value;
+                webserverData.diagnostics.sd = cStr;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_DRINFO:
+                cStr = (char *) value;
+                webserverData.diagnostics.gnssDr = cStr;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_DR_CALIB_INFO:
+                cStr = (char *) value;
+                webserverData.diagnostics.gnssDrCalibration = cStr;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
             case XPLR_WIFISTARTER_SERVERDIAG_FWVERSION:
                 cStr = (char *) value;
                 webserverData.diagnostics.version = cStr;
                 ret = XPLR_WIFISTARTER_OK;
                 break;
 
+            default:
+                ret = XPLR_WIFISTARTER_ERROR;
+                break;
+        }
+    } else {
+        ret = XPLR_WIFISTARTER_ERROR;
+    }
+
+    return ret;
+}
+
+xplrWifiStarterError_t xplrWifiStarterWebserverDiagnosticsGet(xplrWifiStarterServerData_t opt,
+                                                              void *value)
+{
+    xplrWifiStarterError_t ret;
+
+    if (userOptions.webserver) {
+        switch (opt) {
+            case XPLR_WIFISTARTER_SERVERDIAG_CONNECTED:
+                if (userOptions.storage.set && webserverData.diagnostics.connected != 1) {
+                    webserverData.diagnostics.connected = 0;
+                } else {
+                    if (!userOptions.storage.set) {
+                        webserverData.diagnostics.connected = -1;
+                    } else {
+                        webserverData.diagnostics.connected = 0;
+                    }
+                }
+
+                *(int8_t *)value = webserverData.diagnostics.connected;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED:
+                if (userOptions.storage.ppSet && webserverData.diagnostics.configured != 1) {
+                    webserverData.diagnostics.configured = 0;
+                } else {
+                    if (!userOptions.storage.ppSet) {
+                        webserverData.diagnostics.configured = -1;
+                    } else {
+                        webserverData.diagnostics.configured = 0;
+                    }
+                }
+
+                *(int8_t *)value = webserverData.diagnostics.configured;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_READY:
+                *(int8_t *)value = webserverData.diagnostics.ready;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_GNSS_ACCURACY:
+                *(int8_t *)value = webserverData.diagnostics.gnssAccuracy;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_UPTIME:
+                memset(value, 0x00, strlen(value));
+                memcpy(value, webserverData.diagnostics.upTime, strlen(webserverData.diagnostics.upTime));
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_FIXTIME:
+                memset(value, 0x00, strlen(value));
+                memcpy(value, webserverData.diagnostics.timeToFix, strlen(webserverData.diagnostics.timeToFix));
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_MQTTSTATS:
+                memset(value, 0x00, strlen(value));
+                memcpy(value, webserverData.diagnostics.mqttTraffic, strlen(webserverData.diagnostics.mqttTraffic));
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_SDSTATS:
+                memset(value, 0x00, strlen(value));
+                memcpy(value, webserverData.diagnostics.sd, strlen(webserverData.diagnostics.sd));
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_DRINFO:
+                memset(value, 0x00, strlen(value));
+                memcpy(value, webserverData.diagnostics.gnssDr, strlen(webserverData.diagnostics.gnssDr));
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_DR_CALIB_INFO:
+                memset(value, 0x00, strlen(value));
+                memcpy(value, webserverData.diagnostics.gnssDrCalibration,
+                       strlen(webserverData.diagnostics.gnssDrCalibration));
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVERDIAG_FWVERSION:
+                memset(value, 0x00, strlen(value));
+                memcpy(value, webserverData.diagnostics.version, strlen(webserverData.diagnostics.version));
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+
+            default:
+                ret = XPLR_WIFISTARTER_ERROR;
+                break;
+        }
+    } else {
+        ret = XPLR_WIFISTARTER_ERROR;
+    }
+
+    return ret;
+}
+
+xplrWifiStarterError_t xplrWifiStarterWebserverOptionsSet(xplrWifiStarterServerData_t opt,
+                                                          void *value)
+{
+    bool *isVal;
+    xplrWifiStarterError_t ret;
+
+    if (userOptions.webserver) {
+        switch (opt) {
+            case XPLR_WIFISTARTER_SERVEOPTS_SD:
+                isVal = (bool *)value;
+                webserverData.misc.sd = *isVal;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVEOPTS_DR:
+                isVal = (bool *)value;
+                webserverData.misc.gnssDR = *isVal;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVEOPTS_DR_CALIBRATION:
+                isVal = (bool *)value;
+                webserverData.misc.gnssDRCalibration = *isVal;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            default:
+                ret = XPLR_WIFISTARTER_ERROR;
+                break;
+        }
+    } else {
+        ret = XPLR_WIFISTARTER_ERROR;
+    }
+
+    return ret;
+}
+
+xplrWifiStarterError_t xplrWifiStarterWebserverOptionsGet(xplrWifiStarterServerData_t opt,
+                                                          void *value)
+{
+    xplrWifiStarterError_t ret;
+
+    if (userOptions.webserver) {
+        switch (opt) {
+            case XPLR_WIFISTARTER_SERVEOPTS_SD:
+                *(bool *)value = webserverData.misc.sd;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVEOPTS_DR:
+                *(bool *)value = webserverData.misc.gnssDR;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
+            case XPLR_WIFISTARTER_SERVEOPTS_DR_CALIBRATION:
+                *(bool *)value = webserverData.misc.gnssDRCalibration;
+                ret = XPLR_WIFISTARTER_OK;
+                break;
             default:
                 ret = XPLR_WIFISTARTER_ERROR;
                 break;
@@ -905,6 +1134,51 @@ char *xplrWifiStarterGetApSsid(void)
     return ret;
 }
 
+bool xplrWifiStarterHaltLogModule(xplrWifiStarterOpts_t *wifiOptions)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
+    if (wifiOptions->logCfg != NULL) {
+        wifiOptions->logCfg->logEnable = false;
+        ret = true;
+    } else {
+        /* log module is not initialized thus do nothing and return false*/
+        ret = false;
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrWifiStarterStartLogModule(xplrWifiStarterOpts_t *wifiOptions)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
+    xplrLog_error_t err;
+    if (wifiOptions->logCfg != NULL) {
+        wifiOptions->logCfg->logEnable = true;
+        ret = true;
+    } else {
+        err = xplrLogInit(&wifiStarterLog,
+                          XPLR_LOG_DEVICE_INFO,
+                          "/wifi.log",
+                          200,
+                          XPLR_SIZE_MB);
+        if (err != XPLR_LOG_OK) {
+            wifiStarterLog.logEnable = false;
+        } else {
+            wifiStarterLog.logEnable = true;
+        }
+        wifiOptions->logCfg = &wifiStarterLog;
+        ret = wifiStarterLog.logEnable;
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DESCRIPTORS
  * -------------------------------------------------------------- */
@@ -929,7 +1203,7 @@ static void event_handler(void *arg,
 
         if (userOptions.webserver) {
             webserverData.diagnostics.connected = 0;
-            webserverData.diagnostics.configured = 0;
+            webserverData.diagnostics.configured = -1;
             memset(staIpString, 0x00, 16);
         }
 
@@ -1013,7 +1287,7 @@ static esp_err_t wifiNvsLoad(void)
 static esp_err_t wifiNvsWriteDefaults(void)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[10];
+    xplrNvs_error_t err[13];
     size_t numOfNvsEntries;
     esp_err_t ret;
 
@@ -1030,6 +1304,9 @@ static esp_err_t wifiNvsWriteDefaults(void)
         err[7] = xplrNvsWriteString(&storage->nvs, "ppRegion", "n/a");
         err[8] = xplrNvsWriteString(&storage->nvs, "ppPlan", "n/a");
         err[9] = xplrNvsWriteU8(&storage->nvs, "configured", 0);
+        err[10] = xplrNvsWriteU8(&storage->nvs, "ppConfigured", 0);
+        err[11] = xplrNvsWriteU8(&storage->nvs, "sdLog", 0);
+        err[12] = xplrNvsWriteU8(&storage->nvs, "gnssDR", 0);
 
         storage->rootCa = webserverData.pointPerfect.rootCa;
         storage->ppClientId = webserverData.pointPerfect.clientId;
@@ -1038,7 +1315,7 @@ static esp_err_t wifiNvsWriteDefaults(void)
         storage->ppClientRegion = webserverData.pointPerfect.region;
         storage->ppClientPlan = webserverData.pointPerfect.plan;
 
-        numOfNvsEntries = 10;
+        numOfNvsEntries = 13;
     } else {
         numOfNvsEntries = 3;
     }
@@ -1059,7 +1336,7 @@ static esp_err_t wifiNvsWriteDefaults(void)
 static esp_err_t wifiNvsReadConfig(void)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[10];
+    xplrNvs_error_t err[13];
     size_t size[] = {XPLR_WIFI_NVS_NAMESPACE_LENGTH_MAX,
                      XPLR_WIFISTARTER_NVS_SSID_LENGTH_MAX,
                      XPLR_WIFISTARTER_NVS_PASSWORD_LENGTH_MAX,
@@ -1084,8 +1361,11 @@ static esp_err_t wifiNvsReadConfig(void)
         err[7] = xplrNvsReadString(&storage->nvs, "ppRegion", storage->ppClientRegion, &size[7]);
         err[8] = xplrNvsReadString(&storage->nvs, "ppPlan", storage->ppClientPlan, &size[8]);
         err[9] = xplrNvsReadU8(&storage->nvs, "configured", (uint8_t *)&storage->set);
+        err[10] = xplrNvsReadU8(&storage->nvs, "ppConfigured", (uint8_t *)&storage->ppSet);
+        err[11] = xplrNvsReadU8(&storage->nvs, "sdLog", (uint8_t *)&storage->sdLog);
+        err[12] = xplrNvsReadU8(&storage->nvs, "gnssDR", (uint8_t *)&storage->gnssDR);
 
-        numOfNvsEntries = 10;
+        numOfNvsEntries = 13;
     } else {
         numOfNvsEntries = 3;
     }
@@ -1120,6 +1400,9 @@ static esp_err_t wifiNvsReadConfig(void)
             XPLRWIFISTARTER_CONSOLE(D, "ppRegion: <%s>", storage->ppClientRegion);
             XPLRWIFISTARTER_CONSOLE(D, "ppPlan: <%s>", storage->ppClientPlan);
             XPLRWIFISTARTER_CONSOLE(D, "configured: <%u>", (uint8_t)storage->set);
+            XPLRWIFISTARTER_CONSOLE(D, "ppConfigured: <%u>", (uint8_t)storage->ppSet);
+            XPLRWIFISTARTER_CONSOLE(D, "sdLog: <%u>", (uint8_t)storage->sdLog);
+            XPLRWIFISTARTER_CONSOLE(D, "gnssDR: <%u>", (uint8_t)storage->gnssDR);
         }
     }
 
@@ -1129,7 +1412,7 @@ static esp_err_t wifiNvsReadConfig(void)
 static esp_err_t wifiNvsUpdate(uint8_t opt)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[10];
+    xplrNvs_error_t err[13];
     size_t numOfNvsEntries;
     esp_err_t ret;
 
@@ -1147,6 +1430,9 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 xplrNvsEraseKey(&storage->nvs, "ppRegion");
                 xplrNvsEraseKey(&storage->nvs, "ppPlan");
                 xplrNvsEraseKey(&storage->nvs, "configured");
+                xplrNvsEraseKey(&storage->nvs, "ppConfigured");
+                xplrNvsEraseKey(&storage->nvs, "sdLog");
+                xplrNvsEraseKey(&storage->nvs, "gnssDR");
 
                 err[0] = xplrNvsWriteString(&storage->nvs, "id", storage->id);
                 err[1] = xplrNvsWriteString(&storage->nvs, "ssid", storage->ssid);
@@ -1159,8 +1445,11 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                     err[7] = xplrNvsWriteString(&storage->nvs, "ppRegion", storage->ppClientRegion);
                     err[8] = xplrNvsWriteString(&storage->nvs, "ppPlan", storage->ppClientPlan);
                     err[9] = xplrNvsWriteU8(&storage->nvs, "configured", (uint8_t)storage->set);
+                    err[10] = xplrNvsWriteU8(&storage->nvs, "ppConfigured", (uint8_t)storage->ppSet);
+                    err[11] = xplrNvsWriteU8(&storage->nvs, "sdLog", (uint8_t)storage->sdLog);
+                    err[12] = xplrNvsWriteU8(&storage->nvs, "gnssDR", (uint8_t)storage->gnssDR);
 
-                    numOfNvsEntries = 10;
+                    numOfNvsEntries = 13;
                 } else {
                     numOfNvsEntries = 3;
                 }
@@ -1197,12 +1486,16 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                        webserverData.wifi.password,
                        strlen(webserverData.wifi.password));
 
+                storage->set = 1;
+
                 xplrNvsEraseKey(&storage->nvs, "ssid");
                 xplrNvsEraseKey(&storage->nvs, "pwd");
+                xplrNvsEraseKey(&storage->nvs, "configured");
 
                 err[0] = xplrNvsWriteString(&storage->nvs, "ssid", storage->ssid);
                 err[1] = xplrNvsWriteString(&storage->nvs, "pwd", storage->password);
-                numOfNvsEntries = 2;
+                err[2] = xplrNvsWriteU8(&storage->nvs, "configured", (uint8_t)storage->set);
+                numOfNvsEntries = 3;
 
                 for (int i = 0; i < numOfNvsEntries; i++) {
                     if (err[i] != XPLR_NVS_OK) {
@@ -1232,7 +1525,7 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 xplrNvsEraseKey(&storage->nvs, "ppKey");
                 xplrNvsEraseKey(&storage->nvs, "ppRegion");
                 xplrNvsEraseKey(&storage->nvs, "ppPlan");
-                xplrNvsEraseKey(&storage->nvs, "configured");
+                xplrNvsEraseKey(&storage->nvs, "ppConfigured");
 
                 err[0] = xplrNvsWriteString(&storage->nvs, "rootCa", storage->rootCa);
                 err[1] = xplrNvsWriteString(&storage->nvs, "ppId", storage->ppClientId);
@@ -1240,7 +1533,7 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 err[3] = xplrNvsWriteString(&storage->nvs, "ppKey", storage->ppClientKey);
                 err[4] = xplrNvsWriteString(&storage->nvs, "ppRegion", storage->ppClientRegion);
                 err[5] = xplrNvsWriteString(&storage->nvs, "ppPlan", storage->ppClientPlan);
-                err[6] = xplrNvsWriteU8(&storage->nvs, "configured", (uint8_t)storage->set);
+                err[6] = xplrNvsWriteU8(&storage->nvs, "ppConfigured", (uint8_t)storage->ppSet);
 
                 numOfNvsEntries = 7;
 
@@ -1395,6 +1688,102 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
                 XPLRWIFISTARTER_CONSOLE(E, "Trying to write invalid config, error");
             }
             break;
+        case 9: //save thingstream configuration flag from webserver data
+            if ((storage->id != NULL) && (userOptions.webserver)) {
+                userOptions.storage.ppClientPlan = webserverData.pointPerfect.plan;
+
+                xplrNvsEraseKey(&storage->nvs, "ppConfigured");
+
+                storage->ppSet = true;
+                err[0] = xplrNvsWriteU8(&storage->nvs, "ppConfigured", (uint8_t)storage->ppSet);
+
+                numOfNvsEntries = 1;
+
+                for (int i = 0; i < numOfNvsEntries; i++) {
+                    if (err[i] != XPLR_NVS_OK) {
+                        ret = ESP_FAIL;
+                        break;
+                    } else {
+                        ret = ESP_OK;
+                    }
+                }
+            } else {
+                ret = ESP_FAIL;
+                XPLRWIFISTARTER_CONSOLE(E, "Trying to write invalid config, error");
+            }
+            break;
+        case 10: //Save Misc device options
+            if ((storage->id != NULL) && (userOptions.webserver)) {
+                storage->sdLog = webserverData.misc.sd;
+                storage->gnssDR = webserverData.misc.gnssDR;
+
+                xplrNvsEraseKey(&storage->nvs, "sdLog");
+                xplrNvsEraseKey(&storage->nvs, "gnssDR");
+
+                err[0] = xplrNvsWriteU8(&storage->nvs, "sdLog", (uint8_t)storage->sdLog);
+                err[1] = xplrNvsWriteU8(&storage->nvs, "gnssDR", (uint8_t)storage->gnssDR);
+
+                numOfNvsEntries = 2;
+
+                for (int i = 0; i < numOfNvsEntries; i++) {
+                    if (err[i] != XPLR_NVS_OK) {
+                        ret = ESP_FAIL;
+                        break;
+                    } else {
+                        ret = ESP_OK;
+                    }
+                }
+            } else {
+                ret = ESP_FAIL;
+                XPLRWIFISTARTER_CONSOLE(E, "Trying to write invalid config, error");
+            }
+            break;
+        case 11: //Save SD log device option
+            if ((storage->id != NULL) && (userOptions.webserver)) {
+                storage->sdLog = webserverData.misc.sd;
+
+                xplrNvsEraseKey(&storage->nvs, "sdLog");
+
+                err[0] = xplrNvsWriteU8(&storage->nvs, "sdLog", (uint8_t)storage->sdLog);
+
+                numOfNvsEntries = 1;
+
+                for (int i = 0; i < numOfNvsEntries; i++) {
+                    if (err[i] != XPLR_NVS_OK) {
+                        ret = ESP_FAIL;
+                        break;
+                    } else {
+                        ret = ESP_OK;
+                    }
+                }
+            } else {
+                ret = ESP_FAIL;
+                XPLRWIFISTARTER_CONSOLE(E, "Trying to write invalid config, error");
+            }
+            break;
+        case 12: //Save GNSS DR device option
+            if ((storage->id != NULL) && (userOptions.webserver)) {
+                storage->gnssDR = webserverData.misc.gnssDR;
+
+                xplrNvsEraseKey(&storage->nvs, "gnssDR");
+
+                err[0] = xplrNvsWriteU8(&storage->nvs, "gnssDR", (uint8_t)storage->gnssDR);
+
+                numOfNvsEntries = 1;
+
+                for (int i = 0; i < numOfNvsEntries; i++) {
+                    if (err[i] != XPLR_NVS_OK) {
+                        ret = ESP_FAIL;
+                        break;
+                    } else {
+                        ret = ESP_OK;
+                    }
+                }
+            } else {
+                ret = ESP_FAIL;
+                XPLRWIFISTARTER_CONSOLE(E, "Trying to write invalid config, error");
+            }
+            break;
 
         default:
             ret = ESP_FAIL;
@@ -1408,7 +1797,7 @@ static esp_err_t wifiNvsUpdate(uint8_t opt)
 static esp_err_t wifiNvsErase(uint8_t opt)
 {
     xplrWifiStarterNvs_t *storage = &userOptions.storage;
-    xplrNvs_error_t err[10];
+    xplrNvs_error_t err[13];
     size_t numOfNvsEntries;
     esp_err_t ret;
 
@@ -1424,8 +1813,11 @@ static esp_err_t wifiNvsErase(uint8_t opt)
             err[7] = xplrNvsEraseKey(&storage->nvs, "ppRegion");
             err[8] = xplrNvsEraseKey(&storage->nvs, "ppPlan");
             err[9] = xplrNvsEraseKey(&storage->nvs, "configured");
+            err[10] = xplrNvsEraseKey(&storage->nvs, "ppConfigured");
+            err[11] = xplrNvsEraseKey(&storage->nvs, "sdLog");
+            err[12] = xplrNvsEraseKey(&storage->nvs, "gnssDR");
 
-            numOfNvsEntries = 10;
+            numOfNvsEntries = 13;
         } else {
             numOfNvsEntries = 3;
         }
@@ -1447,7 +1839,7 @@ static esp_err_t wifiNvsErase(uint8_t opt)
         err[3] = xplrNvsEraseKey(&storage->nvs, "ppKey");
         err[4] = xplrNvsEraseKey(&storage->nvs, "ppRegion");
         err[5] = xplrNvsEraseKey(&storage->nvs, "ppPlan");
-        err[6] = xplrNvsEraseKey(&storage->nvs, "configured");
+        err[6] = xplrNvsEraseKey(&storage->nvs, "ppConfigured");
         numOfNvsEntries = 7;
     } else {
         err[0] = XPLR_NVS_ERROR;
@@ -1477,8 +1869,7 @@ static bool wifiCredentialsConfigured(void)
             ret = false;
         }
     } else {
-        ret = true;
-        if((strlen(userOptions.ssid) > 0) && (strlen(userOptions.password) > 0)) {
+        if ((strlen(userOptions.ssid) > 0) && (strlen(userOptions.password) > 0)) {
             ret = true;
         } else {
             ret = false;

@@ -26,10 +26,11 @@
 #include "./../../hpglib/src/nvs_service/xplr_nvs.h"
 #include <stdint.h>
 #include "esp_wifi.h"
+#include "./../../hpglib/src/log_service/xplr_log.h"
 
 /** @file
  * @brief This header file defines the wifi client API,
- * includes functions to setup a WiFi client and establish a 
+ * includes functions to setup a WiFi client and establish a
  * connection to the desired AP.
  */
 
@@ -52,6 +53,14 @@ extern "C" {
 
 #define XPLR_WIFISTARTER_AP_PWD         ""
 #define XPLR_WIFISTARTER_AP_CLIENTS_MAX 1
+
+/* ----------------------------------------------------------------
+ * EXTERN VARIABLES
+ * ---------------------------------------------------------------*/
+
+extern xplrLog_t wifiStarterLog;
+extern char wifiBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
+
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -110,20 +119,26 @@ typedef enum {
     XPLR_WIFISTARTER_SERVERDATA_UNKNOWN = -1,   /**< unknown data type in webserver. */
     XPLR_WIFISTARTER_SERVERDATA_SSID,           /**< ssid data available in webserver. */
     XPLR_WIFISTARTER_SERVERDATA_PASSWORD,       /**< password data available in webserver. */
-    XPLR_WIFISTARTER_SERVERDATA_CLIENTID,       /**< point perfect client id available in webserver. */
-    XPLR_WIFISTARTER_SERVERDATA_CLIENTCERT,     /**< point perfect client certificate available in webserver. */
-    XPLR_WIFISTARTER_SERVERDATA_CLIENTKEY,      /**< point perfect client key available in webserver. */
-    XPLR_WIFISTARTER_SERVERDATA_CLIENTREGION,   /**< point perfect client region available in webserver. */
-    XPLR_WIFISTARTER_SERVERDATA_CLIENTPLAN,     /**< point perfect client plan available in webserver. */
-    XPLR_WIFISTARTER_SERVERDATA_ROOTCA,         /**< point perfect root ca available in webserver. */
+    XPLR_WIFISTARTER_SERVERDATA_CLIENTID,       /**< PointPerfect client id available in webserver. */
+    XPLR_WIFISTARTER_SERVERDATA_CLIENTCERT,     /**< PointPerfect client certificate available in webserver. */
+    XPLR_WIFISTARTER_SERVERDATA_CLIENTKEY,      /**< PointPerfect client key available in webserver. */
+    XPLR_WIFISTARTER_SERVERDATA_CLIENTREGION,   /**< PointPerfect client region available in webserver. */
+    XPLR_WIFISTARTER_SERVERDATA_CLIENTPLAN,     /**< PointPerfect client plan available in webserver. */
+    XPLR_WIFISTARTER_SERVERDATA_ROOTCA,         /**< PointPerfect root ca available in webserver. */
     XPLR_WIFISTARTER_SERVERDIAG_CONNECTED,      /**< webserver diagnostics connected status. */
-    XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED,     /**< webserver diagnostics configured status. */
+    XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED,     /**< webserver diagnostics configuration status. */
     XPLR_WIFISTARTER_SERVERDIAG_READY,          /**< webserver diagnostics ready status. */
     XPLR_WIFISTARTER_SERVERDIAG_GNSS_ACCURACY,  /**< webserver diagnostics gnss accuracy. */
     XPLR_WIFISTARTER_SERVERDIAG_UPTIME,         /**< webserver diagnostics total uptime from boot. */
     XPLR_WIFISTARTER_SERVERDIAG_FIXTIME,        /**< webserver diagnostics total time for the device to get a FIX. */
     XPLR_WIFISTARTER_SERVERDIAG_MQTTSTATS,      /**< webserver diagnostics MQTT traffic statistics. */
+    XPLR_WIFISTARTER_SERVERDIAG_SDSTATS,        /**< webserver diagnostics SD info. */
+    XPLR_WIFISTARTER_SERVERDIAG_DRINFO,         /**< webserver diagnostics GNSS DR info. */
+    XPLR_WIFISTARTER_SERVERDIAG_DR_CALIB_INFO,  /**< webserver diagnostics GNSS DR calibration info. */
     XPLR_WIFISTARTER_SERVERDIAG_FWVERSION,      /**< webserver diagnostics firmware version. */
+    XPLR_WIFISTARTER_SERVEOPTS_SD,              /**< webserver option SD enable/disable. */
+    XPLR_WIFISTARTER_SERVEOPTS_DR,              /**< webserver option GNSS DeadReckon enable/disable. */
+    XPLR_WIFISTARTER_SERVEOPTS_DR_CALIBRATION,  /**< webserver option GNSS DeadReckon calibration enable/disable. */
 } xplrWifiStarterServerData_t;
 
 // *INDENT-OFF*
@@ -137,12 +152,15 @@ typedef struct xplrWifiStarterNvs_type {
     char        ssid[XPLR_WIFISTARTER_NVS_SSID_LENGTH_MAX];           /**< ssid of router to connect to */
     char        password[XPLR_WIFISTARTER_NVS_PASSWORD_LENGTH_MAX];   /**< password of router to connect to */
     char        *rootCa;                                              /**< Root CA certificate for communicating with Thingstream */
-    char        *ppClientId;                                          /**< Thingstream's Point Perfect client ID */
-    char        *ppClientCert;                                        /**< Thingstream's Point Perfect client Certificate */
-    char        *ppClientKey;                                         /**< Thingstream's Point Perfect client key */
-    char        *ppClientRegion;                                      /**< Thingstream's Point Perfect region */
-    char        *ppClientPlan;                                        /**< Thingstream's Point Perfect plan */
+    char        *ppClientId;                                          /**< Thingstream's PointPerfect client ID */
+    char        *ppClientCert;                                        /**< Thingstream's PointPerfect client Certificate */
+    char        *ppClientKey;                                         /**< Thingstream's PointPerfect client key */
+    char        *ppClientRegion;                                      /**< Thingstream's PointPerfect region */
+    char        *ppClientPlan;                                        /**< Thingstream's PointPerfect plan */
     bool        set;                                                  /**< Device configuration status */
+    bool        ppSet;                                                /**< PointPerfect configuration status */
+    bool        sdLog;                                                /**< SD log option set */
+    bool        gnssDR;                                                /**< GNSS Dead Reckoning option set */
 } xplrWifiStarterNvs_t;
 // *INDENT-OΝ*
 
@@ -156,6 +174,7 @@ typedef struct xplrWifiStarterOpts_type {
     xplrWifiStarterMode_t mode;      /**< mode of operation. */
     xplrWifiStarterNvs_t storage;    /**< memory module to store/retrieve wi-fi info. */
     bool webserver;                  /**< activate webserver. */
+    xplrLog_t *logCfg;               /**< pointer to the module's log struct. */
 } xplrWifiStarterOpts_t;
 
 // *INDENT-OFF*
@@ -273,10 +292,22 @@ xplrWifiStarterError_t xplrWifiStarterDeviceForceSaveWifi(void);
  *                                4 = key,
  *                                5 = region.
  *                                6 = plan.
+ *                                7 = config flag.
  *
  * @return  XPLR_WIFISTARTER_OK on success or XPLR_WIFISTARTER_ERROR on failure.
  */
 xplrWifiStarterError_t xplrWifiStarterDeviceForceSaveThingstream(uint8_t opts);
+
+/**
+ * @brief Force Save Device Misc options to NVS.
+ *
+ * @param opt credential to save: 0 = all,
+ *                                1 = sd log,
+ *                                2 = gnss DR,
+ *
+ * @return  XPLR_WIFISTARTER_OK on success or XPLR_WIFISTARTER_ERROR on failure.
+ */
+xplrWifiStarterError_t xplrWifiStarterDeviceForceSaveMiscOptions(uint8_t opts);
 
 /**
  * @brief Retrieve webserver data.
@@ -289,7 +320,7 @@ xplrWifiStarterError_t xplrWifiStarterDeviceForceSaveThingstream(uint8_t opts);
 char *xplrWifiStarterWebserverDataGet(xplrWifiStarterServerData_t opt);
 
 /**
- * @brief Set webserver data.
+ * @brief Set webserver diagnostics.
  *
  * @param opt type of data to modify.
  * @param value value to assign.
@@ -297,6 +328,36 @@ char *xplrWifiStarterWebserverDataGet(xplrWifiStarterServerData_t opt);
  * @return  XPLR_WIFISTARTER_OK on success or XPLR_WIFISTARTER_ERROR on failure.
  */
 xplrWifiStarterError_t xplrWifiStarterWebserverDiagnosticsSet(xplrWifiStarterServerData_t opt, void *value);
+
+/**
+ * @brief Get webserver diagnostics.
+ *
+ * @param opt type of data to retrieve.
+ * @param value value to store retrieved.
+ *
+ * @return  XPLR_WIFISTARTER_OK on success or XPLR_WIFISTARTER_ERROR on failure.
+ */
+xplrWifiStarterError_t xplrWifiStarterWebserverDiagnosticsGet(xplrWifiStarterServerData_t opt, void *value);
+
+/**
+ * @brief Set webserver options.
+ *
+ * @param opt type of data to modify.
+ * @param value value to assign.
+ *
+ * @return  XPLR_WIFISTARTER_OK on success or XPLR_WIFISTARTER_ERROR on failure.
+ */
+xplrWifiStarterError_t xplrWifiStarterWebserverOptionsSet(xplrWifiStarterServerData_t opt, void *value);
+
+/**
+ * @brief Get webserver options.
+ *
+ * @param opt type of data to retrieve.
+ * @param value value to store retrieved data.
+ *
+ * @return  XPLR_WIFISTARTER_OK on success or XPLR_WIFISTARTER_ERROR on failure.
+ */
+xplrWifiStarterError_t xplrWifiStarterWebserverOptionsGet(xplrWifiStarterServerData_t opt, void *value);
 
 /**
  * @brief Set webserver location info.
@@ -343,6 +404,22 @@ char* xplrWifiStarterGetApIp(void);
  * @return  pointer to AP SSID address or null (if in STA mode).
  */
 char* xplrWifiStarterGetApSsid(void);
+
+/**
+ * @brief Function that halts the logging of the wifi module
+ * 
+ * @param wifiOptions  options of wifi starter.
+ * @return true if succeeded to halt the module or false otherwise.
+*/
+bool xplrWifiStarterHaltLogModule(xplrWifiStarterOpts_t *wifiOptions);
+
+/**
+ * @brief Function that starts the logging of the wifi module
+ * 
+ * @param wifiOptions  options of wifi starter.
+ * @return true if succeeded to start the module or false otherwise
+*/
+bool xplrWifiStarterStartLogModule(xplrWifiStarterOpts_t *wifiOptions);
 
 #ifdef __cplusplus
 }

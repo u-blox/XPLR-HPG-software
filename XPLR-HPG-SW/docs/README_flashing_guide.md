@@ -7,7 +7,7 @@
 
 To flash your **XPLR-HPG** kit you need to use the `esptool` script.
 
-From a command line window run the Windows executable `esptool.exe` using the arguments described below (No setup needed, go to [Flash command](#flash-command) section).
+From a command line window run the Windows executable `esptool.exe` using the arguments described below (No setup needed, go to [Flash command](#flash-command-examples) section).
 
 (`esptool.exe` is located in misc directory)
 
@@ -15,11 +15,10 @@ From a command line window run the Windows executable `esptool.exe` using the ar
 Each example software has 3 binary files:
 
 - **bootloader.bin**
-- **[SW_NAME].bin**
+- **\[SW_NAME\].bin**
 - **partition-table.bin**
 
 
-<br>
 <br>
 
 ## Flash command arguments
@@ -37,8 +36,7 @@ misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_res
 |FREQ                |`80m`                          |`40m`                        |
 |BOOTLOADER_ADDR     |`0x0`                          |`0x1000`                     |
 
-**For example:**
-
+### Flash command examples
 
 
 To flash you C214 board with the hpg_wifi_mqtt_correction_captive_portal example from our repository you would need the command:
@@ -48,10 +46,10 @@ misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 
 ```
 <br>
 
-To flash you C213 board with the hpg_wifi_mqtt_correction_certs_captive_portal example from our repository you would need the command:
+To flash you C213 board with the hpg_wifi_mqtt_correction_certs_captive_portal (without SD logging feature) example from our repository you would need the command:
 
 ```
-misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 bin/releases/C213/hpg_wifi_mqtt_correction_captive_portal/bootloader/bootloader.bin 0x10000 bin/releases/C213/hpg_wifi_mqtt_correction_captive_portal/hpg_wifi_mqtt_correction_captive_portal.bin 0x8000 bin/releases/C213/hpg_wifi_mqtt_correction_captive_portal/partition_table/partition-table.bin
+misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 bin/releases/C213/hpg_wifi_mqtt_correction_captive_portal/logging_OFF/bootloader/bootloader.bin 0x10000 bin/releases/C213/hpg_wifi_mqtt_correction_captive_portal/logging_OFF/hpg_wifi_mqtt_correction_captive_portal.bin 0x8000 bin/releases/C213/hpg_wifi_mqtt_correction_captive_portal/logging_OFF/partition_table/partition-table.bin
 ```
 <br>
 
@@ -68,11 +66,10 @@ misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 
 
 The same functionality as the `esptool.exe` can be achieved using the `esptool.py` python script.
 
-You will need Python 3.7 or newer installed on your system to use the latest version of `esptool.py`. 
+You will need Python 3.10 installed on your system to use the provided `esptool.py`. 
 
 (`esptool.py` and `requirements.txt` are located in misc directory)
 
-<br>
 <br>
 
 ## Notes
@@ -88,6 +85,8 @@ misc\esptool.exe -p [COM_PORT] erase_flash
 
 
 - Example commands to be run from `XPLR-HPG-SW` directory
+
+- On the XPLR-HPG-1 board (C213) in order to use the hpg_wifi_mqtt_correction_captive_portal example with the SD logging functionality enabled you need to make sure a SD card is inserted into the board. This configuration of the example will **not** work without a SD card.
 
 
 

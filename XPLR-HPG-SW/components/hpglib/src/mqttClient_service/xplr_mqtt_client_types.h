@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include "./../../../../components/ubxlib/ubxlib.h"
 #include "./../../../../components/hpglib/src/nvs_service/xplr_nvs.h"
+#include "xplr_log.h"
 
 /** @file
  * @brief This header file defines the types used in mqtt client service API,
@@ -60,12 +61,12 @@ typedef enum {
     XPLR_CELL_MQTT_CERT_METHOD_PWD          /**< register to a broker using username and password. */
 } xplrCell_mqtt_cert_method_t;
 
-/** Region selection for subscribing to related Point Perfect MQTT topics. */
+/** Region selection for subscribing to related PointPerfect MQTT topics. */
 typedef enum {
-    XPLR_CELL_MQTT_PP_REGION_NONE = -1,     /**< invalid region for point perfect service. */
-    XPLR_CELL_MQTT_PP_REGION_EU,            /**< Europe region for point perfect service. */
-    XPLR_CELL_MQTT_PP_REGION_US,            /**< USA region for point perfect service. */
-    XPLR_CELL_MQTT_PP_REGION_KR             /**< south Korea region for point perfect service. */
+    XPLR_CELL_MQTT_PP_REGION_NONE = -1,     /**< invalid region for PointPerfect service. */
+    XPLR_CELL_MQTT_PP_REGION_EU,            /**< Europe region for PointPerfect service. */
+    XPLR_CELL_MQTT_PP_REGION_US,            /**< USA region for PointPerfect service. */
+    XPLR_CELL_MQTT_PP_REGION_KR             /**< south Korea region for PointPerfect service. */
 } xplrCell_mqtt_pp_region_t;
 
 /** MQTT configuration struct for setting up deviceSettings.
@@ -152,6 +153,7 @@ typedef struct xplrCell_mqtt_client_type {
     (int32_t numUnread, void *received);
     void (*disconnected)                            /**< function pointer to client disconnect callback. */
     (int32_t status, void *param);
+    xplrLog_t                       *logCfg;        /**< Pointer to the log struct. */
 } xplrCell_mqtt_client_t;
 
 #ifdef __cplusplus

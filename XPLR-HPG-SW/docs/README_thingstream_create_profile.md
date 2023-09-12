@@ -3,10 +3,10 @@
 <br>
 <br>
 
-# Thingstream - Creating a device profile for Point Perfect
+# Thingstream - Creating a device profile for PointPerfect
 
 ## Description 
-A device profile is used in order to be able to use **Zero Touch Provisioning (ZTP)** in combination with **Point Perfect**.\
+A device profile is used in order to be able to use **Zero Touch Provisioning (ZTP)** in combination with **PointPerfect**.\
 A device profile can be used then to **[get the needed settings](./README_thingstream_ztp.md)** to perform a ZTP request
 
 ## Creating the profile
@@ -25,7 +25,7 @@ A device profile can be used then to **[get the needed settings](./README_things
 
 ### Video
 Follow the video below for a more detailed explanation of the steps above:\
-[![Thingstream - Creating a device profile for Point Perfect](./../media/shared/misc/vid_rsz.jpg)](https://youtu.be/N8m14aViwg8)
+[![Thingstream - Creating a device profile for PointPerfect](./../media/shared/misc/vid_rsz.jpg)](https://youtu.be/N8m14aViwg8)
 
 <br>
 

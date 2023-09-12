@@ -14,3 +14,9 @@ They demonstrate basic functionality of common scenarios such as:
 | **[01_hpg_cell_register](./01_hpg_cell_register/)** | Configure cellular module and register to a desired network. |
 | **[02_hpg_cell_mqtt_correction_certs](./02_hpg_cell_mqtt_correction_certs/)** | Create an MQTT connection and get correction data from Thingstream using certificates. |
 | **[03_hpg_cell_mqtt_correction_ztp](./03_hpg_cell_mqtt_correction_ztp/)** | Create an MQTT connection and get correction data from Thingstream using ZTP. |
+| **[04_hpg_cell_ntrip_correction](./04_hpg_cell_ntrip_correction/)** | Demonstration of NTRIP client over cellular network, connect to NTRIP caster, get correction data and forward the to the GNSS module. |
+
+
+## Notes
+In most examples the `Boot0` button is used to power down the peripheral modules that are available on the xplr-hpg boards. To switch off the modules just press and hold the `Boot0` button for 3 seconds.<br>
+**It is highly recommended to do this before unplugging the board from the USB to prevent any memory corruption.**

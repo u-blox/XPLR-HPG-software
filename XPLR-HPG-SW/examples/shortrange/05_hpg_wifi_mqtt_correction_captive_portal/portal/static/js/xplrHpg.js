@@ -118,7 +118,7 @@ class xplrHpgHtmlBuilder {
             <span class="badge text-bg-danger">Not Set</span>\
           </li>\
           <li class="list-group-item d-flex justify-content-between align-items-center" id="jsDvcStatusPointPerfect">\
-            Point Perfect\
+            PointPerfect\
             <span class="badge text-bg-danger">Not set</span>\
           </li>\
           <li class="list-group-item d-flex justify-content-between align-items-center" id="jsDvcStatusGnss">\
@@ -148,19 +148,19 @@ class xplrHpgHtmlBuilder {
     } else if (element == "ppNotSet") {
       ctx =
         '\
-      Point Perfect\
+      PointPerfect\
       <span class="badge text-bg-danger">Not set</span>';
       this.context = ctx;
     } else if (element == "ppConfigured") {
       ctx =
         '\
-      Point Perfect\
+      PointPerfect\
       <span class="badge text-bg-secondary">Configured</span>';
       this.context = ctx;
     } else if (element == "ppConnected") {
       ctx =
         '\
-      Point Perfect\
+      PointPerfect\
       <span class="badge text-bg-success">Connected</span>';
       this.context = ctx;
     } else if (element == "gnssNoSignal") {
@@ -233,12 +233,16 @@ class xplrHpgData {
     this.ssid = null;
     this.password = null;
     this.rootCa = null;
+    this.uConfig = null;
 
     this.ppId = null;
     this.ppCert = null;
     this.ppKey = null;
     this.ppRegion = null;
     this.ppPlan = null;
+
+    this.sdLog = null;
+    this.gnssDR = null;
 
     this.dvcConfiguredAlert = false;
 
@@ -263,10 +267,14 @@ class xplrHpgData {
       '{"ssid":null, \
         "ip":null, \
         "host":null, \
+        "plan":null, \
         "uptime":null, \
         "timeToFix":null, \
         "mqttTraffic":null, \
         "accuracy":null, \
+        "sdInfo":null,\
+        "drInfo":null,\
+        "drCalibrationInfo":null,\
         "fwVersion":null}'
     );
 
@@ -297,6 +305,14 @@ class xplrHpgData {
 
   set password(value) {
     this._password = value;
+  }
+
+  get uConfig() {
+    return this._uConfig;
+  }
+
+  set uConfig(value) {
+    this._uConfig = value;
   }
 
   get rootCa() {
@@ -337,6 +353,30 @@ class xplrHpgData {
 
   set ppRegion(value) {
     this._ppRegion = value;
+  }
+
+  get ppPlan() {
+    return this._ppPlan;
+  }
+
+  set ppPlan(value) {
+    this._ppPlan = value;
+  }
+
+  get sdLog() {
+    return this._sdLog;
+  }
+
+  set sdLog(value) {
+    this._sdLog = value;
+  }
+
+  get gnssDR() {
+    return this._gnssDR;
+  }
+
+  set gnssDR(value) {
+    this._gnssDR = value;
   }
 
   get dvcConfiguredAlert() {
@@ -478,6 +518,8 @@ class xplrHpg {
           document.getElementById("jsDvcInfoHostname").value = value.host + ".local";
         }
 
+        document.getElementById("jsDvcInfoPlan").value = value.plan;
+
         document.getElementById("jsDvcInfoUptime").value = value.uptime;
 
         if (value.timeToFix === undefined) {
@@ -495,7 +537,22 @@ class xplrHpg {
           value.mqttTraffic = "n/a";
         }
 
+        if (value.sdInfo === undefined) {
+          value.sdInfo = "n/a";
+        }
+
+        if (value.drInfo === undefined) {
+          value.drInfo = "n/a";
+        }
+
+        if (value.drCalibrationInfo === undefined) {
+          value.drCalibrationInfo = "n/a";
+        }
+
         document.getElementById("jsDvcInfoMqttTraffic").value = value.mqttTraffic;
+        document.getElementById("jsDvcInfoSD").value = value.sdInfo;
+        document.getElementById("jsDvcInfoDr").value = value.drInfo;
+        document.getElementById("jsDvcInfoDrCalibrated").value = value.drCalibrationInfo;
         document.getElementById("jsDvcInfoFwVersion").value = value.fwVersion;
       }
     } else if (event == "jsDvcStatusWifi") {
@@ -593,6 +650,32 @@ class xplrHpg {
           break;
       }
     }
+  }
+
+  convertToX509(key, isCert) {
+    const headerCert = "-----BEGIN CERTIFICATE-----\\n";
+    const footerCert = "-----END CERTIFICATE-----\\n";
+    const headerKey = "-----BEGIN RSA PRIVATE KEY-----\\n";
+    const footerKey = "-----END RSA PRIVATE KEY-----\\n";
+    const base64Iterations = key.length / 64;
+    const base64IterationsMod = key.length % 64;
+    let keyValue = "";
+    let x509 = "";
+
+    for (let i = 0; i <= base64Iterations; i++) {
+      keyValue += key.slice(i * 64, i * 64 + 64);
+      if (base64IterationsMod != 0 || i != base64Iterations) {
+        keyValue += "\\n";
+      }
+    }
+
+    if (isCert) {
+      x509 = headerCert + keyValue + footerCert;
+    } else {
+      x509 = headerKey + keyValue + footerKey;
+    }
+
+    return x509;
   }
 
   wsConnect() {
@@ -702,6 +785,30 @@ class xplrHpg {
     }
   }
 
+  wsUpdateUConfig(config) {
+    this.data.uConfig = config;
+    if (this.data.socketStatus == 1) {
+      const jConfig = JSON.parse(config);
+      const id = jConfig.MQTT.Connectivity.ClientID;
+      const rootCa = this.convertToX509(jConfig.MQTT.Connectivity.ClientCredentials.RootCA, true);
+      const cert = this.convertToX509(jConfig.MQTT.Connectivity.ClientCredentials.Cert, true);
+      const key = this.convertToX509(jConfig.MQTT.Connectivity.ClientCredentials.Key, false);
+
+      this.wsUpdateThingstreamPpId(id);
+      sleep(100).then(() => {
+        this.wsUpdateThingstreamPpRootCa(rootCa);
+      });
+      sleep(100).then(() => {
+        this.wsUpdateThingstreamPpCert(cert);
+      });
+      sleep(100).then(() => {
+        this.wsUpdateThingstreamPpKey(key);
+      });
+    } else {
+      consoleLog("[xplrHpg] Websocket dvcRequest failed, socket state:" + this.data.socket.readyState, "red");
+    }
+  }
+
   wsUpdateThingstreamPpId(id) {
     this.data.ppId = id;
     if (this.data.socketStatus == 1) {
@@ -783,6 +890,34 @@ class xplrHpg {
       let msg = "{" + cmd + ppPlan + "}";
       const jObj = JSON.parse(msg);
       consoleLog("[xplrHpg] Device set thingstream pp plan req msg:" + JSON.stringify(jObj), "cyan");
+      this.data.socket.send(JSON.stringify(jObj));
+    } else {
+      consoleLog("[xplrHpg] Websocket dvcRequest failed, socket state:" + this.data.socket.readyState, "red");
+    }
+  }
+
+  wsUpdateSdLog(log) {
+    this.data.sdLog = log;
+    if (this.data.socketStatus == 1) {
+      let cmd = '"req":"dvcSdLogSet",';
+      let sd = '"sd":' + '"' + this.data.sdLog + '"';
+      let msg = "{" + cmd + sd + "}";
+      const jObj = JSON.parse(msg);
+      consoleLog("[xplrHpg] Device set SD log req msg:" + JSON.stringify(jObj), "cyan");
+      this.data.socket.send(JSON.stringify(jObj));
+    } else {
+      consoleLog("[xplrHpg] Websocket dvcRequest failed, socket state:" + this.data.socket.readyState, "red");
+    }
+  }
+
+  wsUpdateGnssDR(log) {
+    this.data.gnssDR = log;
+    if (this.data.socketStatus == 1) {
+      let cmd = '"req":"dvcGnssDrSet",';
+      let sd = '"gnssDR":' + '"' + this.data.gnssDR + '"';
+      let msg = "{" + cmd + sd + "}";
+      const jObj = JSON.parse(msg);
+      consoleLog("[xplrHpg] Device set GNSS DR req msg:" + JSON.stringify(jObj), "cyan");
       this.data.socket.send(JSON.stringify(jObj));
     } else {
       consoleLog("[xplrHpg] Websocket dvcRequest failed, socket state:" + this.data.socket.readyState, "red");
@@ -890,12 +1025,17 @@ class xplrHpg {
             this.data.info.ssid = msg.ssid;
             this.data.info.ip = msg.ip;
             this.data.info.host = msg.host;
+            this.data.info.plan = msg.plan;
             this.data.info.uptime = msg.uptime;
             this.data.info.timeToFix = msg.timeToFix;
             this.data.info.accuracy = msg.accuracy;
             this.data.info.mqttTraffic = msg.mqttTraffic;
+            this.data.info.sdInfo = msg.sdInfo;
+            this.data.info.drInfo = msg.drInfo;
             this.data.info.fwVersion = msg.fwVersion;
-            this.eventDisplay("jsDvcInfo", "update", msg);
+            if (this.pageActive === "status") {
+              this.eventDisplay("jsDvcInfo", "update", msg);
+            }
             this.data.socketBufferIn.splice(--index, 1);
             break;
           case "dvcSsidScan":
@@ -903,11 +1043,17 @@ class xplrHpg {
             this.data.socketBufferIn.splice(--index, 1);
             break;
           case "dvcLocation":
-            this.data.gnss.latitude = msg.lat;
-            this.data.gnss.longitude = msg.lon;
+            //format lat,lon and accuracy to fixed digits
+            let fLat, fLon, fAcc;
+            fLat = msg.lat.toFixed(7);
+            fLon = msg.lon.toFixed(7);
+            fAcc = msg.accuracy.toFixed(3);
+
+            this.data.gnss.latitude = fLat;
+            this.data.gnss.longitude = fLon;
             this.data.gnss.altitude = msg.alt;
             this.data.gnss.speed = msg.speed;
-            this.data.gnss.accuracy = msg.accuracy;
+            this.data.gnss.accuracy = fAcc;
             this.data.gnss.fixType = msg.type;
             this.data.gnss.timestamp = msg.timestamp;
             this.data.gnss.gMap = msg.gMap;
@@ -926,7 +1072,7 @@ class xplrHpg {
                 fixType = "noSignal";
                 break;
               case 1:
-                fixType = "3D-Fixed";
+                fixType = "3D";
                 break;
               case 2:
                 fixType = "DGNSS";
@@ -943,12 +1089,22 @@ class xplrHpg {
             }
 
             let logMsg =
-              msg.timestamp + " " + "WLAN" + " " + msg.accuracy + " " + msg.lat + " " + msg.lon + " " + fixType;
+              msg.timestamp +
+              " " +
+              this.data.info.plan +
+              " " +
+              this.data.gnss.accuracy +
+              " " +
+              this.data.gnss.latitude +
+              " " +
+              this.data.gnss.longitude +
+              " " +
+              fixType;
 
             //https://www.regexpal.com/
             const log = logMsg.match(
-              //time        src acc      lat          lon          fix
-              /^\d+:\d+:\d+ \w+ (\d+(\.\d+)?) (-?\d+\.\d+) (-?\d+\.\d+) (\S+)/
+              //time        src   acc           lat          lon          fix
+              /^\d+:\d+:\d+ (\S+) (\d+(\.\d+)?) (-?\d+\.\d+) (-?\d+\.\d+) (\S+)/
             );
 
             if (log != null) {
@@ -980,16 +1136,7 @@ class xplrHpg {
   }
 
   isDeviceConfigured() {
-    if (
-      this.data.ssid != null &&
-      this.data.password != null &&
-      this.data.rootCa != null &&
-      this.data.ppId != null &&
-      this.data.ppCert != null &&
-      this.data.ppKey != null &&
-      this.data.ppRegion != null &&
-      this.data.ppPlan != null
-    ) {
+    if (this.data.ssid != null && this.data.password != null) {
       return true;
     } else {
       return false;
@@ -1000,10 +1147,17 @@ class xplrHpg {
     if (this.data.socketStatus == 1) {
       if (page == "dvcStatus") {
         this.wsRequestDvcStatus();
-        this.wsRequestDvcInfo();
+        sleep(100).then(() => {
+          this.wsRequestDvcInfo();
+        });
       } else if (page == "dvcTracker") {
         this.wsRequestDvcStatus();
-        this.wsRequestDvcLocation();
+        sleep(100).then(() => {
+          this.wsRequestDvcInfo();
+        });
+        sleep(100).then(() => {
+          this.wsRequestDvcLocation();
+        });
         if (this.data.diagnostics.wifi == "connected") {
           if (this.loopOnce == null) {
             if (this.data.gnss.latitude != null && this.data.gnss.longitude != null) {

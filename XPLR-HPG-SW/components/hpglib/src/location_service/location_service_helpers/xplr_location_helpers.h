@@ -24,6 +24,7 @@
 
 #include "./../../xplr_hpglib_cfg.h"
 #include "xplr_location_helpers_types.h"
+#include "xplr_log.h"
 
 /** @file
  * @brief This header file defines the general location modules API,
@@ -52,7 +53,13 @@ extern "C" {
  * You can increase this timeout if it's not sufficient for
  * your modules
  */
-#define XPLR_HLPRLOCSRVC_DEVICE_ONLINE_TIMEOUT 20
+#define XPLR_HLPRLOCSRVC_DEVICE_ONLINE_TIMEOUT 40
+
+/* ----------------------------------------------------------------
+ * EXTERN VARIABLES
+ * -------------------------------------------------------------- */
+extern xplrLog_t locationLog;
+extern char buff2Log[512];
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION PROTOTYPES
@@ -68,69 +75,80 @@ extern "C" {
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Used to initialize ubxlib.
+ *
+ * @return  ESP_OK on success otherwise ESP_FAIL on failure.
  */
 esp_err_t xplrHelpersUbxlibInit(void);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Tries to open a device communication in
+ * XPLR_HLPRLOCSRVC_DEVICE_ONLINE_TIMEOUT seconds.
+ * This function will be deprecated on future releases.
+ *
+ * @param dvcConf     device configuration.
+ * @param dvcHandler  device handler.
+ * @return            ESP_OK on success, ESP_INVALID_ARG on invalid parameters,
+ *                    ESP_ERR_TIMEOUT on timeout, ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcDeviceOpen(xplrGnssDevBase_t *dvcBase);
+esp_err_t xplrHlprLocSrvcDeviceOpen(xplrLocationDevConf_t *dvcConf,
+                                    uDeviceHandle_t *dvcHandler);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Tries to open a device communication on a single try,
+ * if it fails it does not retry automatically.
+
+ *
+ * @param dvcConf     device configuration.
+ * @param dvcHandler  device handler.
+ * @return            ESP_OK on success, ESP_INVALID_ARG on invalid parameters,
+ *                    ESP_ERR_TIMEOUT on timeout, ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcDeviceClose(xplrGnssDevBase_t *dvcBase);
+esp_err_t xplrHlprLocSrvcDeviceOpenNonBlocking(xplrLocationDevConf_t *dvcConf,
+                                               uDeviceHandle_t *dvcHandler);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Closes open device.
+ *
+ * @param dvcHandler  device handler.
+ * @return            ESP_OK on success otherwise ESP_FAIL on failure.
  */
-uDeviceHandle_t *xplrHlprLocSrvcGetHandler(xplrGnssDevBase_t *dvcBase);
+esp_err_t xplrHlprLocSrvcDeviceClose(uDeviceHandle_t *dvcHandler);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Returns a device handler pointer.
+ *
+ * @param dvcHandler  device handler.
+ * @return            device handler pointer on success otherwise NULL.
+ */
+uDeviceHandle_t *xplrHlprLocSrvcGetHandler(uDeviceHandle_t *dvcHandler);
+
+/**
+ * @brief Do not use this function directly.
+ * Deinitialize ubxlib.
+ *
+ * @return  ESP_OK on success otherwise ESP_FAIL on failure.
  */
 esp_err_t xplrHlprLocSrvcUbxlibDeinit(void);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Sets a single config value into the module.
+ *
+ * @param dvcHandler   device handler.
+ * @param keyId        config key id.
+ * @param value        value to be set for said config key id.
+ * @param transaction  transaction type.
+ * @param layer        layer for the value to be set into, essentially
+ *                     declares in which memory vals will be stored.
+ * @return             ESP_OK on success, ESP_ERR_TIMEOUT on timeout,
+ *                     ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcConfigAllDefault(xplrGnssDevBase_t *dvcBase, uint8_t i2cAddress);
-
-/**
- * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
- */
-esp_err_t xplrHlprLocSrvcDeviceConfigDefault(xplrGnssDevBase_t *dvcBase, uint8_t i2cAddress);
-
-/**
- * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
- */
-esp_err_t xplrHlprLocSrvcNetworkConfigDefault(xplrGnssDevBase_t *dvcBase);
-
-/**
- * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
- */
-esp_err_t xplrHlprLocSrvcSetDeviceConfig(xplrGnssDevBase_t *dvcBase, uDeviceCfg_t *sdConfig);
-
-/**
- * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
- */
-esp_err_t xplrHlprLocSrvcSetNetworkConfig(xplrGnssDevBase_t *dvcBase, uNetworkCfgGnss_t *sdNetwork);
-
-/**
- * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
- */
-esp_err_t xplrHlprLocSrvcOptionSingleValSet(xplrGnssDevBase_t *dvcBase,
+esp_err_t xplrHlprLocSrvcOptionSingleValSet(uDeviceHandle_t *dvcHandler,
                                             uint32_t keyId,
                                             uint64_t value,
                                             uGnssCfgValTransaction_t transaction,
@@ -138,57 +156,124 @@ esp_err_t xplrHlprLocSrvcOptionSingleValSet(xplrGnssDevBase_t *dvcBase,
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Sets multiple config values in one go.
+ *
+ * @param dvcHandler   device handler.
+ * @param list         a list of tuples (key id, val) to be set.
+ * @param numValues    number/length of list to be set.
+ * @param transaction  transaction type.
+ * @param layer        layer for the value to be set into, essentially
+ *                     declares in which memory vals will be stored.
+ * @return             ESP_OK on success, ESP_ERR_TIMEOUT on timeout,
+ *                     ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcOptionMultiValSet(xplrGnssDevBase_t *dvcBase,
-                                           const uGnssCfgVal_t *pList,
+esp_err_t xplrHlprLocSrvcOptionMultiValSet(uDeviceHandle_t *dvcHandler,
+                                           const uGnssCfgVal_t *list,
                                            size_t numValues,
                                            uGnssCfgValTransaction_t transaction,
                                            uGnssCfgValLayer_t layer);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Gets a single config value as stored on the module.
+ *
+ * @param dvcHandler  device handler.
+ * @param keyId       config key id.
+ * @param value       stores value fetched from module.
+ * @param size        size of value.
+ * @param layer       layer from which to get value from, essentially
+ *                    declares from which memory the value will be read.
+ * @return            ESP_OK on success, ESP_ERR_TIMEOUT on timeout,
+ *                    ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcOptionSingleValGet(xplrGnssDevBase_t *dvcBase,
+esp_err_t xplrHlprLocSrvcOptionSingleValGet(uDeviceHandle_t *dvcHandler,
                                             uint32_t keyId,
-                                            void *pValue,
+                                            void *value,
                                             size_t size,
                                             uGnssCfgValLayer_t layer);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Gets multiple config values as stored on the module in
+ * the form of a list.
+ *
+ * @param dvcHandler  device handler.
+ * @param keyIdList   a list of key ids.
+ * @param numKeyIds   number/length of list to be set.
+ * @param list        a list of tuples (key id, val) to store values.
+ * @param layer       layer from which to get value from, essentially
+ *                    declares from which memory the value will be read.
+ * @return            ESP_OK on success, ESP_ERR_TIMEOUT on timeout,
+ *                    ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcOptionMultiValGet(xplrGnssDevBase_t *dvcBase,
-                                           const uint32_t *pKeyIdList,
+esp_err_t xplrHlprLocSrvcOptionMultiValGet(uDeviceHandle_t *dvcHandler,
+                                           const uint32_t *keyIdList,
                                            size_t numKeyIds,
-                                           uGnssCfgVal_t **pList,
+                                           uGnssCfgVal_t **list,
                                            uGnssCfgValLayer_t layer);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Gets device information such as module type,
+ * firmware version, hardware version, I2C info, etc.
+ *
+ * @param dvcConf     device configuration.
+ * @param dvcHandler  device handler.
+ * @param dvcInfo     stored device info.
+ * @return            ESP_OK on success otherwise ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcGetDeviceInfo(xplrGnssDevBase_t *dvcBase, xplrGnssDevInfo_t *dInfo);
+esp_err_t xplrHlprLocSrvcGetDeviceInfo(xplrLocationDevConf_t *dvcConf,
+                                       uDeviceHandle_t dvcHandler,
+                                       xplrLocDvcInfo_t *dvcInfo);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Prints device info such module type,
+ * firmware version, hardware version, I2C info, etc.
+ *
+ * @param dvcInfo  storage for device info.
+ * @return         ESP_OK on success otherwise ESP_FAIL on failure.
  */
-esp_err_t xplrHlprLocSrvcPrintDeviceInfo(xplrGnssDevInfo_t *dInfo);
+esp_err_t xplrHlprLocSrvcPrintDeviceInfo(xplrLocDvcInfo_t *dvcInfo);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Sends a ubx formatted command.
+ * Function checks internally if sent size matches
+ * desired size (size param).
+ *
+ * @param dvcHandler  device handler.
+ * @param buffer      buffer of ubx formatted command to send.
+ * @param size        size of buffer to send.
+ * @return            size of bytes sent on success otherwise
+ *                    negative value on error
  */
-int32_t xplrHlprLocSrvcSendUbxFormattedCommand(uDeviceHandle_t *dHandler,
-                                               const char *pBuffer,
+int32_t xplrHlprLocSrvcSendUbxFormattedCommand(uDeviceHandle_t *dvcHandler,
+                                               const char *buffer,
                                                size_t size);
 
 /**
  * @brief Do not use this function directly.
- * Only meant for internal/private use by location components.
+ * Sends RTCM (NTRIP) correction data to GNSS module.
+ *
+ * @param dvcHandler  device handler.
+ * @param buffer      buffer containing RTCM correction data.
+ * @param size        size of buffer to send.
+ * @return            ESP_OK on success otherwise ESP_FAIL on failure.
+ */
+esp_err_t xplrHlprLocSrvcSendRtcmFormattedCommand(uDeviceHandle_t *dvcHandler,
+                                                  const char *buffer,
+                                                  size_t size);
+
+/**
+ * @brief Do not use this function directly.
+ * Checks if profile id is inside permited limits of
+ * maximum allowed devices.
+ *
+ * @param dvcProfile  a device profile id.
+ * @param maxDevLim   maximum allowed devices according to
+ *                    configuration (check xplr_hpglib_cfg.h)
+ * @return            true if device profile is inside limits otherwise false
  */
 bool xplrHlprLocSrvcCheckDvcProfileValidity(uint8_t dvcProfile, uint8_t maxDevLim);
 

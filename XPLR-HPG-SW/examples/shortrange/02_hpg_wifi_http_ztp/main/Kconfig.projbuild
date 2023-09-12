@@ -1,5 +1,13 @@
 menu "XPLR HPG Options"
 
+    menu "AWS Root CA Settings"
+        config XPLR_AWS_ROOTCA_URL
+            string "AWS Root CA Url"
+            default "https://www.amazontrust.com/repository/AmazonRootCA1.pem"
+            help
+                Amazon Url in order to fetch the Root CA certificate. If not using a different Root CA certificate leave to default value.
+    endmenu
+    
     menu "Thingstream Zero Touch Provisioning Settings"
         config XPLR_TS_PP_ZTP_CREDENTIALS_URL
             string "ZTP Thingstream credentials URL"
@@ -13,12 +21,6 @@ menu "XPLR HPG Options"
             default "ztp-token"
             help
                 Type in the ZTP token from your Thingstream account.
-
-        config XPLR_TS_PP_DEVICE_NAME
-            string "ZTP device name"
-            default "device-name"
-            help
-                Type in a device name of your chosing.
     endmenu
 
     menu "Wi-Fi Settings"

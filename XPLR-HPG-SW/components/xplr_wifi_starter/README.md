@@ -32,7 +32,6 @@ Name | Value | Description
 <br>
 
 ## Modules-Components used
-XPLR MQTT Wi-Fi uses the following modules-components:
 
 Name | Description 
 --- | --- 

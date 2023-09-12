@@ -26,7 +26,8 @@
 #include "esp_log.h"
 #include "mqtt_client.h"
 #include "freertos/ringbuf.h"
-#include "xplr_ztp_json_parser.h"
+#include "./../../hpglib/src/thingstream_service/xplr_thingstream.h"
+#include "./../../../components/hpglib/src/log_service/xplr_log.h"
 
 /** @file
  * @brief This header file defines the wifi mqtt service API,
@@ -121,12 +122,12 @@ typedef struct xplrMqttWifiRingBuffItem_type {
  * a complete payload.
  */
 typedef struct xplrMqttWifiPayload_type {
-    uint16_t dataLength;  /**< data length that the buffer contain, populated number of data. */
-    uint16_t maxDataLength;  /**< max data length the buffer can accept. This is checked in
-                                  the parsing function to make sure memcpy will not try
-                                  to write beyond the buffer capabilities. */
-    char *topic;     /**< topic we received from, account for the string NULL terminator. */
-    char *data;      /**< the data itself. */
+    uint16_t dataLength;    /**< data length that the buffer contain, populated number of data. */
+    uint16_t maxDataLength; /**< max data length the buffer can accept. This is checked in
+                                 the parsing function to make sure memcpy will not try
+                                 to write beyond the buffer capabilities. */
+    char *topic;            /**< topic we received from, account for the string NULL terminator. */
+    char *data;             /**< the data itself. */
 } xplrMqttWifiPayload_t;
 
 /**
@@ -151,6 +152,7 @@ typedef struct xplrMqttWifiFsmUCD_type {
 typedef struct xplrMqttWifiClient_type {
     esp_mqtt_client_handle_t handler;  /**< client handler. */
     xplrMqttWifiFsmUCD_t ucd;          /**< user context data pack. */
+    xplrLog_t *logCfg;                 /**< pointer to the module's log struct. */
 } xplrMqttWifiClient_t;
 
 
@@ -160,7 +162,7 @@ typedef struct xplrMqttWifiClient_type {
 
 /**
  * @brief Init state machine to a known state
- * 
+ *
  * @param client  a client item containing MQTT client handler UCD pack.
  * @return        zero on success or negative error code on
  *                failure.
@@ -179,8 +181,8 @@ esp_err_t xplrMqttWifiInitClient(xplrMqttWifiClient_t *client, esp_mqtt_client_c
 
 /**
  * @brief Sets MQTT client to first state, COnfig state, from which it can start
- * executing it's FSM. 
- * 
+ * executing it's FSM.
+ *
  * @param client  a client item containing MQTT client handler UCD pack.
  * @return        zero on success or negative error code on
  *                failure.
@@ -189,7 +191,7 @@ esp_err_t xplrMqttWifiStart(xplrMqttWifiClient_t *client);
 
 /**
  * @brief Sets ring buffer slots count
- * 
+ *
  * @param client  a client item containing MQTT client handler UCD pack.
  * @param count   count of ringbuffer slots.
  * @return        zero on success or negative error code on
@@ -219,14 +221,12 @@ xplrMqttWifiError_t xplrMqttWifiFsm(xplrMqttWifiClient_t *client);
  * Useful when getting the whole ZTP reply with populated topics.
  *
  * @param client  a client item containing MQTT client handler UCD pack.
- * @param topics  a topics array to subscribe to.
- * @param qos     quality of service flag.
+ * @param settings PointPerfect setting and credentials struct
  * @return        zero on success or negative error code on
  *                failure.
  */
 esp_err_t xplrMqttWifiSubscribeToTopicArrayZtp(xplrMqttWifiClient_t *client,
-                                               xplrZtpStyleTopics_t *topics,
-                                               xplrMqttWifiQosLvl_t qos);
+                                               xplr_thingstream_pp_settings_t *settings);
 
 /**
  * @brief Subscribe to an array of topics in string format.
@@ -238,8 +238,8 @@ esp_err_t xplrMqttWifiSubscribeToTopicArrayZtp(xplrMqttWifiClient_t *client,
  * @return        zero on success or negative error code on
  *                failure.
  */
-esp_err_t xplrMqttWifiSubscribeToTopicArray(xplrMqttWifiClient_t *client, 
-                                            char *topics[], 
+esp_err_t xplrMqttWifiSubscribeToTopicArray(xplrMqttWifiClient_t *client,
+                                            char *topics[],
                                             uint16_t cnt,
                                             xplrMqttWifiQosLvl_t qos);
 
@@ -247,14 +247,12 @@ esp_err_t xplrMqttWifiSubscribeToTopicArray(xplrMqttWifiClient_t *client,
  * @brief Subscribe to single ZTP Topic.
  *
  * @param client  a client item containing MQTT client handler UCD pack.
- * @param topic   a ZTP topic to subscribe to.
- * @param qos     quality of service flag.
+ * @param topic   a ZTP topic to subscribe to..
  * @return        zero on success or negative error code on
  *                failure.
  */
-esp_err_t xplrMqttWifiSubscribeToTopicZtp(xplrMqttWifiClient_t *client, 
-                                          xplrTopic *topic,
-                                          xplrMqttWifiQosLvl_t qos);
+esp_err_t xplrMqttWifiSubscribeToTopicZtp(xplrMqttWifiClient_t *client,
+                                          xplr_thingstream_pp_topic_t *topic);
 
 /**
  * @brief Subscribe to a single MQTT topic using string.
@@ -265,7 +263,7 @@ esp_err_t xplrMqttWifiSubscribeToTopicZtp(xplrMqttWifiClient_t *client,
  * @return        zero on success or negative error code on
  *                failure.
  */
-esp_err_t xplrMqttWifiSubscribeToTopic(xplrMqttWifiClient_t *client, 
+esp_err_t xplrMqttWifiSubscribeToTopic(xplrMqttWifiClient_t *client,
                                        char *topic,
                                        xplrMqttWifiQosLvl_t qos);
 
@@ -278,7 +276,7 @@ esp_err_t xplrMqttWifiSubscribeToTopic(xplrMqttWifiClient_t *client,
  *                failure.
  */
 esp_err_t xplrMqttWifiUnsubscribeFromTopicArrayZtp(xplrMqttWifiClient_t *client,
-                                                   xplrZtpStyleTopics_t *topics);
+                                                   xplr_thingstream_pp_settings_t *settings);
 
 /**
  * @brief Unsubscribe from a string Topics array.
@@ -290,7 +288,7 @@ esp_err_t xplrMqttWifiUnsubscribeFromTopicArrayZtp(xplrMqttWifiClient_t *client,
  * @return        zero on success or negative error code on
  *                failure.
  */
-esp_err_t xplrMqttWifiUnsubscribeFromTopicArray(xplrMqttWifiClient_t *client, 
+esp_err_t xplrMqttWifiUnsubscribeFromTopicArray(xplrMqttWifiClient_t *client,
                                                 char *topics[],
                                                 uint16_t cnt);
 
@@ -302,7 +300,8 @@ esp_err_t xplrMqttWifiUnsubscribeFromTopicArray(xplrMqttWifiClient_t *client,
  * @return        zero on success or negative error code on
  *                failure.
  */
-esp_err_t xplrMqttWifiUnsubscribeFromTopicZtp(xplrMqttWifiClient_t *client, xplrTopic *topic);
+esp_err_t xplrMqttWifiUnsubscribeFromTopicZtp(xplrMqttWifiClient_t *client,
+                                              xplr_thingstream_pp_topic_t *topic);
 
 /**
  * @brief Unsubscribe from a single topic.
@@ -367,7 +366,7 @@ xplrMqttWifiClientStates_t xplrMqttWifiGetPreviousState(xplrMqttWifiClient_t *cl
 /**
  * @brief Tries to publish a message to the desired topic using
  * a ZTP style topic
- * 
+ *
  * @param client    a client item containing MQTT client handler UCD pack.
  * @param topic     a ZTP topic to publish to.
  * @param data      data to publish.
@@ -377,10 +376,10 @@ xplrMqttWifiClientStates_t xplrMqttWifiGetPreviousState(xplrMqttWifiClient_t *cl
  * @return          zero on success or negative error code on
  *                  failure.
  */
-esp_err_t xplrMqttWifiPublishMsgZtp(xplrMqttWifiClient_t *client, 
-                                    xplrTopic *topic, 
+esp_err_t xplrMqttWifiPublishMsgZtp(xplrMqttWifiClient_t *client,
+                                    xplr_thingstream_pp_topic_t *topic,
                                     char *data,
-                                    uint64_t dataLength, 
+                                    uint64_t dataLength,
                                     xplrMqttWifiQosLvl_t qos,
                                     int retain);
 
@@ -396,12 +395,28 @@ esp_err_t xplrMqttWifiPublishMsgZtp(xplrMqttWifiClient_t *client,
  * @return          zero on success or negative error code on
  *                  failure.
  */
-esp_err_t xplrMqttWifiPublishMsg(xplrMqttWifiClient_t *client, 
-                                 char *topic, 
+esp_err_t xplrMqttWifiPublishMsg(xplrMqttWifiClient_t *client,
+                                 char *topic,
                                  char *data,
-                                 uint64_t dataLength, 
-                                 xplrMqttWifiQosLvl_t qos, 
+                                 uint64_t dataLength,
+                                 xplrMqttWifiQosLvl_t qos,
                                  int retain);
+
+/**
+ * @brief Function that halts the logging of the mqtt module
+ * 
+ * @param client    a client item containing MQTT client handler UCD pack.
+ * @return true if succeeded to halt the module or false otherwise.
+*/
+bool xplrMqttWifiHaltLogModule(xplrMqttWifiClient_t *client);
+
+/**
+ * @brief Function that starts the logging of the mqtt module
+ * 
+ * @param client    a client item containing MQTT client handler UCD pack.
+ * @return true if succeeded to start the module or false otherwise
+*/
+bool xplrMqttWifiStartLogModule(xplrMqttWifiClient_t *client);
 
 #ifdef __cplusplus
 }

@@ -28,8 +28,16 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-#if (1 == XPLRCOM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)
+#if (1 == XPLRCOM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRCOM_LOG_ACTIVE))
 #define XPLRCOM_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRCOM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+#define XPLRCOM_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
+    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
+    XPLRLOG(&cellLog,buff2Log);
+#elif ((0 == XPLRCOM_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+#define XPLRCOM_CONSOLE(tag, message, ...)\
+    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
+    XPLRLOG(&cellLog,buff2Log);
 #else
 #define XPLRCOM_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -86,6 +94,11 @@ xplrCom_t comDevices[XPLRCOM_NUMOF_DEVICES] = {NULL};
 xplrCom_cell_netInfo_t currentNetInfo;
 xplrCom_cell_connect_t cellFsm = XPLR_COM_CELL_CONNECT_ERROR;
 
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+static xplrLog_t cellLog;
+static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
+#endif
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -119,7 +132,18 @@ xplrCom_error_t xplrUbxlibInit(void)
     xplrCom_error_t ret;
     int32_t ubxlibRes;
 
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+    xplrLog_error_t err;
+    err = xplrLogInit(&cellLog, XPLR_LOG_DEVICE_INFO, "/cell.log", 100, XPLR_SIZE_MB);
+    if (err == XPLR_LOG_OK) {
+        cellLog.logEnable = true;
+    } else {
+        cellLog.logEnable = false;
+    }
+#endif
+
     ubxlibRes = uPortInit();
+
     if (ubxlibRes == 0) {
         XPLRCOM_CONSOLE(D, "ubxlib init ok");
         ubxlibRes = uDeviceInit();
@@ -214,7 +238,7 @@ xplrCom_error_t xplrComCellFsmConnect(int8_t dvcProfile)
                 XPLRCOM_CONSOLE(D, "open ok, configuring MNO");
             } else {
                 fsm[0] = XPLR_COM_CELL_CONNECT_ERROR; /* failed to open, go to error state */
-                XPLRCOM_CONSOLE(E, "open failed with code: ", ret);
+                XPLRCOM_CONSOLE(E, "open failed with code: %d", ret);
             }
             break;
         case XPLR_COM_CELL_CONNECT_SET_MNO:
@@ -226,7 +250,7 @@ xplrCom_error_t xplrComCellFsmConnect(int8_t dvcProfile)
                 XPLRCOM_CONSOLE(D, "MNO ok or cannot be changed, checking device");
             } else {
                 fsm[0] = XPLR_COM_CELL_CONNECT_ERROR; /* failed to set or read MNO, go to error state */
-                XPLRCOM_CONSOLE(E, "MNO Set failed with code: ", ret);
+                XPLRCOM_CONSOLE(E, "MNO Set failed with code: %d", ret);
             }
             break;
         case XPLR_COM_CELL_CONNECT_SET_RAT:
@@ -248,7 +272,7 @@ xplrCom_error_t xplrComCellFsmConnect(int8_t dvcProfile)
                 XPLRCOM_CONSOLE(D, "bands ok, checking device");
             } else {
                 fsm[0] = XPLR_COM_CELL_CONNECT_ERROR; /* failed to set / read band list, go to error state */
-                XPLRCOM_CONSOLE(E, "bands Set failed with code: ", ret);
+                XPLRCOM_CONSOLE(E,  "bands Set failed with code: %d", ret);
             }
             break;
         case XPLR_COM_CELL_CONNECT:
@@ -284,8 +308,9 @@ xplrCom_error_t xplrComCellFsmConnect(int8_t dvcProfile)
                     /* ok... we should not be here. actually you should never be here.
                      * just in case, try to recover by running again previous state */
                     fsm[0] = fsm[1];
-                    XPLRCOM_CONSOLE(E, "dvc rdy after unknown conditions, running previous state: %d",
-                                     (int32_t)fsm[1]);
+                    XPLRCOM_CONSOLE(E,
+                                    "dvc rdy after unknown conditions, running previous state: %d",
+                                    (int32_t)fsm[1]);
                 }
             } else { /* dvc busy, retry */
                 // TODO: add max retries
@@ -414,7 +439,7 @@ xplrCom_error_t xplrComCellPowerDown(int8_t dvcProfile)
         XPLRCOM_CONSOLE(D, "dvc powered down, ok");
     } else {
         ret = XPLR_COM_ERROR;
-        XPLRCOM_CONSOLE(E, "error powering down dvc");
+        XPLRCOM_CONSOLE(E, "error (%d) powering down dvc", ubxlibRet);
     }
 
     return ret;
@@ -428,6 +453,70 @@ void xplrComCellPowerResume(int8_t dvcProfile)
      * resuming can be achieved by hot reseting the fsm state of xplrComCellFsmConnect(). */
     fsm[0] = XPLR_COM_CELL_CONNECT_INIT;
     XPLRCOM_CONSOLE(D, "resuming power to device...");
+}
+
+xplrCom_error_t xplrComCellGetDeviceInfo(int8_t dvcProfile, char *model, char *fw, char *imei)
+{
+    uDeviceHandle_t dvcHandler = comDevices[dvcProfile].handler;
+    int64_t ubxlibRet[3];
+    xplrCom_error_t ret;
+
+    ubxlibRet[0] = uCellInfoGetModelStr(dvcHandler, model, 32);
+    ubxlibRet[1] = uCellInfoGetFirmwareVersionStr(dvcHandler, fw, 32);
+    ubxlibRet[2] = uCellInfoGetImei(dvcHandler, imei);
+
+    for (int i = 0; i < 3; i++) {
+        if (ubxlibRet[i] < 0) {
+            ret = XPLR_COM_ERROR;
+            break;
+        }
+        ret = XPLR_COM_OK;
+    }
+
+    return ret;
+}
+
+bool xplrComHaltLogModule(int8_t dvcProfile)
+{
+    bool ret;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+    if(comDevices[dvcProfile].cellSettings->logCfg != NULL) {
+        comDevices[dvcProfile].cellSettings->logCfg->logEnable = false;
+        ret = true;
+    } else {
+        ret = false;
+        /* log module is not initialized thus do nothing*/
+    }
+#else
+    ret = false;
+#endif
+    return ret;
+}
+
+bool xplrComStartLogModule(int8_t dvcProfile)
+{
+    bool ret;
+
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+    xplrLog_error_t err;
+    if(comDevices[dvcProfile].cellSettings->logCfg != NULL) {
+        comDevices[dvcProfile].cellSettings->logCfg->logEnable = true;
+        ret = true;
+    } else {
+        /* log module is not initialized thus initialize it*/
+        err = xplrLogInit(&cellLog, XPLR_LOG_DEVICE_INFO, "/cell.log", 100, XPLR_SIZE_MB);
+        if (err == XPLR_LOG_OK) {
+            cellLog.logEnable = true;
+        } else {
+            cellLog.logEnable = false;
+        }
+        comDevices[dvcProfile].cellSettings->logCfg = &cellLog;
+        ret = cellLog.logEnable;  
+    }
+#else
+    ret = false;
+#endif
+    return ret;
 }
 
 /* ----------------------------------------------------------------
@@ -497,6 +586,10 @@ xplrCom_error_t cellSetConfig(xplrCom_cell_config_t *cfg)
             comDevices[dvcProfile].deviceSettings.deviceType = U_DEVICE_TYPE_CELL;
             comDevices[dvcProfile].deviceNetwork = U_NETWORK_TYPE_CELL;
             comDevices[dvcProfile].deviceSettings.transportType = U_DEVICE_TRANSPORT_TYPE_UART;
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+            /* point to the local log struct*/
+            cfg->logCfg = &cellLog;
+#endif
             ret = XPLR_COM_OK;
             XPLRCOM_CONSOLE(D, "ok: %d", ret);
         } else {
@@ -617,7 +710,10 @@ xplrCom_error_t cellDvcSetMno(int8_t index)
     storedMno = uCellCfgGetMnoProfile(dvcHandler);
     if (storedMno != configMno) {
         /* MNO stored in cellular module different than in config. Try changing it. */
-        XPLRCOM_CONSOLE(W, "Module's MNO: %d differs from config: %d", storedMno, configMno);
+        XPLRCOM_CONSOLE(W,
+                        "Module's MNO: %d differs from config: %d",
+                        storedMno,
+                        configMno);
         if (storedMno > 0) {
             ret = uCellCfgSetMnoProfile(dvcHandler, configMno); /* set MNO in module */
             if (ret == XPLR_COM_OK) {
@@ -702,21 +798,28 @@ xplrCom_error_t cellDvcSetBands(int8_t index)
             /* CAT-M1 or NB1 found, read current bandmask info */
             ubxlibRet = uCellCfgGetBandMask(dvcHandler, ratList[i], &activeBandMask[0], &activeBandMask[1]);
             if (ubxlibRet == 0) {
-                XPLRCOM_CONSOLE(D, "band mask for RAT %s is 0x%08x%08x %08x%08x.\n", ratStr[ratList[i]],
-                                 (uint32_t)(activeBandMask[1] >> 32), (uint32_t) activeBandMask[1],
-                                 (uint32_t)(activeBandMask[0] >> 32), (uint32_t) activeBandMask[0]);
+                XPLRCOM_CONSOLE(D,
+                                "band mask for RAT %s is 0x%08x%08x %08x%08x.\n",
+                                ratStr[ratList[i]],
+                                (uint32_t)(activeBandMask[1] >> 32),
+                                (uint32_t) activeBandMask[1],
+                                (uint32_t)(activeBandMask[0] >> 32),
+                                (uint32_t) activeBandMask[0]);
                 /* check if stored bandmask differs from config */
                 if ((activeBandMask[0] != bandList[(i * 2)]) || (activeBandMask[1] != bandList[(i * 2) + 1])) {
                     /* bandmasks are different, update dvc  */
-                    XPLRCOM_CONSOLE(D, "setting band mask for RAT %s to 0x%08x%08x %08x%08x...\n",
-                                     ratStr[ratList[i]],
-                                     (uint32_t)(bandList[(i * 2) + 1] >> 32), (uint32_t)(bandList[(i * 2) + 1]),
-                                     (uint32_t)(bandList[(i * 2)] >> 32), (uint32_t)(bandList[(i * 2)]));
+                    XPLRCOM_CONSOLE(D,
+                                    "setting band mask for RAT %s to 0x%08x%08x %08x%08x...\n",
+                                    ratStr[ratList[i]],
+                                    (uint32_t)(bandList[(i * 2) + 1] >> 32),
+                                    (uint32_t)(bandList[(i * 2) + 1]),
+                                    (uint32_t)(bandList[(i * 2)] >> 32),
+                                    (uint32_t)(bandList[(i * 2)]));
                     ubxlibRet = uCellCfgSetBandMask(dvcHandler, ratList[i], bandList[(i * 2)], bandList[(i * 2) + 1]);
                     if (ubxlibRet != 0) {
                         XPLRCOM_CONSOLE(E, "unable to change band mask for RAT %s, it is"
-                                         " likely your module does not support one of those"
-                                         " bands.\n", ratStr[ratList[i]]);
+                                        " likely your module does not support one of those"
+                                        " bands.\n", ratStr[ratList[i]]);
                         errors++;
                     }
                 }

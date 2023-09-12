@@ -6,7 +6,7 @@
 # HTTP(S) Client Service (cellular)
 
 ## Description
-Provided library exposes the HTTP(S) client available in ublox cellular modules offering to the user high level functions for:
+Provided library exposes the HTTP(S) client available in u-blox cellular modules offering to the user high level functions for:
 - configuring client parameters.
 - managing connection process to a webserver.
 - storing certificates to module's memory.

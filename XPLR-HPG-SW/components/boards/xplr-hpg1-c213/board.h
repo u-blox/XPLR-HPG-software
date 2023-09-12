@@ -33,8 +33,8 @@
  * -------------------------------------------------------------- */
 
 /*Definations of Board*/
-#define BOARD_NAME "XPLR=HPG1-C213"
-#define BOARD_VERSION "revB"
+#define BOARD_NAME "XPLR-HPG1-C213"
+#define BOARD_VERSION "revC"
 #define BOARD_VENDOR "uBlox"
 #define BOARD_URL "https://www.u-blox.com/en/product/xplr-hpg-1"
 
@@ -47,101 +47,101 @@
 #define CONFIG_CELLULAR_MB  1
 
 /*Definations of IO*/
-#define BOARD_IO_LED_RED 5U 
-#define BOARD_IO_LED_GREEN 2U 
-#define BOARD_IO_LED_BLUE 8U 
+#define BOARD_IO_LED_RED 5U
+#define BOARD_IO_LED_GREEN 2U
+#define BOARD_IO_LED_BLUE 8U
 
-#define BOARD_IO_BTN1 0U 
-#define BOARD_IO_BTN2 21U 
+#define BOARD_IO_BTN1 0U
+#define BOARD_IO_BTN2 21U
 
 /*Definitions of mikroBUSES*/
 /* mikroBus 1 */
-#define BOARD_IO_MB1_AN 1U 
-#define BOARD_IO_MB1_RST 9U 
-#define BOARD_IO_MB1_CS 38U 
-#define BOARD_IO_MB1_TX 46U 
-#define BOARD_IO_MB1_RX 3U 
-#define BOARD_IO_MB1_INT 4U 
-#define BOARD_IO_MB1_PWM 7U 
+#define BOARD_IO_MB1_AN 1U
+#define BOARD_IO_MB1_RST 9U
+#define BOARD_IO_MB1_CS 38U
+#define BOARD_IO_MB1_TX 46U
+#define BOARD_IO_MB1_RX 3U
+#define BOARD_IO_MB1_INT 4U
+#define BOARD_IO_MB1_PWM 7U
 /* mikroBus 2 */
-#define BOARD_IO_MB2_AN 11U 
-#define BOARD_IO_MB2_RST 47U 
-#define BOARD_IO_MB2_CS 14U 
-#define BOARD_IO_MB2_TX 33U 
-#define BOARD_IO_MB2_RX 48U 
+#define BOARD_IO_MB2_AN 11U
+#define BOARD_IO_MB2_RST 47U
+#define BOARD_IO_MB2_CS 14U
+#define BOARD_IO_MB2_TX 33U
+#define BOARD_IO_MB2_RX 48U
 #if CONFIG_JTAG_ON_GPIO==0
-    #define BOARD_IO_MB2_INT 39U 
+#define BOARD_IO_MB2_INT 39U
 #else
-    #define BOARD_IO_MB2_INT -1
+#define BOARD_IO_MB2_INT -1
 #endif
-#define BOARD_IO_MB2_PWM 10U 
+#define BOARD_IO_MB2_PWM 10U
 /* mikroBus 3 */
-#define BOARD_IO_MB3_AN 12U 
+#define BOARD_IO_MB3_AN 12U
 #if CONFIG_JTAG_ON_GPIO==0
-    #define BOARD_IO_MB3_RST 41U 
+#define BOARD_IO_MB3_RST 41U
 #else
-    #define BOARD_IO_MB3_RST -1
+#define BOARD_IO_MB3_RST -1
 #endif
-#define BOARD_IO_MB3_CS 13U 
+#define BOARD_IO_MB3_CS 13U
 /* TX and RX are missing */
 #if CONFIG_JTAG_ON_GPIO==0
-    #define BOARD_IO_MB3_INT 42U 
-    #define BOARD_IO_MB3_PWM 40U 
+#define BOARD_IO_MB3_INT 42U
+#define BOARD_IO_MB3_PWM 40U
 #else
-    #define BOARD_IO_MB3_INT -1
-    #define BOARD_IO_MB3_PWM -1
+#define BOARD_IO_MB3_INT -1
+#define BOARD_IO_MB3_PWM -1
 #endif
 
 /*Definitions of SPI*/
-#define BOARD_IO_SPI_SCK 36U 
-#define BOARD_IO_SPI_MOSI 35U 
-#define BOARD_IO_SPI_MISO 37U 
+#define BOARD_IO_SPI_SCK 36U
+#define BOARD_IO_SPI_MOSI 35U
+#define BOARD_IO_SPI_MISO 37U
 
 /*Definitions of SD*/
 #define BOARD_IO_SPI_SD_SCK BOARD_IO_SPI_SCK
 #define BOARD_IO_SPI_SD_MOSI BOARD_IO_SPI_MOSI
 #define BOARD_IO_SPI_SD_MISO BOARD_IO_SPI_MISO
-#define BOARD_IO_SPI_SD_nCS 34U 
+#define BOARD_IO_SPI_SD_nCS 34U
 
 /*Definitions of I2C*/
-#define BOARD_IO_I2C_PERIPHERALS_SCL 17U 
-#define BOARD_IO_I2C_PERIPHERALS_SDA 18U 
+#define BOARD_IO_I2C_PERIPHERALS_SCL 17U
+#define BOARD_IO_I2C_PERIPHERALS_SDA 18U
 
 /*Definitions of DEBUG UART (0)*/
-#define BOARD_IO_UART_DBG_TX 43U 
-#define BOARD_IO_UART_DBG_RX 44U 
-#define BOARD_IO_UART_DBG_RTS 45U 
-#define BOARD_IO_UART_DBG_CTS 6U 
+#define BOARD_IO_UART_DBG_TX 43U
+#define BOARD_IO_UART_DBG_RX 44U
+#define BOARD_IO_UART_DBG_RTS 45U
+#define BOARD_IO_UART_DBG_CTS 6U
 
 #define BOARD_IO_LED BOARD_IO_LED_BLUE /* Needed for xplr-hpg-2 examples */
 
 #define BOARD_IO_3V3_EN BOARD_IO_LED_GREEN
 
 #if CONFIG_CELLULAR_MB == 1
-    /*Definitions LTE on MB1*/
-    #define BOARD_IO_LTE_PWR_ON BOARD_IO_MB1_RST
-    #define BOARD_IO_LTE_ON_nSENSE  BOARD_IO_MB1_AN
-    #define BOARD_IO_LTE_nRST -1
-    #define BOARD_IO_UART_LTE_TX BOARD_IO_MB1_TX
-    #define BOARD_IO_UART_LTE_RX  BOARD_IO_MB1_RX
-    #define BOARD_IO_UART_LTE_CTS  BOARD_IO_MB1_INT
-    #define BOARD_IO_UART_LTE_RTS  BOARD_IO_MB1_CS
+/*Definitions LTE on MB1*/
+#define BOARD_IO_LTE_PWR_ON BOARD_IO_MB1_RST
+#define BOARD_IO_LTE_ON_nSENSE  BOARD_IO_MB1_AN
+#define BOARD_IO_LTE_nRST -1
+#define BOARD_IO_UART_LTE_TX BOARD_IO_MB1_TX
+#define BOARD_IO_UART_LTE_RX  BOARD_IO_MB1_RX
+#define BOARD_IO_UART_LTE_CTS  BOARD_IO_MB1_INT
+#define BOARD_IO_UART_LTE_RTS  BOARD_IO_MB1_CS
 #endif
 
 #if CONFIG_CELLULAR_MB == 2
-    /*Definitions LTE on MB1*/
-    #define BOARD_IO_LTE_PWR_ON BOARD_IO_MB2_RST
-    #define BOARD_IO_LTE_ON_nSENSE  BOARD_IO_MB2_AN
-    #define BOARD_IO_LTE_nRST -1
-    #define BOARD_IO_UART_LTE_TX BOARD_IO_MB2_TX
-    #define BOARD_IO_UART_LTE_RX  BOARD_IO_MB2_RX
-    #define BOARD_IO_UART_LTE_CTS  BOARD_IO_MB2_INT
-    #define BOARD_IO_UART_LTE_RTS  BOARD_IO_MB2_CS
+/*Definitions LTE on MB1*/
+#define BOARD_IO_LTE_PWR_ON BOARD_IO_MB2_RST
+#define BOARD_IO_LTE_ON_nSENSE  BOARD_IO_MB2_AN
+#define BOARD_IO_LTE_nRST -1
+#define BOARD_IO_UART_LTE_TX BOARD_IO_MB2_TX
+#define BOARD_IO_UART_LTE_RX  BOARD_IO_MB2_RX
+#define BOARD_IO_UART_LTE_CTS  BOARD_IO_MB2_INT
+#define BOARD_IO_UART_LTE_RTS  BOARD_IO_MB2_CS
 #endif
 
 /*Definitions of WT/DIR*/
-#define BOARD_IO_WT_WHEELTICK 15U 
-#define BOARD_IO_WT_DIRECTION 16U 
+#define BOARD_IO_WT_WHEELTICK 15U
+#define BOARD_IO_WT_DIRECTION 16U
 
 /*Definations of Peripheral*/
 #define BOARD_I2C_PERIPHERALS_MODE I2C_MODE_MASTER
@@ -247,6 +247,13 @@ xplr_board_error_t xplrBoardSetPower(xplr_board_peripheral_id_t id, bool on);
  * @return  XPLR_BOARD_ERROR_OK on success, XPLR_BOARD_ERROR otherwise.
  */
 xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode);
+
+/**
+ * @brief Check if the SD card is in the slot
+ *
+ * @return XPLR_BOARD_ERROR_OK on success, XPLR_BOARD_ERROR otherwise.
+*/
+xplr_board_error_t xplrBoardDetectSd(void);
 
 #ifdef __cplusplus
 }

@@ -19,12 +19,16 @@ message(STATUS " XPLR_HPG_SW_PATH is $ENV{XPLR_HPG_SW_PATH}")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_http_ztp")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_certs")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_ztp")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_ntrip_correction")
 set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_captive_portal")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_sd_config_file")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_kit_info")
 
 # cellular examples
 #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_register")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_certs")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_ztp")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_cell_ntrip_correction")
 
 # positioning examples
 #set(ENV{XPLR_HPG_PROJECT} "hpg_gnss_config")
@@ -44,3 +48,4 @@ project($ENV{XPLR_HPG_PROJECT})
 
 message(STATUS "Building project: ${CMAKE_PROJECT_NAME}")
 message(STATUS "-----------Package Info End---------")
+
