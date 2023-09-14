@@ -71,7 +71,7 @@ static xplrNvs_error_t nvsClose(xplrNvs_t *nvs);
  * PUBLIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
 
-xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *namespace)
+xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *nvsNamespace)
 {
     const esp_partition_t *nvs_partition;
     esp_err_t err;
@@ -140,18 +140,18 @@ xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *namespace)
     /* check namespace and create it if not present */
     if (err == ESP_OK) {
         /* check namespace not null */
-        if (namespace != NULL) {
+        if (nvsNamespace != NULL) {
             /* check namespace length */
-            if (strlen(namespace) >= NVS_KEY_NAME_MAX_SIZE - 1) {
+            if (strlen(nvsNamespace) >= NVS_KEY_NAME_MAX_SIZE - 1) {
                 err = ESP_FAIL;
                 XPLRNVS_CONSOLE(E, "namespace <%s> too long (%u), max size is <%u>",
-                                namespace,
-                                strlen(namespace),
+                                nvsNamespace,
+                                strlen(nvsNamespace),
                                 NVS_KEY_NAME_MAX_SIZE);
             } else {
                 /* get namespace to handle */
                 memset(nvs->tag, 0x00, 16);
-                memcpy(nvs->tag, namespace, strlen(namespace));
+                memcpy(nvs->tag, nvsNamespace, strlen(nvsNamespace));
                 XPLRNVS_CONSOLE(D, "namespace set: <%s>", nvs->tag);
                 /* create namespace if not present */
                 err = nvs_open_from_partition(nvsPartitionName, nvs->tag, NVS_READWRITE, &nvs->handler);
