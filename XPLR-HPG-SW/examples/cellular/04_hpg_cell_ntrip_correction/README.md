@@ -108,11 +108,14 @@ Z-axis acceleration (gravity-free): 0.00 m/s^2
 ...
 ```
 
-**NOTE:** Vehicle dynamics will only be printed if the module has been calibrated.
-
+**NOTE:**
+- Vehicle dynamics will only be printed if the module has been calibrated.
+- Dead reckoning is only available in ZED-F9R GNSS module.
 <br>
 
 ## Build instructions
+
+### Building using Visual Studio Code
 Building this example requires to edit a minimum set of files in order to select the corresponding source files and configure cellular and NTRIP settings using Kconfig.
 Please follow the steps described bellow:
 
@@ -141,7 +144,13 @@ Please follow the steps described bellow:
    #define XPLRCELL_NTRIP_DEBUG_ACTIVE        (1U)
    ...
    ```
-4. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
+4. Open the [app](./main/hpg_cell_ntrip_correction.c) and select if you need logging to the SD card for your application.
+   ```
+   #define APP_SD_LOGGING_ENABLED      0U
+   ```
+   This is a general option that enables or disables the SD logging functionality for all the modules. <br> 
+   To enable/disable the individual module debug message SD logging:
+   - Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
    For more information about the **logging service of hpglib** follow **[this guide](./../../../components/hpglib/src/log_service/README.md)**
    ```
    ...
@@ -157,14 +166,26 @@ Please follow the steps described bellow:
    ...
 
    ```
+   - Alternatively, you can enable or disable the individual module debug message logging to the SD card by modifying the value of the `appLog.logOptions.allLogOpts` bit map, located in the [app](./main/hpg_cell_ntrip_correction.c). This gives the user the ability to enable/disable each logging instance in runtime, while the macro options in the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) give the option to the user to fully disable logging and ,as a result, have a smaller memory footprint.
 5. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
 6. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
 7. Navigate to the `Board Options` section and select the board you wish to build the example for.
-8. Navigate to the [Dead Reckoning](./../../../docs/README_dead_reckoning.md) and Enable/Disable it according to your needs.
-9. Go to `XPLR HPG Options -> Cellular Settings -> APN value of cellular provider` and input the **APN** of your cellular provider.
-10.  Go to `XPLR HPG Options -> NTRIP Client settings` and configure as needed.
-11. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
+8. Under the `Board Options` settings make sure to select the GNSS module that your kit is equipped with. By default ZED-F9R is selected.
+9. Navigate to the [Dead Reckoning](./../../../docs/README_dead_reckoning.md) and Enable/Disable it according to your needs.
+10. Go to `XPLR HPG Options -> Cellular Settings -> APN value of cellular provider` and input the **APN** of your cellular provider.
+11.  Go to `XPLR HPG Options -> NTRIP Client settings` and configure as needed.
+12. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
+
+### Building using ESP-IDF from a command line
+1. Navigate to the `XPLR-HPG-SW` root folder.
+2. In [CMakeLists](./../../../CMakeLists.txt) select the `hpg_cell_ntrip_correction` project, making sure that all other projects are commented out.
+3. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to be logged in the SD card or the debug UART.
+4. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `idf.py menuconfig`.
+5. Navigate to the fields mentioned above from step 7 through 10 and provide the appropriate configuration. When finished press `q` and answer `Y` to save the configuration.
+6. Run `idf.py build` to compile the project.
+7. Run `idf.py -p COMX flash` to flash the binary to the board, where **COMX** is the `COM Port` that the XPLR-HPGx has enumerated on.
+8. Run `idf.py monitor -p COMX` to monitor the debug UART output.
 
 ## Kconfig/Build Definitions-Macros
 This is a description of definitions and macros configured by **[Kconfig](./../../../docs/README_kconfig.md)**.\
@@ -176,13 +197,13 @@ Name | Default value | Belongs to | Description | Manual overwrite notes
 **`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" | **[boards](./../../../components/boards)** | Board variant to build firmware for.|
 **`CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE`** | "Disabled" | **[hpg_gnss_lband_correction](./main/hpg_gnss_lband_correction.c)** | Enables or Disables Dead Reckoning functionality. |
 **`XPLR_CELL_APN`** | "internet" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | APN value of cellular provider to register. | You will have to replace this value with your specific APN of your cellular provider, either by directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.
-**`CONFIG_XPLR_CELL_NTRIP_HOST`** | "host" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster URL/IP address
-**`CONFIG_XPLR_CELL_NTRIP_PORT`** | "2101" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster port
-**`CONFIG_XPLR_CELL_NTRIP_MOUNTPOINT`** | "mountpoint" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster mountpoint
-**`CONFIG_XPLR_CELL_NTRIP_USERAGENT`** | "NTRIP_XPLR_HPG" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | User-Agent
-**`CONFIG_XPLR_CELL_NTRIP_USE_AUTH`** | "True" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Use authentication
-**`CONFIG_XPLR_CELL_NTRIP_USERNAME`** | "username" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Username
-**`CONFIG_XPLR_CELL_NTRIP_PASSWORD`** | "password" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Password
+**`CONFIG_XPLR_NTRIP_HOST`** | "host" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster URL/IP address
+**`CONFIG_XPLR_NTRIP_PORT`** | "2101" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster port
+**`CONFIG_XPLR_NTRIP_MOUNTPOINT`** | "mountpoint" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | NTRIP caster mountpoint
+**`CONFIG_XPLR_NTRIP_USERAGENT`** | "NTRIP_XPLR_HPG" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | User-Agent
+**`CONFIG_XPLR_NTRIP_USE_AUTH`** | "True" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Use authentication
+**`CONFIG_XPLR_NTRIP_USERNAME`** | "username" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Username
+**`CONFIG_XPLR_NTRIP_PASSWORD`** | "password" | **[hpg_cell_ntrip_correction](./main/hpg_cell_ntrip_correction.c)** | Password
 <br>
 
 ## Local Definitions-Macros
@@ -198,9 +219,12 @@ Name | Description
 **`APP_GNSS_LOC_INTERVAL`** | Frequency, in seconds, of how often we want our print location function \[**`appPrintLocation(void)`**\] to execute. Can be changed as desired.
 **`APP_GNSS_DR_INTERVAL`** | Frequency, in seconds, of how often we want our print dead reckoning data function \[**`gnssDeadReckoningPrint(void)`**\] to execute. Can be changed as desired.
 **`APP_NTRIP_STATE_INTERVAL_SEC`** | Frequency of NTRIP client state logging to console in seconds.
-**`APP_RUN_TIME_SEC`** | Duration, in seconds, for which we want the application to run.
+**`APP_RUN_TIME`** | Duration, in seconds, for which we want the application to run.
 **`APP_SERIAL_DEBUG_ENABLED`** | Switches application related debug messages ON or OFF.
 **`APP_GNSS_I2C_ADDR`** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
+**`APP_RESTART_ON_ERROR`** | Option to select if the board should perform a reboot in case of error.
+**`APP_INACTIVITY_TIMEOUT`** | Time in seconds to trigger an inactivity timeout and cause a restart.
+**`APP_SD_HOT_PLUG_FUNCTIONALITY`** | Option to enable the hot plug functionality of the SD card driver (being able to insert and remove the card in runtime).
 <br>
 
 ## Modules-Components used

@@ -75,7 +75,7 @@
 /*
  * LBAND I2C address in hex
  */
-#define APP_LBAND_I2C_ADDR          (0x43)
+#define APP_LBAND_I2C_ADDR         (0x43)
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -129,6 +129,7 @@ static void configCellSettings(xplrCom_cell_config_t *cfg);
 void app_main(void)
 {
     esp_err_t ret;
+    xplrCom_error_t xplrComErr;
     /*
      * Initialize HPG-XPLR-HPG kit using its board file
      */
@@ -139,20 +140,31 @@ void app_main(void)
      */
     if (xplrBoardIsInit()) {
         printf("XPLR-HPG kit has already initialized. \n");
+        XPLR_CI_CONSOLE(9901, "OK");
     } else {
         printf("XPLR-HPG kit has not been initialized. \n");
+        XPLR_CI_CONSOLE(9901, "ERROR");
     }
 
     /*
      * Config GNSS and LBAND modules
+
      */
-    xplrGnssUbxlibInit();
+    ret = xplrGnssUbxlibInit();
+    if (ret != ESP_OK) {
+        XPLR_CI_CONSOLE(9902, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(9902, "OK");
+    }
 
     printf("Waiting for GNSS device to come online!\n");
     appConfigGnssSettings(&dvcGnssConfig);
     ret = xplrGnssStartDevice(0, &dvcGnssConfig);
     if (ret != ESP_OK) {
         printf("GNSS device config failed!\n");
+        XPLR_CI_CONSOLE(9903, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(9903, "OK");
     }
 
     gnssState = xplrGnssGetCurrentState(0);
@@ -166,6 +178,9 @@ void app_main(void)
     ret = xplrLbandStartDevice(0, &dvcLbandConfig);
     if (ret != ESP_OK) {
         printf("LBAND device config failed!\n");
+        XPLR_CI_CONSOLE(9904, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(9904, "OK");
     }
 
     /*
@@ -173,7 +188,12 @@ void app_main(void)
      */
     configCellSettings(&cellConfig); /* Setup configuration parameters for hpg com */
     xplrComCellInit(&cellConfig); /* Initialize hpg com */
-    xplrComCellFsmConnect(cellConfig.profileIndex);
+    xplrComErr = xplrComCellFsmConnect(cellConfig.profileIndex);
+    if (xplrComErr != XPLR_COM_OK) {
+        XPLR_CI_CONSOLE(9905, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(9905, "OK");
+    }
 
     /*
      * Print board info
@@ -221,10 +241,24 @@ void app_main(void)
            buff_to_print[5]);
     memset(buff_to_print, 0x00, strlen(buff_to_print));
 
-    xplrGnssPrintDeviceInfo(0);
-    xplrLbandPrintDeviceInfo(0);
+    if (xplrGnssPrintDeviceInfo(0) != ESP_OK) {
+        XPLR_CI_CONSOLE(9906, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(9906, "OK");
+    }
 
-    xplrComCellGetDeviceInfo(cellConfig.profileIndex, cellModel, cellFw, cellImei);
+    if (xplrLbandPrintDeviceInfo(0) != ESP_OK) {
+        XPLR_CI_CONSOLE(9907, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(9907, "OK");
+    }
+
+    if (xplrComCellGetDeviceInfo(cellConfig.profileIndex, cellModel, cellFw, cellImei) != XPLR_COM_OK) {
+        XPLR_CI_CONSOLE(9908, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(9908, "OK");
+    }
+
     printf("Cell Info:\n");
     vTaskDelay(pdMS_TO_TICKS(100));
     printf("Model: %s \n", cellModel);
@@ -273,15 +307,8 @@ void app_main(void)
  */
 static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
 {
-    /**
-    * Pin numbers are those of the MCU: if you
-    * are using an MCU inside a u-blox module the IO pin numbering
-    * for the module is likely different that from the MCU: check
-    * the data sheet for the module to determine the mapping
-    * DEVICE i.e. module/chip configuration: in this case a gnss
-    * module connected via UART
-    */
     gnssCfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
+    gnssCfg->hw.dvcType = (xplrLocDeviceType_t)CONFIG_GNSS_MODULE;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
@@ -317,7 +344,7 @@ static void appConfigLbandSettings(xplrLbandDeviceCfg_t *lbandCfg)
     * for the module is likely different that from the MCU: check
     * the data sheet for the module to determine the mapping
     * DEVICE i.e. module/chip configuration: in this case an lband
-    * module connected via UART
+    * module connected via I2C
     */
     lbandCfg->hwConf.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
     lbandCfg->hwConf.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;

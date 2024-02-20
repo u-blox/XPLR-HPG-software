@@ -3,8 +3,8 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := hpg_gnss_lband_correction
-
+PROJECT_NAME := hpg_cell_mqtt_correction_certs_sd_autonomous
+ 
 include $(XPLR_HPG_SW_PATH)/project.mk
 
 include $(IDF_PATH)/make/project.mk

@@ -24,38 +24,44 @@ When running the code, depending on the debug settings configured, messages are 
 
 **Dead Reckoning disabled**
 ```
-I [(254200) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [267] bytes.
-I [(255481) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [5349] bytes.
-I [(255521) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [607] bytes.
-I [(257571) xplrGnss|xplrGnssPrintLocation|771|: Printing location info.
+D [(88001) hpgLocHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|461|: Sent UBX data [202] bytes.
+I [(91254) hpgGnss|gnssLocationPrinter|4258|: Printing location info.
 ======== Location Info ========
 Location type: 1
-Location fix type: 3D\DGNSS\RTK-FLOAT
-Location latitude: 37.980349 (raw: 379803489)
-Location longitude: 23.657008 (raw: 236570083)
-Location altitude: 66.248000 (m) | 66248 (mm)
-Location radius: 0.212000 (m) | 212 (mm)
-Speed: 0.057600 (km/h) | 0.016000 (m/s) | 16 (mm/s)
-Estimated horizontal accuracy: 0.2121 (m) | 212.10 (mm)
-Estimated vertical accuracy: 0.2589 (m) | 258.90 (mm)
-Satellite number: 27
-Time UTC: 1671709848
+Location fix type: RTK-FLOAT
+Location latitude: 38.048038 (raw: 380480378)
+Location longitude: 23.809130 (raw: 238091304)
+Location altitude: 237.230000 (m) | 237230 (mm)
+Location radius: 0.244000 (m) | 244 (mm)
+Speed: 0.007200 (km/h) | 0.002000 (m/s) | 2 (mm/s)
+Estimated horizontal accuracy: 0.2442 (m) | 244.20 (mm)
+Estimated vertical accuracy: 0.3372 (m) | 337.20 (mm)
+Satellite number: 30
+Time UTC: 12:41:24
+Date UTC: 12.01.2024
+Calendar Time UTC: Fri 12.01.2024 12:41:24
 ===============================
-I [(258891) xplrCommonHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|358|: Sent UBX formatted command [149] bytes.
-I [(262566) xplrGnss|xplrGnssPrintLocation|771|: Printing location info.
+I [(91300) hpgGnss|xplrGnssPrintGmapsLocation|1806|: Printing GMapsLocation!
+I [(91307) hpgGnss|xplrGnssPrintGmapsLocation|1807|: Gmaps Location: https://maps.google.com/?q=38.048038,23.809130
+D [(93426) hpgLocHelpers|xplrHlprLocSrvcSendUbxFormattedCommand|461|: Sent UBX data [202] bytes.
+I [(96256) hpgGnss|gnssLocationPrinter|4258|: Printing location info.
 ======== Location Info ========
 Location type: 1
-Location fix type: 3D\DGNSS\RTK-FLOAT
-Location latitude: 37.980349 (raw: 379803489)
-Location longitude: 23.657007 (raw: 236570074)
-Location altitude: 66.373000 (m) | 66373 (mm)
-Location radius: 0.207000 (m) | 207 (mm)
-Speed: 0.046800 (km/h) | 0.013000 (m/s) | 13 (mm/s)
-Estimated horizontal accuracy: 0.2066 (m) | 206.60 (mm)
-Estimated vertical accuracy: 0.2558 (m) | 255.80 (mm)
-Satellite number: 27
-Time UTC: 1671709853
+Location fix type: RTK-FLOAT
+Location latitude: 38.048036 (raw: 380480365)
+Location longitude: 23.809128 (raw: 238091281)
+Location altitude: 235.639000 (m) | 235639 (mm)
+Location radius: 0.159000 (m) | 159 (mm)
+Speed: 0.007200 (km/h) | 0.002000 (m/s) | 2 (mm/s)
+Estimated horizontal accuracy: 0.1588 (m) | 158.80 (mm)
+Estimated vertical accuracy: 0.2201 (m) | 220.10 (mm)
+Satellite number: 30
+Time UTC: 12:41:29
+Date UTC: 12.01.2024
+Calendar Time UTC: Fri 12.01.2024 12:41:29
 ===============================
+I [(96303) hpgGnss|xplrGnssPrintGmapsLocation|1806|: Printing GMapsLocation!
+I [(96309) hpgGnss|xplrGnssPrintGmapsLocation|1807|: Gmaps Location: https://maps.google.com/?q=38.048036,23.809128
 ```
 **Dead Reckoning enabled and printing flag APP_PRINT_IMU_DATA is set**
 ```
@@ -127,11 +133,15 @@ Z-axis acceleration (gravity-free): 0.00 m/s^2
 ...
 ...
 ```
-**NOTE:** Vehicle dynamics will only be printed if the module has been calibrated.
+**NOTE:**
+- Vehicle dynamics will only be printed if the module has been calibrated.
+- Dead reckoning is only available in ZED-F9R GNSS module.
 
 <br>
 
 ## Build instructions
+
+### Building using Visual Studio Code
 Building this example requires to edit a minimum set of files in order to select the corresponding source files and configure Wi-Fi and MQTT settings using Kconfig.
 Please follow the steps described bellow:
 
@@ -155,17 +165,25 @@ Please follow the steps described bellow:
    ...
    #define XPLRHELPERS_DEBUG_ACTIVE           (1U)
    #define XPLRGNSS_DEBUG_ACTIVE              (1U)
+   #define XPLRLBAND_DEBUG_ACTIVE             (1U)
    ...
    #define XPLRWIFISTARTER_DEBUG_ACTIVE       (1U)
    #define XPLRMQTTWIFI_DEBUG_ACTIVE          (1U)
    ```
-4. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
+4. Open the [app](./main/hpg_wifi_mqtt_correction_certs.c) and select if you need logging to the SD card for your application.
+   ```
+   #define APP_SD_LOGGING_ENABLED      0U
+   ```
+   This is a general option that enables or disables the SD logging functionality for all the modules. <br> 
+   To enable/disable the individual module debug message SD logging:
+   - Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
    For more information about the **logging service of hpglib** follow **[this guide](./../../../components/hpglib/src/log_service/README.md)**
    ```
    ...
    #define XPLR_HPGLIB_LOG_ENABLED             1U
    ...
    #define XPLRGNSS_LOG_ACTIVE                (1U)
+   #define XPLRLBAND_LOG_ACTIVE               (1U)
    ...
    #define XPLRLOCATION_LOG_ACTIVE            (1U)
    ...
@@ -175,28 +193,41 @@ Please follow the steps described bellow:
    ...
 
    ```
+   - Alternatively, you can enable or disable the individual module debug message logging to the SD card by modifying the value of the `appLog.logOptions.allLogOpts` bit map, located in the [app](./main/hpg_wifi_mqtt_correction_certs.c). This gives the user the ability to enable/disable each logging instance in runtime, while the macro options in the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) give the option to the user to fully disable logging and ,as a result, have a smaller memory footprint.
 5. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
 6. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
 7. Navigate to the `Board Options` section and select the board you wish to build the example for.
-8. Navigate to the [Dead Reckoning](./../../../docs/README_dead_reckoning.md) and Enable/Disable it according to your needs.
-9. Copy the MQTT **Hostname** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Broker Hostname` and configure your MQTT broker host as needed. Remember to put **`"mqtts://"`** in front.\
+8. Under the `Board Options` settings make sure to select the GNSS module that your kit is equipped with. By default ZED-F9R is selected.
+9. Navigate to the [Dead Reckoning](./../../../docs/README_dead_reckoning.md) and Enable/Disable it according to your needs.
+10. Go to `XPLR HPG Options -> Correction Data Source -> Choose correction data source for your GNSS module` and select the **Correction data source** you need for your GNSS module.
+11. Copy the MQTT **Hostname** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Broker Hostname` and configure your MQTT broker host as needed. Remember to put **`"mqtts://"`** in front.\
     You can also skip this step since the correct **hostname** is already configured.
-10. Copy the MQTT **Client ID** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Client ID` and configure it as needed.
-11. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point SSID` and configure you **Access Point's SSID** as needed.
-12. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure you **Access Point's Password** as needed.
-13. Download the 3 required files from **Thingstream** by following this **[guide](./../../../docs/README_thingstream_certificates.md)**:
+12. Copy the MQTT **Client ID** from **Thingstream**, go to `XPLR HPG Options -> MQTT Settings -> Client ID` and configure it as needed.
+13. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point SSID` and configure you **Access Point's SSID** as needed.
+14. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure you **Access Point's Password** as needed.
+15. Download the 3 required files from **Thingstream** by following this **[guide](./../../../docs/README_thingstream_certificates.md)**:
    - **Client Key**
    - **Client Certificate**
    - **Root Certificate**
-14. **Copy and Paste** the contents of **Client Key**, named **device-\[client_id\]-pp-key.pem**, into **client.key** located inside the main folder of the project. Replace everything inside the file.
-15. **Copy and Paste** the contents of **Client Certificate**, named **device-\[client_id\]-pp-cert.crt**, into **client.crt** located inside the main folder of the project. Replace everything inside the file.
-16. **Root Certificate** is already provided as a file **root.crt**. Check if the contents have changed and if yes then copy and Paste the contents of **Root Certificate** into **root.crt** located inside the main folder of the project. Replace everything inside the file.
-17. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
+16. **Copy and Paste** the contents of **Client Key**, named **device-\[client_id\]-pp-key.pem**, into **client.key** located inside the main folder of the project. Replace everything inside the file.
+17. **Copy and Paste** the contents of **Client Certificate**, named **device-\[client_id\]-pp-cert.crt**, into **client.crt** located inside the main folder of the project. Replace everything inside the file.
+18. **Root Certificate** is already provided as a file **root.crt**. Check if the contents have changed and if yes then copy and Paste the contents of **Root Certificate** into **root.crt** located inside the main folder of the project. Replace everything inside the file.
+19. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
 
 **NOTE**:
 - In the described file names above **\[client_id\]** is equal to your specific **DeviceID**.
 <br>
+
+### Building using ESP-IDF from a command line
+1. Navigate to the `XPLR-HPG-SW` root folder.
+2. In [CMakeLists](./../../../CMakeLists.txt) select the `hpg_wifi_mqtt_correction_certs` project, making sure that all other projects are commented out.
+3. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to be logged in the SD card or the debug UART.
+4. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `idf.py menuconfig`.
+5. Navigate to the fields mentioned above from step 7 through 18 and provide the appropriate configuration. When finished press `q` and answer `Y` to save the configuration.
+6. Run `idf.py build` to compile the project.
+7. Run `idf.py -p COMX flash` to flash the binary to the board, where **COMX** is the `COM Port` that the XPLR-HPGx has enumerated on.
+8. Run `idf.py monitor -p COMX` to monitor the debug UART output.
 
 ## Kconfig/Build Definitions-Macros
 This is a description of definitions and macros configured by **[Kconfig](./../../../docs/README_kconfig.md)**.\
@@ -206,7 +237,9 @@ In most cases, these values can be directly overwritten in the source code or ju
 Name | Default value | Belongs to | Description | Manual overwrite notes
 --- | --- | --- | --- | ---
 **`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" | **[boards](./../../../components/boards)** | Board variant to build firmware for.|
-**`CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE`** | "Disabled" | **[hpg_gnss_lband_correction](./main/hpg_gnss_lband_correction.c)** | Enables or Disables Dead Reckoning functionality. |
+**`CONFIG_GNSS_MODULE`** | "ZED-F9R" | **[boards](./../../../components/boards)** | Selects the GNSS module equipped. |
+**`CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE`** | "Disabled" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | Enables or Disables Dead Reckoning functionality. |
+**`CONFIG_XPLR_CORRECTION_DATA_SOURCE`** | "Correction via IP" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | Selects the source of the correction data to be forwarded to the GNSS module. |
 **`CONFIG_XPLR_WIFI_SSID`** | "ssid" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | AP SSID name to try and connect to. | You can replace this value by either directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.v
 **`CONFIG_XPLR_WIFI_PASSWORD`** | "password" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | AP password to try and connect to.| You can replace this value by either directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.
 **`CONFIG_XPLR_MQTTWIFI_CLIENT_ID`** | "MQTT Client ID" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_certs.c)** | A unique MQTT client ID as taken from **Thingstream**. | You will have to replace this value to with your specific MQTT client ID, either directly editing source code in the app or using Kconfig.
@@ -228,9 +261,14 @@ Name | Description
 **`APP_LOCATION_PRINT_PERIOD `** | Period in seconds on how often we want our print location function \[**`appPrintLocation(uint8_t periodSecs)`**\] to execute. Can be changed as desired.
 **`APP_DEAD_RECKONING_PRINT_PERIOD `** | Period in seconds on how often we want our print dead reckoning data function \[**`appPrintDeadReckoning(uint8_t periodSecs)`**\] to execute. Can be changed as desired.
 **`APP_GNSS_I2C_ADDR `** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
+**`APP_LBAND_I2C_ADDR`** | I2C address for **[NEO-D9S](https://www.u-blox.com/en/product/neo-d9s-series)**  module.
 **`APP_ORIGIN_COUNTRY`** | Correction data region.
 **`APP_CORRECTION_TYPE`** | Thingstream subscription plan.
 **`APP_MAX_TOPICLEN`** | Maximum topic buffer size.
+**`APP_INACTIVITY_TIMEOUT`** | Time in seconds to trigger an inactivity timeout and cause a restart.
+**`APP_RESTART_ON_ERROR`** | Trigger soft reset if device in error state.
+**`APP_SD_HOT_PLUG_FUNCTIONALITY`** | Option to enable the hot plug functionality of the SD card driver (being able to insert and remove the card in runtime).
+**`APP_ENABLE_CORR_MSG_WDG`** | Option to enable the correction message watchdog mechanism.
 <br>
 
 ## Modules-Components used
@@ -242,6 +280,7 @@ Name | Description
 **[xplr_wifi_starter](./../../../components/xplr_wifi_starter)** | XPLR Wi-Fi connection manager.
 **[xplr_mqtt](./../../../components/xplr_mqtt)** | XPLR MQTT manager.
 **[hpglib/location_services/xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)** | XPLR GNSS location device manager.
+**[hpglib/location_services/xplr_lband_service](./../../../components/hpglib/src/location_service/lband_service/)** | XPLR LBAND service manager.
 **[hpglib/location_services/location_service_helpers](./../../../components/hpglib/src/location_service/location_service_helpers/)** | Internally used by **[xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)**.
 **[hpglib/log_service](./../../../components/hpglib/src/log_service/)** | XPLR logging service.
 **[hpglib/sd_service](./../../../components/hpglib/src/sd_service/)** | Internally used by **[log_service](./../../../components/hpglib/src/log_service/)**.

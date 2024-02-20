@@ -48,6 +48,7 @@ extern "C" {
  * Can be overwritten
  */
 #define XPLR_LBAND_FUNCTIONS_TIMEOUTS_MS XPLR_HLPRLOCSRVC_FUNCTIONS_TIMEOUTS_MS
+#define XPLR_LBAND_SEMAPHORE_TIMEOUT    pdMS_TO_TICKS(500)
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION PROTOTYPES
@@ -269,7 +270,7 @@ esp_err_t xplrLbandSendCorrectionDataAsyncStop(uint8_t dvcProfile);
 
 /**
  * @brief Shows if async correction data sender is running.
- * 
+ *
  * @param dvcProfile  an integer number denoting the device profile/index.
  * @return            true if async is running otherwise false
  */
@@ -293,6 +294,32 @@ esp_err_t xplrLbandGetDeviceInfo(uint8_t dvcProfile, xplrLocDvcInfo_t *devInfo);
  *                    ESP_FAIL on failure
  */
 esp_err_t xplrLbandPrintDeviceInfo(uint8_t dvcProfile);
+
+/**
+ * @brief Function that shows if correction data are forwarded to the GNSS module
+ *
+ * @return  true if there has been at least a message forwarded, false otherwise
+ * @note    the function consumes the message, so it can be called periodically by the application to check
+ *          if the NEO module is "alive"
+*/
+bool xplrLbandHasFrwdMessage(void);
+
+/**
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
+*/
+int8_t xplrLbandInitLogModule(xplr_cfg_logInstance_t *logCfg);
+
+/**
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
+*/
+esp_err_t xplrLbandStopLogModule(void);
 
 #ifdef __cplusplus
 }

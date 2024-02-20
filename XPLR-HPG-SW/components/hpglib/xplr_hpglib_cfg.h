@@ -57,7 +57,16 @@ extern "C" {
  * Enable debug log output to serial for hpglib modules.
  */
 #define XPLR_HPGLIB_SERIAL_DEBUG_ENABLED    (1U)
+#define XPLR_CI_CONSOLE_ACTIVE              (1U)
 #define XPLR_HPGLIB_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
+#define XPLR_HPGLIB_CI_FORMAT  "\x1B[35mCI-%04ld-%s\x1B[0m\n"
+//#define XPLR_HPGLIB_CI_FORMAT  "CI-%04ld-%s\n"
+
+#if (1 == XPLR_CI_CONSOLE_ACTIVE)
+#define XPLR_CI_CONSOLE(ciid, result)   esp_rom_printf(XPLR_HPGLIB_CI_FORMAT, ciid, result)
+#else
+#define XPLR_CI_CONSOLE(ciid, result) do{} while(0)
+#endif
 
 /**
  * Enable logging to SD card for hpglib modules.
@@ -85,7 +94,9 @@ extern "C" {
 #define XPLRSD_DEBUG_ACTIVE                            (0U)         /*< These debug messages are off by default. Please read the readme of log_service before enabling them*/
 #define XPLRCELL_NTRIP_DEBUG_ACTIVE                    (1U)
 #define XPLRWIFI_NTRIP_DEBUG_ACTIVE                    (1U)
-
+#define XPLRBLUETOOTH_DEBUG_ACTIVE                     (1U)
+#define XPLRATSERVER_DEBUG_ACTIVE                      (1U)
+#define XPLRATPARSER_DEBUG_ACTIVE                      (1U)
 
 /**
  * Select in which modules to activate the logging in the SD card
@@ -104,6 +115,10 @@ extern "C" {
 #define XPLRZTP_LOG_ACTIVE                             (1U)
 #define XPLRWIFI_NTRIP_LOG_ACTIVE                      (1U)
 #define XPLRCELL_NTRIP_LOG_ACTIVE                      (1U)
+#define XPLRBLUETOOTH_LOG_ACTIVE                       (1U)
+#define XPLRATSERVER_LOG_ACTIVE                        (1U)
+#define XPLRATPARSER_LOG_ACTIVE                        (1U)
+
 
 /**
  * Configure hpg module settings
@@ -112,25 +127,55 @@ extern "C" {
 #define XPLRCELL_MQTT_NUMOF_CLIENTS                    (1U)
 #define XPLRGNSS_NUMOF_DEVICES                         (1U)
 #define XPLRLBAND_NUMOF_DEVICES                        (1U)
+#define XPLRATSERVER_NUMOF_SERVERS                     (1U)
 #define XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_NAME           (64U)
 #define XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_PAYLOAD        (10U * 1024U)
 #define XPLRZTP_PAYLOAD_SIZE_MAX                       (6U * 1024U)
+#define XPLRCELL_GREETING_MESSAGE_MAX                  (64U)
 #if (XPLRCELL_MQTT_NUMOF_CLIENTS > 1)
 #error "Only one (1) MQTT client is currently supported from ubxlib."
 #endif
-#define XPLRCELL_NTRIP_RECEIVE_DATA_SIZE (2U * 1024U)
-#define XPLRCELL_NTRIP_GGA_INTERVAL_S (20)
-#define XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE (2U * 1024U)
-#define XPLRWIFI_NTRIP_GGA_INTERVAL_S (20)
+#define XPLRCELL_NTRIP_RECEIVE_DATA_SIZE               (2U * 1024U)
+#define XPLRCELL_NTRIP_GGA_INTERVAL_S                  (20)
+#define XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE               (2U * 1024U)
+#define XPLRWIFI_NTRIP_GGA_INTERVAL_S                  (20)
+#define XPLRBLUETOOTH_RX_BUFFER_SIZE                   (4U * 1024U)
+#define XPLRBLUETOOTH_NUMOF_DEVICES                    (3)
+#define XPLRBLUETOOTH_MAX_MSG_SIZE                     (256U)
+#define XPLRBLUETOOTH_MODE_OFF                         (255)
+#define XPLRBLUETOOTH_MODE_BT_CLASSIC                  (0)                          /* Only supported in HPG-2 board (NINA-W1 variant) */
+#define XPLRBLUETOOTH_MODE_BLE                         (1)
+#define XPLRBLUETOOTH_MODE                             (XPLRBLUETOOTH_MODE_OFF)
 
 /**
- * Sizes for the logging buffers, used to format the logging messages
- * Normally, the small size buffer should be enough, however, when logging
- * large strings such as certificates or json payloads large buffer size
- * might be needed.
+ * Logging module global settings
 */
-#define XPLRLOG_BUFFER_SIZE_SMALL                      (512U)
-#define XPLRLOG_BUFFER_SIZE_LARGE                      (5U * 1024U)
+#define KB                                      (1024LLU)
+#define MB                                      1024*KB
+#define GB                                      1024*MB
+#define XPLR_LOG_MAX_INSTANCES                  (20U)
+#define XPLRLOG_NEW_FILE_ON_BOOT                true
+#define XPLRLOG_FILE_SIZE_INTERVAL              4 * GB
+#define XPLR_LOG_BUFFER_MAX_SIZE                256
+#define XPLR_LOG_MAX_PRINT_SIZE                 1024
+#define XPLRCOM_DEFAULT_FILENAME                "xplr_com.log"
+#define XPLRCELL_HTTP_DEFAULT_FILENAME          "xplr_cell_http.log"
+#define XPLR_GNSS_INFO_DEFAULT_FILENAME         "xplr_gnss.log"
+#define XPLR_GNSS_UBX_DEFAULT_FILENAME          "xplr_gnss.ubx"
+#define XPLR_LBAND_INFO_DEFAULT_FILENAME        "xplr_lband.log"
+#define XPLR_LOC_HELPERS_DEFAULT_FILENAME       "xplr_location_helpers.log"
+#define XPLRCELL_MQTT_DEFAULT_FILENAME          "xplr_cell_mqtt.log"
+#define XPLRCELL_NTRIP_DEFAULT_FILENAME         "xplr_cell_ntrip.log"
+#define XPLRWIFI_NTRIP_DEFAULT_FILENAME         "xplr_wifi_ntrip.log"
+#define XPLR_NVS_DEFAULT_FILENAME               "xplr_nvs.log"
+#define XPLR_THINGSTREAM_DEFAULT_FILENAME       "xplr_thingstream.log"
+#define XPLR_ZTP_DEFAULT_FILENAME               "xplr_ztp.log"
+#define XPLR_MQTTWIFI_DEFAULT_FILENAME          "xplr_wifi_mqtt.log"
+#define XPLR_WIFI_STARTER_DEFAULT_FILENAME      "xplr_wifi_starter.log"
+#define XPLR_WIFI_WEBSERVER_DEFAULT_FILENAME    "xplr_wifi_webserver.log"
+#define XPLR_AT_PARSER_DEFAULT_FILENAME         "xplr_at_parser.log"
+#define XPLR_AT_SERVER_DEFAULT_FILENAME         "xplr_at_server.log"
+#define XPLR_BLUETOOTH_DEFAULT_FILENAME         "xplr_bluetooth.log"
 
 /**
  * Macro definition to "surpress" any compiler warning message regarding "unused variables".

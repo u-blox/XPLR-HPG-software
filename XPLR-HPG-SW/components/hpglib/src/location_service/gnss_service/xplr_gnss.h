@@ -93,6 +93,31 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile);
 esp_err_t xplrGnssStopDevice(uint8_t dvcProfile);
 
 /**
+ * @brief Stops a GNSS device and saves configuration on shutdown.
+ * The save-on-shutdown feature (SOS) enables the u-blox receiver to store the contents of the
+ * battery-backed RAM to an external flash memory and restore it upon startup.
+ * The restoring of data on startup is automatically done if the corresponding data
+ * is present in the flash. Data expiration is not checked. Module is then shutdown.
+ *
+ * @param dvcProfile  an integer number denoting the device profile/index.
+ * @return            ESP_OK on success, ESP_INVALID_ARG on invalid parameters,
+ *                    ESP_FAIL on failure
+ *
+*/
+esp_err_t xplrGnssSaveOnShutdown(uint8_t dvcProfile);
+
+/**
+ * @brief Clears backup configuration saved in the flash.
+ * The host can send this message in order to erase the backup file present in flash.
+ *
+ * @param dvcProfile  an integer number denoting the device profile/index.
+ * @return            ESP_OK on success, ESP_INVALID_ARG on invalid parameters,
+ *                    ESP_FAIL on failure
+ *
+*/
+esp_err_t xplrGnssClearBackupConfiguration(uint8_t dvcProfile);
+
+/**
  * @brief Deinitialize ubxLib.
  * Be careful when deinitializing ubxlib since there might
  * be other modules that use it.
@@ -418,6 +443,14 @@ esp_err_t xplrGnssConsumeMessage(uint8_t dvcProfile);
 esp_err_t xplrGnssNvsDeleteCalibrations(uint8_t dvcProfile);
 
 /**
+ * @brief Function that fetches the latest UTC timestamp of the receiver.
+ *
+ * @param dvcProfile    an integer number denoting the device profile/index.
+ * @return              the UTC timestamp in success, -1 in error.
+*/
+int64_t xplrGnssGetTimestampUTC(uint8_t dvcProfile);
+
+/**
  * @brief Returns a string in GMaps format that can be used to view your location online.
  * Useful for checking location while using console output.
  *
@@ -551,36 +584,55 @@ xplrGnssStates_t xplrGnssGetPreviousState(uint8_t dvcProfile);
 uErrorCode_t xplrGnssGetGgaMessage(uint8_t dvcProfile, char **buffer, size_t size);
 
 /**
- * @brief Function that initializes the GNSS message logging task
+ * @brief Function that initializes logging of the GNSS async messages with user-selected configuration
  *
- * @param dvcProfile  an integer number denoting the device profile/index.
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
+*/
+int8_t xplrGnssAsyncLogInit(xplr_cfg_logInstance_t *logCfg);
+
+/**
+ * @brief   Function that stops the async logging of ubx messages
+ *
+ * @return  ESP_OK on success otherwise ESP_FAIL on failure.
+*/
+esp_err_t xplrGnssAsyncLogStop(void);
+
+/**
+ * @brief   Function that de-initializes the GNSS message logging task
+ *
+ * @return  ESP_OK on success otherwise ESP_FAIL on failure.
+*/
+esp_err_t xplrGnssAsyncLogDeInit(void);
+
+/**
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
+*/
+int8_t xplrGnssInitLogModule(xplr_cfg_logInstance_t *logCfg);
+
+/**
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  ESP_OK on success, ESP_FAIL otherwise.
+*/
+esp_err_t xplrGnssStopLogModule(void);
+
+/**
+ * @brief Function that writes the location fix type to a string buffer
+ *
+ * @param locData     struct containing location data information.
+ * @param buffer      a buffer where the string will be written
+ * @param maxLen      maximum length that the buffer can accommodate
  * @return            ESP_OK on success otherwise ESP_FAIL on failure.
 */
-esp_err_t xplrGnssAsyncLogInit(uint8_t dvcProfile);
-
-/**
- * @brief Function that de-initializes the GNSS message logging task
- *
- * @param dvcProfile  an integer number denoting the device profile/index.
- * @return            ESP_OK on success otherwise ESP_FAIL on failure.
-*/
-esp_err_t xplrGnssAsyncLogDeInit(uint8_t dvcProfile);
-
-/**
- * @brief Function that halts the logging of the gnss module's selected submodule
- *
- * @param module  the submodule for which the logging will be halted.
- * @return true if succeeded to halt the module or false otherwise.
-*/
-bool xplrGnssHaltLogModule(xplrGnssLogModule_t module);
-
-/**
- * @brief Function that starts the logging of the gnss module's selected submodule
- * 
- * @param module  the submodule for which the logging will be started/resumed.
- * @return        true if the module has been enabled or false in error
-*/
-bool xplrGnssStartLogModule(xplrGnssLogModule_t module);
+esp_err_t xplrGnssFixTypeToString(xplrGnssLocation_t *locData, char *buffer, uint8_t maxLen);
 
 #ifdef __cplusplus
 }

@@ -32,6 +32,7 @@
 
 /*INDENT-OFF*/
 typedef enum {
+    XPLR_LBAND_FREQUENCY_INVALID = -1,
     XPLR_LBAND_FREQUENCY_EU = 0,
     XPLR_LBAND_FREQUENCY_US
 } xplrLbandRegion_t;

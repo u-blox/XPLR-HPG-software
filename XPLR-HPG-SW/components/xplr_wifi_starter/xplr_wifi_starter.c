@@ -43,16 +43,15 @@
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
+/**
+ * Debugging print macro
+ */
 #if (1 == XPLRWIFISTARTER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRWIFISTARTER_LOG_ACTIVE))
-#define XPLRWIFISTARTER_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRWIFISTARTER_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiStarter", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRWIFISTARTER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
-#define XPLRWIFISTARTER_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-    XPLRLOG(&wifiStarterLog,wifiBuff2Log);
+#define XPLRWIFISTARTER_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiStarter", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRWIFISTARTER_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
-#define XPLRWIFISTARTER_CONSOLE(tag, message, ...) \
-    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiStarter", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    XPLRLOG(&wifiStarterLog,wifiBuff2Log)
+#define XPLRWIFISTARTER_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiStarter", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRWIFISTARTER_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -91,11 +90,6 @@
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
-/* ----------------------------------------------------------------
- * EXTERN VARIABLES
- * ---------------------------------------------------------------*/
-xplrLog_t wifiStarterLog = {0};
-char wifiBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE] = {0};
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -141,6 +135,8 @@ char apIpString[16] = {0};
 
 xplrWifiWebServerData_t webserverData;
 
+static int8_t logIndex = -1;
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -180,6 +176,7 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
         case XPLR_WIFISTARTER_STATE_CONFIG_WIFI:
             xplrWifiStarterPrivateUpdateNextState(XPLR_WIFISTARTER_STATE_FLASH_INIT);
             XPLRWIFISTARTER_CONSOLE(D, "Config WiFi OK.");
+            lastActionTime = MICROTOSEC(esp_timer_get_time());
             break;
 
         case XPLR_WIFISTARTER_STATE_FLASH_INIT:
@@ -401,9 +398,15 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                     xplrWifiStarterPrivateUpdateNextState(XPLR_WIFISTARTER_STATE_CONNECT_WIFI);
                 }
                 XPLRWIFISTARTER_CONSOLE(D, "WiFi started successful!");
+                if (userOptions.mode == XPLR_WIFISTARTER_MODE_STA_AP) {
+                    XPLR_CI_CONSOLE(502, "OK");
+                }
             } else {
                 xplrWifiStarterPrivateUpdateNextStateToError();
                 XPLRWIFISTARTER_CONSOLE(E, "WiFi start failed!");
+                if (userOptions.mode == XPLR_WIFISTARTER_MODE_STA_AP) {
+                    XPLR_CI_CONSOLE(502, "ERROR");
+                }
             }
             break;
 
@@ -431,8 +434,10 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                     ret = XPLR_WIFISTARTER_STATE_ERROR;
                     xplrWifiStarterPrivateUpdateNextState(XPLR_WIFISTARTER_STATE_ERROR);
                     XPLRWIFISTARTER_CONSOLE(E, "WiFi NVS Update failed, going to error state.");
+                    XPLR_CI_CONSOLE(504, "ERROR");
                 } else {
                     XPLRWIFISTARTER_CONSOLE(W, "NVS updated, restarting device...");
+                    XPLR_CI_CONSOLE(504, "OK");
                     esp_restart();
                 }
             } else {
@@ -500,6 +505,12 @@ xplrWifiStarterError_t xplrWifiStarterFsm()
                      */
                     xplrWifiStarterPrivateUpdateNextStateToError();
                 }
+                esp_ret = esp_event_loop_delete_default();
+                if (esp_ret == ESP_OK) {
+                    XPLRWIFISTARTER_CONSOLE(D, "Deleted default event loop.");
+                } else {
+                    XPLRWIFISTARTER_CONSOLE(E, "Error deleting default event loop!");
+                }
                 XPLRWIFISTARTER_CONSOLE(D, "WiFi disconnected successful!");
             } else {
                 xplrWifiStarterPrivateUpdateNextStateToError();
@@ -546,19 +557,7 @@ esp_err_t xplrWifiStarterInitConnection(xplrWifiStarterOpts_t *wifiOptions)
 
     /* get wifi user options from app */
     memcpy(&userOptions, wifiOptions, sizeof(xplrWifiStarterOpts_t));
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
-    xplrLog_error_t err = xplrLogInit(&wifiStarterLog,
-                                      XPLR_LOG_DEVICE_INFO,
-                                      "/wifi.log",
-                                      200,
-                                      XPLR_SIZE_MB);
-    if (err != XPLR_LOG_OK) {
-        wifiStarterLog.logEnable = false;
-    } else {
-        wifiStarterLog.logEnable = true;
-    }
-    wifiOptions->logCfg = &wifiStarterLog;
-#endif
+
     if (strlen(userOptions.ssid) > (ELEMENTCNT(wifiConfig.sta.ssid) - 1)) {
         return ESP_FAIL;
     } else {
@@ -677,9 +676,11 @@ xplrWifiStarterError_t xplrWifiStarterDeviceErase(void)
     if (res != ESP_OK) {
         ret = XPLR_WIFISTARTER_ERROR;
         XPLRWIFISTARTER_CONSOLE(E, "Failed to erase NVS.");
+        XPLR_CI_CONSOLE(514, "ERROR");
     } else {
         if (userOptions.webserver) {
             XPLRWIFISTARTER_CONSOLE(W, "NVS erased, rebooting device...");
+            XPLR_CI_CONSOLE(514, "OK");
             esp_restart();
         }
         ret = XPLR_WIFISTARTER_OK;
@@ -1134,48 +1135,52 @@ char *xplrWifiStarterGetApSsid(void)
     return ret;
 }
 
-bool xplrWifiStarterHaltLogModule(xplrWifiStarterOpts_t *wifiOptions)
+int8_t xplrWifiStarterInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
-    if (wifiOptions->logCfg != NULL) {
-        wifiOptions->logCfg->logEnable = false;
-        ret = true;
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_WIFI_STARTER_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
     } else {
-        /* log module is not initialized thus do nothing and return false*/
-        ret = false;
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
-bool xplrWifiStarterStartLogModule(xplrWifiStarterOpts_t *wifiOptions)
+esp_err_t xplrWifiStarterStopLogModule(void)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFISTARTER_LOG_ACTIVE)
-    xplrLog_error_t err;
-    if (wifiOptions->logCfg != NULL) {
-        wifiOptions->logCfg->logEnable = true;
-        ret = true;
+    esp_err_t ret;
+    xplrLog_error_t logErr;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
     } else {
-        err = xplrLogInit(&wifiStarterLog,
-                          XPLR_LOG_DEVICE_INFO,
-                          "/wifi.log",
-                          200,
-                          XPLR_SIZE_MB);
-        if (err != XPLR_LOG_OK) {
-            wifiStarterLog.logEnable = false;
-        } else {
-            wifiStarterLog.logEnable = true;
-        }
-        wifiOptions->logCfg = &wifiStarterLog;
-        ret = wifiStarterLog.logEnable;
+        ret = ESP_OK;
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
@@ -1802,25 +1807,8 @@ static esp_err_t wifiNvsErase(uint8_t opt)
     esp_err_t ret;
 
     if (opt == 0) { //erase all
-        err[0] = xplrNvsEraseKey(&storage->nvs, "id");
-        err[1] = xplrNvsEraseKey(&storage->nvs, "ssid");
-        err[2] = xplrNvsEraseKey(&storage->nvs, "pwd");
-        if (userOptions.webserver) {
-            err[3] = xplrNvsEraseKey(&storage->nvs, "rootCa");
-            err[4] = xplrNvsEraseKey(&storage->nvs, "ppId");
-            err[5] = xplrNvsEraseKey(&storage->nvs, "ppCert");
-            err[6] = xplrNvsEraseKey(&storage->nvs, "ppKey");
-            err[7] = xplrNvsEraseKey(&storage->nvs, "ppRegion");
-            err[8] = xplrNvsEraseKey(&storage->nvs, "ppPlan");
-            err[9] = xplrNvsEraseKey(&storage->nvs, "configured");
-            err[10] = xplrNvsEraseKey(&storage->nvs, "ppConfigured");
-            err[11] = xplrNvsEraseKey(&storage->nvs, "sdLog");
-            err[12] = xplrNvsEraseKey(&storage->nvs, "gnssDR");
-
-            numOfNvsEntries = 13;
-        } else {
-            numOfNvsEntries = 3;
-        }
+        err[0] = xplrNvsErase(&storage->nvs);
+        numOfNvsEntries = 1;
     } else if (opt == 1) { //erase wifi creds
         err[0] = xplrNvsEraseKey(&storage->nvs, "id");
         err[1] = xplrNvsEraseKey(&storage->nvs, "ssid");

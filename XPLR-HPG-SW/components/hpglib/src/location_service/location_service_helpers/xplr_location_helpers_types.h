@@ -33,7 +33,7 @@
 
 /*INDENT-OFF*/
 
-/** Location device NVS struct. 
+/** Location device NVS struct.
  * contains data to be stored in NVS under namespace <id>
 */
 typedef struct xplrLocNvs_type {
@@ -41,14 +41,24 @@ typedef struct xplrLocNvs_type {
     char        id[15];     /**< nvs namespace */
 } xplrLocNvs_t;
 
+/** Location device type.
+ * GNSS device types / models that are compatible with hpgLib
+*/
+typedef enum {
+    XPLR_LOCATION_DEVICE_NOT_SUPPORTED = -1,
+    XPLR_LOCATION_DEVICE_ZED_F9R,
+    XPLR_LOCATION_DEVICE_ZED_F9P
+} xplrLocDeviceType_t;
+
 /**
  * Simple struct basic device settings.
  * It contains the absolute minimum to setup a device handler
  * Used both for GNSS and LBAND version M9 modules
  */
 typedef struct xplrLocationDevConf_type {
-    uDeviceCfg_t      dvcConfig;  /**< ubxlib device settings */
-    uNetworkCfgGnss_t dvcNetwork; /**< ubxlib device network type */
+    xplrLocDeviceType_t dvcType;    /**< hpglib device type */
+    uDeviceCfg_t        dvcConfig;  /**< ubxlib device settings */
+    uNetworkCfgGnss_t   dvcNetwork; /**< ubxlib device network type */
 } xplrLocationDevConf_t;
 
 /**

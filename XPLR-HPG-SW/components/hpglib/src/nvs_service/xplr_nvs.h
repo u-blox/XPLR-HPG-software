@@ -25,6 +25,7 @@
 #include "nvs_flash.h"
 #include "./../../xplr_hpglib_cfg.h"
 #include "./../../components/hpglib/src/log_service/xplr_log.h"
+#include "./../../components/hpglib/src/common/xplr_common.h"
 
 
 /** @file
@@ -58,7 +59,6 @@ typedef enum {
 typedef struct xplrNvs_type {
     char                tag[16];    /**< namespace for data stored in memory. */
     nvs_handle_t        handler;    /**< NVS handler from esp-idf storage API. */
-    xplrLog_t           *logCfg;    /**< Pointer to the log struct of the module. */
 } xplrNvs_t;
 
 /* ----------------------------------------------------------------
@@ -71,7 +71,7 @@ typedef struct xplrNvs_type {
  * @param  nvs  driver struct to initialize.
  * @return      XPLR_NVS_OK on success, XPLR_NVS_ERROR otherwise.
  */
-xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *namespace);
+xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *nvsNamespace);
 
 /**
  * @brief De-initialize nvs driver.
@@ -84,7 +84,14 @@ xplrNvs_error_t xplrNvsDeInit(xplrNvs_t *nvs);
 /**
  * @brief Erase nvs namespace (all data).
  *
- * @param  nvs  driver struct to de-initialize.
+ * @return      XPLR_NVS_OK on success, XPLR_NVS_ERROR otherwise.
+ */
+xplrNvs_error_t xplrNvsEraseAll();
+
+/**
+ * @brief Erase nvs namespace (all data).
+ *
+ * @param  nvs  driver struct to erase
  * @return      XPLR_NVS_OK on success, XPLR_NVS_ERROR otherwise.
  */
 xplrNvs_error_t xplrNvsErase(xplrNvs_t *nvs);
@@ -301,20 +308,21 @@ xplrNvs_error_t xplrNvsWriteString(xplrNvs_t *nvs, const char *key, const char *
 xplrNvs_error_t xplrNvsWriteStringHex(xplrNvs_t *nvs, const char *key, const char *value);
 
 /**
- * @brief Function that halts the logging of the nvs module
- * 
- * @param  nvs    driver struct
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrNvsHaltLogModule(xplrNvs_t *nvs);
+int8_t xplrNvsInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the nvs module
- * 
- * @param  nvs    driver struct
- * @return true if succeeded to start the module or false otherwise
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
 */
-bool xplrNvsStartLogModule(xplrNvs_t *nvs);
+esp_err_t xplrNvsStopLogModule(void);
 
 #ifdef __cplusplus
 }

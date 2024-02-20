@@ -144,6 +144,9 @@ typedef struct xplrMqttWifiFsmUCD_type {
     xplrMqttWifiRingBuffItem_t prevItem;    /**< previous item parsed from ring buffer. */
     uint64_t lastActionTime;                /**< last time stamp when the FSM executed a step, useful
                                                  for timeout detections. */
+    uint64_t lastMsgTime;                   /**< last time stamp when the client received a message
+                                                 from the broker. Needed to implement the watchdog mechanism */
+    bool enableWatchdog;                    /**< option to enable the watchdog timer for MQTT message reception */
 } xplrMqttWifiFsmUCD_t;
 
 /**
@@ -152,7 +155,6 @@ typedef struct xplrMqttWifiFsmUCD_type {
 typedef struct xplrMqttWifiClient_type {
     esp_mqtt_client_handle_t handler;  /**< client handler. */
     xplrMqttWifiFsmUCD_t ucd;          /**< user context data pack. */
-    xplrLog_t *logCfg;                 /**< pointer to the module's log struct. */
 } xplrMqttWifiClient_t;
 
 
@@ -314,13 +316,23 @@ esp_err_t xplrMqttWifiUnsubscribeFromTopicZtp(xplrMqttWifiClient_t *client,
 esp_err_t xplrMqttWifiUnsubscribeFromTopic(xplrMqttWifiClient_t *client, char *topic);
 
 /**
+ * @brief Used to command a disconnect from the mqtt client.
+ * After this function a call of xplrMqttWifiHardDisconnect is
+ * advised to re-initialize all aspects of the client, unless
+ * a re-initialization of the client is to be performed.
+ *
+ * @param client  a client item containing MQTT client handler UCD pack
+*/
+void xplrMqttWifiDisconnect(xplrMqttWifiClient_t *client);
+
+/**
  * @brief Used to completely destroy the conenction.
  * After this function has been called you must call xplrMqttStarterInitClient
  * to re-initialize all aspects of the client (handlers, topics, ring buffers).
  *
  * @param client  a client item containing MQTT client handler UCD pack
  */
-void xplrMqttWifiHardDisconnect(xplrMqttWifiClient_t *client);
+esp_err_t xplrMqttWifiHardDisconnect(xplrMqttWifiClient_t *client);
 
 /**
  * @brief Tries to reconnect to an MQTT broker.
@@ -403,20 +415,28 @@ esp_err_t xplrMqttWifiPublishMsg(xplrMqttWifiClient_t *client,
                                  int retain);
 
 /**
- * @brief Function that halts the logging of the mqtt module
- * 
- * @param client    a client item containing MQTT client handler UCD pack.
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrMqttWifiHaltLogModule(xplrMqttWifiClient_t *client);
+int8_t xplrMqttWifiInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the mqtt module
- * 
- * @param client    a client item containing MQTT client handler UCD pack.
- * @return true if succeeded to start the module or false otherwise
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
 */
-bool xplrMqttWifiStartLogModule(xplrMqttWifiClient_t *client);
+esp_err_t xplrMqttWifiStopLogModule(void);
+
+/**
+ * @brief Function used to feed the internal watchdog timer of the MQTT client
+ *
+ * @param client    a client item containing MQTT client handler UCD pack.
+*/
+void xplrMqttWifiFeedWatchdog(xplrMqttWifiClient_t *client);
 
 #ifdef __cplusplus
 }

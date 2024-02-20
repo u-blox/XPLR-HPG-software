@@ -56,12 +56,6 @@ extern "C" {
 #define XPLR_HLPRLOCSRVC_DEVICE_ONLINE_TIMEOUT 40
 
 /* ----------------------------------------------------------------
- * EXTERN VARIABLES
- * -------------------------------------------------------------- */
-extern xplrLog_t locationLog;
-extern char buff2Log[512];
-
-/* ----------------------------------------------------------------
  * PUBLIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
@@ -276,6 +270,23 @@ esp_err_t xplrHlprLocSrvcSendRtcmFormattedCommand(uDeviceHandle_t *dvcHandler,
  * @return            true if device profile is inside limits otherwise false
  */
 bool xplrHlprLocSrvcCheckDvcProfileValidity(uint8_t dvcProfile, uint8_t maxDevLim);
+
+/**
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
+*/
+int8_t xplrHlprLocSrvcInitLogModule(xplr_cfg_logInstance_t *logCfg);
+
+/**
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
+*/
+esp_err_t xplrHlprLocSrvcStopLogModule(void);
 
 #ifdef __cplusplus
 }

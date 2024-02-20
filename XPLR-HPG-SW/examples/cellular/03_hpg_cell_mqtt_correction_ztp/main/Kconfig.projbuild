@@ -15,6 +15,22 @@ menu "XPLR HPG Options"
             default 1 if XPLR_DR_OPT_ENABLE
     endmenu
 
+    menu "Correction Data Source"
+        choice XPLR_CORRECTION_DATA_SOURCE
+            prompt "Choose correction data source for your GNSS module"
+            default CORRECTION_VIA_IP
+            config CORRECTION_VIA_IP
+                bool "Correction via IP"
+            config CORRECTION_VIA_LBAND
+                bool "Correction via LBAND"
+        endchoice
+
+        config XPLR_CORRECTION_DATA_SOURCE
+            int 
+            default 0 if CORRECTION_VIA_IP
+            default 1 if CORRECTION_VIA_LBAND
+    endmenu
+
     menu "Cellular Settings"
         config XPLR_CELL_APN
             string "APN value of cellular provider"

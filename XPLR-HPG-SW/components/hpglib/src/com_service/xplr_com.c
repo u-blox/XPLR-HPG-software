@@ -29,15 +29,11 @@
  * -------------------------------------------------------------- */
 
 #if (1 == XPLRCOM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRCOM_LOG_ACTIVE))
-#define XPLRCOM_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRCOM_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRCOM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
-#define XPLRCOM_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-    XPLRLOG(&cellLog,buff2Log);
+#define XPLRCOM_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRCOM_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
-#define XPLRCOM_CONSOLE(tag, message, ...)\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    XPLRLOG(&cellLog,buff2Log);
+#define XPLRCOM_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCom", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRCOM_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -55,6 +51,7 @@ typedef struct xplrCom_type {
                                                          element 0 holds most current state.
                                                          element 1 holds previous state */
     int8_t                          retries;
+    bool                            cntrlRestart;
 } xplrCom_t;
 
 /* ----------------------------------------------------------------
@@ -93,11 +90,7 @@ const char *const netStatStr[] = {"unknown",
 xplrCom_t comDevices[XPLRCOM_NUMOF_DEVICES] = {NULL};
 xplrCom_cell_netInfo_t currentNetInfo;
 xplrCom_cell_connect_t cellFsm = XPLR_COM_CELL_CONNECT_ERROR;
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
-static xplrLog_t cellLog;
-static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
-#endif
+static int8_t logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -116,6 +109,7 @@ static xplrCom_error_t cellDvcSetRat(int8_t index);
 static xplrCom_error_t cellDvcSetBands(int8_t index);
 static xplrCom_error_t cellDvcRegister(int8_t index);
 static void            cellDvcGetNetworkInfo(int8_t index, xplrCom_cell_netInfo_t *info);
+static void            cellConsumeRestartMsg(int8_t index);
 
 /* ----------------------------------------------------------------
  * STATIC CALLBACK FUNCTION PROTOTYPES
@@ -131,16 +125,6 @@ xplrCom_error_t xplrUbxlibInit(void)
 {
     xplrCom_error_t ret;
     int32_t ubxlibRes;
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
-    xplrLog_error_t err;
-    err = xplrLogInit(&cellLog, XPLR_LOG_DEVICE_INFO, "/cell.log", 100, XPLR_SIZE_MB);
-    if (err == XPLR_LOG_OK) {
-        cellLog.logEnable = true;
-    } else {
-        cellLog.logEnable = false;
-    }
-#endif
 
     ubxlibRes = uPortInit();
 
@@ -221,6 +205,66 @@ xplrCom_error_t xplrComCellDeInit(int8_t dvcProfile)
 uDeviceHandle_t xplrComGetDeviceHandler(int8_t dvcProfile)
 {
     return comDevices[dvcProfile].handler;
+}
+
+xplrCom_error_t xplrComSetGreetingMessage(int8_t dvcProfile,
+                                          const char *pStr,
+                                          void (*pCallback)(uDeviceHandle_t, void *),
+                                          void *pCallbackParam)
+{
+    xplrCom_error_t ret;
+    uDeviceHandle_t handler = xplrComGetDeviceHandler(dvcProfile);
+    int32_t err = uCellCfgSetGreetingCallback(handler, pStr, pCallback, pCallbackParam);
+
+    if (err != 0) {
+        XPLRCOM_CONSOLE(E, "Error in setting greeting callback function and message <%d>", err);
+        ret = XPLR_COM_ERROR;
+    } else {
+        XPLRCOM_CONSOLE(D, "Set up greeting message and callback successfully!");
+        ret = XPLR_COM_OK;
+    }
+
+    return ret;
+}
+
+xplrCom_error_t xplrComPowerResetHard(int8_t dvcProfile)
+{
+    xplrCom_error_t ret;
+    xplrCom_cell_connect_t *fsm = comDevices[dvcProfile].cellFsm;
+    uDeviceHandle_t handler = xplrComGetDeviceHandler(dvcProfile);
+    int32_t err;
+
+    comDevices[dvcProfile].cntrlRestart = true;
+    /* rebooting the module */
+    err = uCellPwrReboot(handler, NULL);
+    if (err == 0) {
+        /* dvc in reset, reset connect fsm */
+        fsm[1] = fsm[0];
+        fsm[0] = XPLR_COM_CELL_CONNECT;
+        ret = XPLR_COM_OK;
+        XPLRCOM_CONSOLE(I, "dvc soft reset, ok");
+    } else {
+        fsm[1] = fsm[0];
+        fsm[0] = XPLR_COM_CELL_CONNECT_ERROR;
+        ret = XPLR_COM_ERROR;
+        XPLRCOM_CONSOLE(E, "error soft reseting dvc");
+    }
+
+    return ret;
+}
+
+bool xplrComIsRstControlled(int8_t dvcProfile)
+{
+    bool ret = true;
+
+    if (comDevices[dvcProfile].cntrlRestart) {
+        cellConsumeRestartMsg(dvcProfile);
+        ret = true;
+    } else {
+        ret = false;
+    }
+
+    return ret;
 }
 
 xplrCom_error_t xplrComCellFsmConnect(int8_t dvcProfile)
@@ -476,46 +520,52 @@ xplrCom_error_t xplrComCellGetDeviceInfo(int8_t dvcProfile, char *model, char *f
     return ret;
 }
 
-bool xplrComHaltLogModule(int8_t dvcProfile)
+int8_t xplrComCellInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
-    if(comDevices[dvcProfile].cellSettings->logCfg != NULL) {
-        comDevices[dvcProfile].cellSettings->logCfg->logEnable = false;
-        ret = true;
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLRCOM_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
     } else {
-        ret = false;
-        /* log module is not initialized thus do nothing*/
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
-bool xplrComStartLogModule(int8_t dvcProfile)
+esp_err_t xplrComCellStopLogModule(void)
 {
-    bool ret;
+    esp_err_t ret;
+    xplrLog_error_t logErr;
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
-    xplrLog_error_t err;
-    if(comDevices[dvcProfile].cellSettings->logCfg != NULL) {
-        comDevices[dvcProfile].cellSettings->logCfg->logEnable = true;
-        ret = true;
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
     } else {
-        /* log module is not initialized thus initialize it*/
-        err = xplrLogInit(&cellLog, XPLR_LOG_DEVICE_INFO, "/cell.log", 100, XPLR_SIZE_MB);
-        if (err == XPLR_LOG_OK) {
-            cellLog.logEnable = true;
-        } else {
-            cellLog.logEnable = false;
-        }
-        comDevices[dvcProfile].cellSettings->logCfg = &cellLog;
-        ret = cellLog.logEnable;  
+        ret = ESP_OK;
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
@@ -586,10 +636,6 @@ xplrCom_error_t cellSetConfig(xplrCom_cell_config_t *cfg)
             comDevices[dvcProfile].deviceSettings.deviceType = U_DEVICE_TYPE_CELL;
             comDevices[dvcProfile].deviceNetwork = U_NETWORK_TYPE_CELL;
             comDevices[dvcProfile].deviceSettings.transportType = U_DEVICE_TRANSPORT_TYPE_UART;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
-            /* point to the local log struct*/
-            cfg->logCfg = &cellLog;
-#endif
             ret = XPLR_COM_OK;
             XPLRCOM_CONSOLE(D, "ok: %d", ret);
         } else {
@@ -865,7 +911,7 @@ void cellDvcGetNetworkInfo(int8_t index, xplrCom_cell_netInfo_t *info)
 {
     uDeviceHandle_t dvcHandler = comDevices[index].handler;
 
-    uCellNetGetOperatorStr(dvcHandler, info->operator, 32);
+    uCellNetGetOperatorStr(dvcHandler, info->networkOperator, 32);
     memcpy(info->rat,
            ratStr[uCellNetGetActiveRat(dvcHandler)],
            strlen(ratStr[uCellNetGetActiveRat(dvcHandler)])
@@ -879,13 +925,18 @@ void cellDvcGetNetworkInfo(int8_t index, xplrCom_cell_netInfo_t *info)
     uCellNetGetMccMnc(dvcHandler, &info->Mcc, &info->Mnc);
 
     XPLRCOM_CONSOLE(D, "cell network settings:");
-    XPLRCOM_CONSOLE(D, "operator: %s", info->operator);
+    XPLRCOM_CONSOLE(D, "network_operator: %s", info->networkOperator);
     XPLRCOM_CONSOLE(D, "ip: %s", info->ip);
     XPLRCOM_CONSOLE(D, "registered: %d", info->registered);
     XPLRCOM_CONSOLE(D, "RAT: %s", info->rat);
     XPLRCOM_CONSOLE(D, "status: %s", info->status);
     XPLRCOM_CONSOLE(D, "Mcc: %d", info->Mcc);
     XPLRCOM_CONSOLE(D, "Mnc: %d", info->Mnc);
+}
+
+static void cellConsumeRestartMsg(int8_t index)
+{
+    comDevices[index].cntrlRestart = false;
 }
 
 /* ----------------------------------------------------------------

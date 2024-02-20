@@ -1,0 +1,74 @@
+menu "XPLR HPG Options"
+
+    menu "Bluetooth Settings"
+        config XPLR_BLUETOOTH_DEVICE_NAME
+            string "Device name"
+            default "xplr-hpg"
+            help
+                Fill in the Bluetooth device name
+
+    endmenu
+
+    menu "Correction Data Source"
+        choice XPLR_CORRECTION_DATA_SOURCE
+            prompt "Choose correction data source for your GNSS module"
+            default CORRECTION_VIA_IP
+            config CORRECTION_VIA_IP
+                bool "Correction via IP"
+            config CORRECTION_VIA_LBAND
+                bool "Correction via LBAND"
+        endchoice
+
+        config XPLR_CORRECTION_DATA_SOURCE
+            int 
+            default 0 if CORRECTION_VIA_IP
+            default 1 if CORRECTION_VIA_LBAND
+    endmenu
+
+    menu "Dead Reckoning"
+        choice XPLR_GNSS_DEADRECKONING_ENABLE
+            prompt "Dead reckoning state"
+            config XPLR_DR_OPT_DISABLE
+                bool "Disable"
+            config XPLR_DR_OPT_ENABLE
+                bool "Enable"
+        endchoice
+        
+        config XPLR_GNSS_DEADRECKONING_ENABLE
+            int
+            default 0 if XPLR_DR_OPT_DISABLE
+            default 1 if XPLR_DR_OPT_ENABLE
+    endmenu
+    
+    menu "MQTT Settings"
+        config XPLR_MQTTWIFI_THINGSTREAM_HOSTNAME
+            string "Broker hostname"
+            default "mqtts://pp.services.u-blox.com"
+            help
+                Sets the url for the MQTT Broker Address.<br>
+                Default value is recommended unless there's a change in the official docs.<br>
+                Can be overwritten when using Zero Touch Provisionning (ZTP).
+
+        config XPLR_MQTTWIFI_CLIENT_ID
+            string "Client ID"
+            default "Client-ID"
+            help
+                Sets the MQTT Client ID according to Thingstream Client ID value.<br>
+                Can be overwritten when using Zero Touch Provisionning (ZTP).
+    endmenu
+
+    menu "Wi-Fi Settings"
+        config XPLR_WIFI_SSID
+            string "Access Point SSID"
+            default "ssid"
+            help
+                Fill in the AP SSID you wish to connect to.
+
+        config XPLR_WIFI_PASSWORD
+            string "Access Point Password"
+            default "password"
+            help
+                Fill in the AP SSID you wish to connect to.
+    endmenu
+
+endmenu

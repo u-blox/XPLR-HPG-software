@@ -19,9 +19,12 @@ message(STATUS " XPLR_HPG_SW_PATH is $ENV{XPLR_HPG_SW_PATH}")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_http_ztp")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_certs")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_ztp")
-#set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_ntrip_correction")
 set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_captive_portal")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_ntrip_correction")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_sd_config_file")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_bluetooth")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_certs_sw_maps")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_at_app")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_kit_info")
 
 # cellular examples
@@ -29,10 +32,12 @@ set(ENV{XPLR_HPG_PROJECT} "hpg_wifi_mqtt_correction_captive_portal")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_certs")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_ztp")
 #set(ENV{XPLR_HPG_PROJECT} "hpg_cell_ntrip_correction")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_certs_sw_maps")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_cell_mqtt_correction_certs_sd_autonomous")
 
 # positioning examples
 #set(ENV{XPLR_HPG_PROJECT} "hpg_gnss_config")
-#set(ENV{XPLR_HPG_PROJECT} "hpg_gnss_lband_correction")
+#set(ENV{XPLR_HPG_PROJECT} "hpg_gnss_save_on_shutdown")
 
 if(NOT DEFINED ENV{XPLR_HPG_PROJECT})
 message(FATAL_ERROR " Only one (1) project must be selected.")

@@ -30,17 +30,15 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
+/**
+ * Debugging print macro
+ */
 #if (1 == XPLRNVS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRNVS_LOG_ACTIVE))
-#define XPLRNVS_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRNVS_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgNvs", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRNVS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
-#define XPLRNVS_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    if (nvsLog.logEnable){\
-        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-        XPLRLOG(&nvsLog,buff2Log);}
+#define XPLRNVS_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgNvs", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRNVS_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
-#define XPLRNVS_CONSOLE(tag, message, ...) if (nvsLog.logEnable){\
-        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrNvs", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-        XPLRLOG(&nvsLog,buff2Log);}
+#define XPLRNVS_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgNvs", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRNVS_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -53,10 +51,7 @@
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
 const char nvsPartitionName[] = "nvs";  /* partition name to store configuration settings */
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
-static xplrLog_t nvsLog;
-static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
-#endif
+static int8_t logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -71,29 +66,11 @@ static xplrNvs_error_t nvsClose(xplrNvs_t *nvs);
  * PUBLIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
 
-xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *namespace)
+xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *nvsNamespace)
 {
     const esp_partition_t *nvs_partition;
     esp_err_t err;
     xplrNvs_error_t ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
-    /* initialize logging*/
-    xplrLog_error_t logErr;
-    /* We check if the SD struct is null (indicating first comer). If yes initialize log module, 
-       else return OK */
-    if (nvsLog.sd == NULL) {
-        logErr = xplrLogInit(&nvsLog, XPLR_LOG_DEVICE_INFO, "/nvs.log", 100, XPLR_SIZE_MB);
-        if (logErr == XPLR_LOG_OK) {
-            nvsLog.logEnable = true;
-        } else {
-            nvsLog.logEnable = false;
-        }
-    } else {
-        logErr = XPLR_LOG_OK;
-        XPLRNVS_CONSOLE(W, "Logging to NVS already initialized.");
-    }
-    nvs->logCfg = &nvsLog;
-#endif
 
     /* initialize nvs */
     err = nvs_flash_init();
@@ -140,18 +117,18 @@ xplrNvs_error_t xplrNvsInit(xplrNvs_t *nvs, const char *namespace)
     /* check namespace and create it if not present */
     if (err == ESP_OK) {
         /* check namespace not null */
-        if (namespace != NULL) {
+        if (nvsNamespace != NULL) {
             /* check namespace length */
-            if (strlen(namespace) >= NVS_KEY_NAME_MAX_SIZE - 1) {
+            if (strlen(nvsNamespace) >= NVS_KEY_NAME_MAX_SIZE - 1) {
                 err = ESP_FAIL;
                 XPLRNVS_CONSOLE(E, "namespace <%s> too long (%u), max size is <%u>",
-                                namespace,
-                                strlen(namespace),
+                                nvsNamespace,
+                                strlen(nvsNamespace),
                                 NVS_KEY_NAME_MAX_SIZE);
             } else {
                 /* get namespace to handle */
                 memset(nvs->tag, 0x00, 16);
-                memcpy(nvs->tag, namespace, strlen(namespace));
+                memcpy(nvs->tag, nvsNamespace, strlen(nvsNamespace));
                 XPLRNVS_CONSOLE(D, "namespace set: <%s>", nvs->tag);
                 /* create namespace if not present */
                 err = nvs_open_from_partition(nvsPartitionName, nvs->tag, NVS_READWRITE, &nvs->handler);
@@ -197,6 +174,22 @@ xplrNvs_error_t xplrNvsDeInit(xplrNvs_t *nvs)
     return ret;
 }
 
+xplrNvs_error_t xplrNvsEraseAll()
+{
+    xplrNvs_error_t ret;
+    esp_err_t espRet;
+
+    espRet = nvs_flash_erase_partition(nvsPartitionName);
+    if (espRet != ESP_OK) {
+        XPLRNVS_CONSOLE(E, "nvs erase all error");
+        ret = XPLR_NVS_ERROR;
+    } else {
+        XPLRNVS_CONSOLE(D, "erased all namespaces");
+        ret = XPLR_NVS_OK;
+    }
+    return ret;
+}
+
 xplrNvs_error_t xplrNvsErase(xplrNvs_t *nvs)
 {
     esp_err_t err;
@@ -211,9 +204,10 @@ xplrNvs_error_t xplrNvsErase(xplrNvs_t *nvs)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "failed to erase <%s> namespace", nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "<%s> namespace erased ok", nvs->tag);
+            ret = nvsClose(nvs);
         }
     }
 
@@ -234,12 +228,12 @@ xplrNvs_error_t xplrNvsEraseKey(xplrNvs_t *nvs, const char *key)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "failed to erase <%s> from <%s> namespace", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "<%s> key from namespace <%s> erased ok", key,  nvs->tag);
+            ret = nvsClose(nvs);
         }
     }
-
 
     return ret;
 }
@@ -259,13 +253,12 @@ xplrNvs_error_t xplrNvsReadU8(xplrNvs_t *nvs, const char *key, uint8_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%u>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -285,13 +278,12 @@ xplrNvs_error_t xplrNvsReadU16(xplrNvs_t *nvs, const char *key, uint16_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%u>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -311,13 +303,12 @@ xplrNvs_error_t xplrNvsReadU32(xplrNvs_t *nvs, const char *key, uint32_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%u>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -337,13 +328,12 @@ xplrNvs_error_t xplrNvsReadU64(xplrNvs_t *nvs, const char *key, uint64_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%llu>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -363,13 +353,12 @@ xplrNvs_error_t xplrNvsReadI8(xplrNvs_t *nvs, const char *key, int8_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -389,13 +378,12 @@ xplrNvs_error_t xplrNvsReadI16(xplrNvs_t *nvs, const char *key, int16_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -415,13 +403,12 @@ xplrNvs_error_t xplrNvsReadI32(xplrNvs_t *nvs, const char *key, int32_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -441,13 +428,12 @@ xplrNvs_error_t xplrNvsReadI64(xplrNvs_t *nvs, const char *key, int64_t *value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error reading key <%s> from namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
             XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lld>", key,  nvs->tag, *value);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -468,13 +454,12 @@ xplrNvs_error_t xplrNvsReadString(xplrNvs_t *nvs, const char *key, char *value, 
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error (0x%04x) reading key <%s> from namespace <%s>", (int32_t)err, key,
                             nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
-            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%s>", key,  nvs->tag, value);
+            XPLRNVS_CONSOLE(D, "Read key <%s> in namespace <%s>", key,  nvs->tag);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -490,18 +475,16 @@ xplrNvs_error_t xplrNvsReadStringHex(xplrNvs_t *nvs, const char *key, char *valu
         ret = XPLR_NVS_ERROR;
     } else {
         err = nvs_get_str(nvs->handler, key, value, size);
-
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error (0x%04x) reading key <%s> from namespace <%s>", (int32_t)err, key,
                             nvs->tag);
+            (void)nvsClose(nvs);
         } else {
-            ret = XPLR_NVS_OK;
-            XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <0x%x>", key,  nvs->tag, (unsigned int)value);
+            XPLRNVS_CONSOLE(D, "Read key <%s> in namespace <%s>", key,  nvs->tag);
+            ret = nvsClose(nvs);
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -521,19 +504,19 @@ xplrNvs_error_t xplrNvsWriteU8(xplrNvs_t *nvs, const char *key, uint8_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%u>", key,  nvs->tag, value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -553,19 +536,19 @@ xplrNvs_error_t xplrNvsWriteU16(xplrNvs_t *nvs, const char *key, uint16_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%u>", key,  nvs->tag, value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -585,19 +568,19 @@ xplrNvs_error_t xplrNvsWriteU32(xplrNvs_t *nvs, const char *key, uint32_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lu>", key,  nvs->tag, (long unsigned int)value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -617,19 +600,19 @@ xplrNvs_error_t xplrNvsWriteU64(xplrNvs_t *nvs, const char *key, uint64_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%llu>", key,  nvs->tag, value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -649,19 +632,19 @@ xplrNvs_error_t xplrNvsWriteI8(xplrNvs_t *nvs, const char *key, int8_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -681,19 +664,19 @@ xplrNvs_error_t xplrNvsWriteI16(xplrNvs_t *nvs, const char *key, int16_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -713,19 +696,19 @@ xplrNvs_error_t xplrNvsWriteI32(xplrNvs_t *nvs, const char *key, int32_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%d>", key,  nvs->tag, value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -745,19 +728,19 @@ xplrNvs_error_t xplrNvsWriteI64(xplrNvs_t *nvs, const char *key, int64_t value)
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
                 XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%lld>", key,  nvs->tag, (int64_t)value);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -777,20 +760,20 @@ xplrNvs_error_t xplrNvsWriteString(xplrNvs_t *nvs, const char *key, const char *
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             vTaskDelay(pdMS_TO_TICKS(100));
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
-                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <%s>", key,  nvs->tag, value);
+                XPLRNVS_CONSOLE(D, "Wrote key <%s> in namespace <%s>", key,  nvs->tag);
+                ret = nvsClose(nvs);
             }
         }
     }
-
-    ret = nvsClose(nvs);
 
     return ret;
 }
@@ -810,64 +793,73 @@ xplrNvs_error_t xplrNvsWriteStringHex(xplrNvs_t *nvs, const char *key, const cha
         if (err != ESP_OK) {
             ret = XPLR_NVS_ERROR;
             XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+            (void)nvsClose(nvs);
         } else {
             err = nvs_commit(nvs->handler);
             vTaskDelay(pdMS_TO_TICKS(100));
             if (err != ESP_OK) {
                 ret = XPLR_NVS_ERROR;
                 XPLRNVS_CONSOLE(E, "Error writing key <%s> to namespace <%s>", key,  nvs->tag);
+                (void)nvsClose(nvs);
             } else {
-                ret = XPLR_NVS_OK;
-                XPLRNVS_CONSOLE(D, "key <%s> in namespace <%s> is <0x%x>", key,  nvs->tag, (unsigned int)value);
+                XPLRNVS_CONSOLE(D, "Wrote key <%s> in namespace <%s>", key,  nvs->tag);
+                ret = nvsClose(nvs);
             }
         }
     }
 
-    ret = nvsClose(nvs);
-
     return ret;
 }
 
-bool xplrNvsHaltLogModule(xplrNvs_t *nvs)
+int8_t xplrNvsInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
-    if(nvs->logCfg != NULL) {
-        nvs->logCfg->logEnable = false;
-        ret = true;
-    } else {
-        /* log module is not initialized thus do nothing and return false*/
-        ret = false;
-    }
-#else
-    ret = false;
-#endif
-    return ret;
-}
-
-bool xplrNvsStartLogModule(xplrNvs_t *nvs)
-{
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRNVS_LOG_ACTIVE)
+    int8_t ret;
     xplrLog_error_t logErr;
-    if(nvs->logCfg != NULL) {
-        nvs->logCfg->logEnable = true;
-        ret = true;
-    } else {
-        logErr = xplrLogInit(&nvsLog, XPLR_LOG_DEVICE_INFO, "/nvs.log", 100, XPLR_SIZE_MB);
-        if (logErr == XPLR_LOG_OK) {
-            nvsLog.logEnable = true;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_NVS_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
         } else {
-            nvsLog.logEnable = false;
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
         }
-        nvs->logCfg = &nvsLog;
-        ret = nvsLog.logEnable;
+        ret = logIndex;
+    } else {
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else 
-    ret = false;
-#endif
+
     return ret;
 }
+
+esp_err_t xplrNvsStopLogModule(void)
+{
+    esp_err_t ret;
+    xplrLog_error_t logErr;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
+    }
+
+    return ret;
+}
+
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS

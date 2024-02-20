@@ -22,7 +22,7 @@
 #include "freertos/semphr.h"
 #include "esp_heap_caps.h"
 #include "freertos/queue.h"
-#include "./../../../components/hpglib/src/common/xplr_common.h"\
+#include "./../../../components/hpglib/src/common/xplr_common.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
@@ -32,15 +32,11 @@
  * Debugging print macro
  */
 #if (1 == XPLRMQTTWIFI_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRMQTTWIFI_LOG_ACTIVE))
-#define XPLRMQTTWIFI_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrMqttWifi", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRMQTTWIFI_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiMqtt", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRMQTTWIFI_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRMQTTWIFI_LOG_ACTIVE)
-#define XPLRMQTTWIFI_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrMqttWifi", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrMqttWifi", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-    XPLRLOG(&mqttLog,buff2Log);
+#define XPLRMQTTWIFI_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiMqtt", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRMQTTWIFI_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRMQTTWIFI_LOG_ACTIVE)
-#define XPLRMQTTWIFI_CONSOLE(tag, message, ...)\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrMqttWifi", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    XPLRLOG(&mqttLog,buff2Log)
+#define XPLRMQTTWIFI_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiMqtt", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRMQTTWIFI_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -55,6 +51,16 @@
  * If nothing happens in 30 seconds then timeout.
  */
 #define MQTT_ACTION_TIMEOUT     30
+/**
+ * Timeout for message receive from the MQTT broker
+ * If no message is received in this time a watchdog will
+ * be triggered and the client will reconnect to the broker.
+*/
+#ifdef CONFIG_BT_ENABLED
+#define MQTT_MESSAGE_TIMEOUT    30
+#else
+#define MQTT_MESSAGE_TIMEOUT    10
+#endif
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -67,10 +73,7 @@
 static xplrMqttWifiError_t ret;
 static esp_err_t esp_ret;
 static char prevTopic[XPLR_MQTTWIFI_PAYLOAD_TOPIC_LEN];
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRMQTTWIFI_LOG_ACTIVE)
-static xplrLog_t mqttLog;
-static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
-#endif
+static int8_t logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC CALLBACK FUNCTION PROTOTYPES
@@ -99,6 +102,8 @@ static esp_err_t xplrMqttWifiDestroyConnection(xplrMqttWifiClient_t *client);
 static xplrMqttWifiClientStates_t xplrMqttWifiGetCurrentStatePrivate(xplrMqttWifiFsmUCD_t *ucd);
 static xplrMqttWifiClientStates_t xplrMqttWifiGetPreviousStatePrivate(xplrMqttWifiFsmUCD_t *ucd);
 static esp_err_t xplrMqttWifiCheckQosLvl(xplrMqttWifiQosLvl_t qosLvl);
+static void mqttFeedWatchdog(xplrMqttWifiClient_t *client);
+static bool mqttCheckWatchdog(xplrMqttWifiClient_t *client);
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DESCRIPTORS
@@ -133,21 +138,6 @@ esp_err_t xplrMqttWifiInitClient(xplrMqttWifiClient_t *client,
         return ESP_FAIL;
     }
 
-#if (1 == XPLRMQTTWIFI_LOG_ACTIVE && 1 == XPLR_HPGLIB_LOG_ENABLED)
-    xplrLog_error_t logErr;
-    logErr = xplrLogInit(&mqttLog,
-                         XPLR_LOG_DEVICE_INFO,
-                         "/wifimqtt.log",
-                         200,
-                         XPLR_SIZE_MB);
-    if (logErr != XPLR_LOG_OK) {
-        mqttLog.logEnable = false;
-    } else {
-        mqttLog.logEnable = true;
-    }
-    client->logCfg = &mqttLog;
-#endif
-
     /**
      * This is not the most efficient way to do it but for now
      * since ringbuff item has a data capacity of XPLR_MQTTWIFI_PAYLOAD_DATA_LEN
@@ -168,6 +158,7 @@ esp_err_t xplrMqttWifiInitClient(xplrMqttWifiClient_t *client,
         return ESP_FAIL;
     }
     /*INDENT-ON*/
+
     return ESP_OK;
 }
 
@@ -392,6 +383,11 @@ esp_err_t xplrMqttWifiSubscribeToTopic(xplrMqttWifiClient_t *client,
         return ESP_FAIL;
     }
 
+    /* Workaround for zero length topic when plan is LBAND */
+    if (strlen(topic) == 0) {
+        return ESP_OK;
+    }
+
     esp_ret = xplrMqttWifiCheckQosLvl(qos);
     if (esp_ret != ESP_OK) {
         XPLRMQTTWIFI_CONSOLE(E, "QoS level [%d] is out of bounds!", qos);
@@ -407,6 +403,7 @@ esp_err_t xplrMqttWifiSubscribeToTopic(xplrMqttWifiClient_t *client,
 
     XPLRMQTTWIFI_CONSOLE(D, "Successfully subscribed to topic: %s with id: %d", topic, return_id);
     xplrMqttWifiToNextState(&client->ucd, XPLR_MQTTWIFI_STATE_SUBSCRIBED);
+    mqttFeedWatchdog(client);
 
     return ESP_OK;
 }
@@ -573,7 +570,7 @@ esp_err_t xplrMqttWifiUnsubscribeFromTopic(xplrMqttWifiClient_t *client, char *t
     }
 
     XPLRMQTTWIFI_CONSOLE(D, "Successfully unsubscribed from topic: %s with id: %d", topic, return_id);
-    return ESP_FAIL;
+    return ESP_OK;
 }
 
 void xplrMqttWifiDisconnect(xplrMqttWifiClient_t *client)
@@ -581,12 +578,16 @@ void xplrMqttWifiDisconnect(xplrMqttWifiClient_t *client)
     xplrMqttWifiUpdateNextState(&client->ucd, XPLR_MQTTWIFI_STATE_DISCONNECT_REQUESTED);
 }
 
-void xplrMqttWifiHardDisconnect(xplrMqttWifiClient_t *client)
+esp_err_t xplrMqttWifiHardDisconnect(xplrMqttWifiClient_t *client)
 {
     esp_ret = xplrMqttWifiDestroyConnection(client);
     if (esp_ret == ESP_OK) {
         xplrMqttWifiUpdateNextState(&client->ucd, XPLR_MQTTWIFI_STATE_DISCONNECTED_OK);
+    } else {
+        //do nothing
     }
+
+    return esp_ret;
 }
 
 void xplrMqttWifiReconnect(xplrMqttWifiClient_t *client)
@@ -599,8 +600,11 @@ xplrMqttWifiGetItemError_t xplrMqttWifiReceiveItem(xplrMqttWifiClient_t *client,
 {
     uint32_t cntWaiting;
     xplrMqttWifiRingBuffItem_t *item;
+    bool wdgTrigger;
 
     vRingbufferGetInfo(client->ucd.xRingbuffer, NULL, NULL, NULL, NULL, &cntWaiting);
+    /* Connection is alive if the watchdog is not triggered */
+    wdgTrigger = mqttCheckWatchdog(client);
 
     if (cntWaiting > 0) {
         /**
@@ -617,6 +621,7 @@ xplrMqttWifiGetItemError_t xplrMqttWifiReceiveItem(xplrMqttWifiClient_t *client,
                     memcpy(&client->ucd.prevItem, item, sizeof(xplrMqttWifiRingBuffItem_t));
                     reply->dataLength = item->dataLength;
                     vRingbufferReturnItem(client->ucd.xRingbuffer, (void *)item);
+                    mqttFeedWatchdog(client);
                     return XPLR_MQTTWIFI_ITEM_OK;
                 } else {
                     XPLRMQTTWIFI_CONSOLE(E, "MQTT get buffer is not big enough. Cannot copy item.");
@@ -651,6 +656,7 @@ xplrMqttWifiGetItemError_t xplrMqttWifiReceiveItem(xplrMqttWifiClient_t *client,
                         memcpy(&client->ucd.prevItem, item, sizeof(xplrMqttWifiRingBuffItem_t));
                         reply->dataLength += item->dataLength;
                         vRingbufferReturnItem(client->ucd.xRingbuffer, (void *)item);
+                        mqttFeedWatchdog(client);
                         return XPLR_MQTTWIFI_ITEM_OK;
                     } else {
                         XPLRMQTTWIFI_CONSOLE(E, "MQTT get buffer is not big enough. Cannot copy item.");
@@ -689,54 +695,67 @@ xplrMqttWifiGetItemError_t xplrMqttWifiReceiveItem(xplrMqttWifiClient_t *client,
             XPLRMQTTWIFI_CONSOLE(W, "NULL item from RingBuff");
             return XPLR_MQTTWIFI_ITEM_ERROR;
         }
+    } else if (wdgTrigger) {
+        xplrMqttWifiHardDisconnect(client);
+    } else {
+        //Do nothing
     }
 
     return XPLR_MQTTWIFI_ITEM_NOITEM;
 }
 
-bool xplrMqttWifiHaltLogModule(xplrMqttWifiClient_t *client)
+int8_t xplrMqttWifiInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRMQTTWIFI_LOG_ACTIVE)
-    if(client->logCfg != NULL) {
-       client->logCfg->logEnable = false;
-       ret = true;
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_MQTTWIFI_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
     } else {
-        /* log module is not initialized thus do nothing and return false*/
-        ret = false;
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
-bool xplrMqttWifiStartLogModule(xplrMqttWifiClient_t *client)
+esp_err_t xplrMqttWifiStopLogModule(void)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRMQTTWIFI_LOG_ACTIVE)
+    esp_err_t ret;
     xplrLog_error_t logErr;
-    if(client->logCfg != NULL) {
-        client->logCfg->logEnable = true;
-        ret = true;
-    } else {   
-        logErr = xplrLogInit(&mqttLog,
-                             XPLR_LOG_DEVICE_INFO,
-                             "/wifimqtt.log",
-                             200,
-                             XPLR_SIZE_MB);
-        if (logErr != XPLR_LOG_OK) {
-            mqttLog.logEnable = false;
-        } else {
-            mqttLog.logEnable = true;
-        }
-        client->logCfg = &mqttLog;
-        ret = mqttLog.logEnable;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
     }
-#else 
-    ret = false;
-#endif
+
     return ret;
+}
+
+void xplrMqttWifiFeedWatchdog(xplrMqttWifiClient_t *client)
+{
+    (void) mqttFeedWatchdog(client);
 }
 
 /* ----------------------------------------------------------------
@@ -754,7 +773,9 @@ static esp_err_t xplrMqttWifiEventHandlerCb(esp_mqtt_event_handle_t event)
         case MQTT_EVENT_CONNECTED:
             xplrMqttWifiUpdateNextState(ucd, XPLR_MQTTWIFI_STATE_CONNECTED);
             ucd->isConnected = true;
+#if (XPLR_CI_CONSOLE_ACTIVE != 1)
             XPLRMQTTWIFI_CONSOLE(D, "MQTT event connected!");
+#endif
             break;
 
         case MQTT_EVENT_DISCONNECTED:
@@ -763,15 +784,21 @@ static esp_err_t xplrMqttWifiEventHandlerCb(esp_mqtt_event_handle_t event)
                 xplrMqttWifiUpdateNextState(ucd, XPLR_MQTTWIFI_STATE_DISCONNECTED_OK);
             }
             ucd->isConnected = false;
+#if (XPLR_CI_CONSOLE_ACTIVE != 1)
             XPLRMQTTWIFI_CONSOLE(D, "MQTT event disconnected!");
+#endif
             break;
 
         case MQTT_EVENT_SUBSCRIBED:
+#if (XPLR_CI_CONSOLE_ACTIVE != 1)
             XPLRMQTTWIFI_CONSOLE(D, "MQTT event subscribed!");
+#endif
             break;
 
         case MQTT_EVENT_UNSUBSCRIBED:
+#if (XPLR_CI_CONSOLE_ACTIVE != 1)
             XPLRMQTTWIFI_CONSOLE(D, "MQTT event unsubscribed!");
+#endif
             break;
 
         case MQTT_EVENT_PUBLISHED:
@@ -786,7 +813,9 @@ static esp_err_t xplrMqttWifiEventHandlerCb(esp_mqtt_event_handle_t event)
             break;
 
         case MQTT_EVENT_ERROR:
+#if (XPLR_CI_CONSOLE_ACTIVE != 1)
             XPLRMQTTWIFI_CONSOLE(E, "MQTT event error!");
+#endif
             xplrMqttWifiUpdateNextStateToError(ucd);
             break;
 
@@ -794,6 +823,18 @@ static esp_err_t xplrMqttWifiEventHandlerCb(esp_mqtt_event_handle_t event)
             break;
     }
     return ESP_OK;
+}
+
+esp_err_t xplrMqttWifiStopTasks(xplrMqttWifiClient_t *client)
+{
+    esp_ret = esp_mqtt_client_stop(client->handler);
+    if (esp_ret == ESP_OK) {
+        XPLRMQTTWIFI_CONSOLE(W, "Error %d stopping mqtt client.", esp_ret);
+    } else {
+        XPLRMQTTWIFI_CONSOLE(D, "Stopped mqtt client.");
+    }
+
+    return esp_ret;
 }
 
 /* ----------------------------------------------------------------
@@ -872,22 +913,22 @@ static esp_err_t xplrMqttWifiDestroyConnection(xplrMqttWifiClient_t *client)
 {
     if (client->handler == NULL) {
         XPLRMQTTWIFI_CONSOLE(W, "Client handler seems to be NULL! Maybe client has not been initialized.");
-        return ESP_FAIL;
+        esp_ret = ESP_FAIL;
+    } else {
+        esp_ret = esp_mqtt_client_stop(client->handler);
+        if (esp_ret == ESP_OK) {
+            esp_ret = esp_mqtt_client_destroy(client->handler);
+            if (esp_ret == ESP_OK) {
+                vRingbufferDelete(client->ucd.xRingbuffer);
+            } else {
+                // do nothing
+            }
+        } else {
+            //do nothing
+        }
     }
 
-    esp_ret = esp_mqtt_client_stop(client->handler);
-    if (esp_ret != ESP_OK || esp_ret != ESP_ERR_INVALID_ARG) {
-        return esp_ret;
-    }
-
-    esp_ret = esp_mqtt_client_destroy(client->handler);
-    if (esp_ret != ESP_OK || esp_ret != ESP_ERR_INVALID_ARG) {
-        return esp_ret;
-    }
-
-    vRingbufferDelete(client->ucd.xRingbuffer);
-
-    return ESP_OK;
+    return esp_ret;
 }
 
 static void xplrMqttWifiUpdateNextState(xplrMqttWifiFsmUCD_t *ucd,
@@ -928,4 +969,39 @@ static esp_err_t xplrMqttWifiCheckQosLvl(xplrMqttWifiQosLvl_t qosLvl)
     }
 
     return ESP_OK;
+}
+
+static void mqttFeedWatchdog(xplrMqttWifiClient_t *client)
+{
+    if (client != NULL) {
+        if (client->ucd.enableWatchdog) {
+            client->ucd.lastMsgTime = esp_timer_get_time();
+        } else {
+            //Do nothing
+        }
+    }
+}
+
+static bool mqttCheckWatchdog(xplrMqttWifiClient_t *client)
+{
+    bool ret;
+
+    if (client != NULL) {
+        if (client->ucd.enableWatchdog) {
+            if (MICROTOSEC(esp_timer_get_time() - client->ucd.lastMsgTime) >= MQTT_MESSAGE_TIMEOUT) {
+                ret = true;
+                XPLRMQTTWIFI_CONSOLE(E, "Watchdog triggered! No MQTT messages for [%d] seconds",
+                                     MQTT_MESSAGE_TIMEOUT);
+            } else {
+                ret = false;
+            }
+        } else {
+            ret = false;
+        }
+
+    } else {
+        ret = false;
+    }
+
+    return ret;
 }

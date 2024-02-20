@@ -24,6 +24,7 @@
 
 #include "./../../xplr_hpglib_cfg.h"
 #include "xplr_com_types.h"
+#include "xplr_common.h"
 
 /** @file
  * @brief This header file defines the general communication service API,
@@ -82,6 +83,40 @@ xplrCom_error_t xplrComCellDeInit(int8_t dvcProfile);
  * @return ubxlib device handler (uDeviceHandle_t).
  */
 uDeviceHandle_t xplrComGetDeviceHandler(int8_t dvcProfile);
+
+/**
+ * @brief Function that sets a greeting message to the LARA module
+ * (a message that is sent by the module when powered on).
+ * This is useful to be able to get alerted in case of a random or
+ * unexpected reboot of the module.
+ *
+ * @param dvcProfile        device profile to set the greeting message.
+ * @param pStr              the message to be set (cannot be greater than U_CELL_CFG_GREETING_CALLBACK_MAX_LEN_BYTES, excluding the NULL-terminator).
+ * @param pCallback         the callback; use NULL to remove a previous callback.
+ * @param pCallbackParam    user parameter which will be passed to pCallback as its second parameter; may be NULL.
+ * @return                  XPLR_COM_OK on success, XPLR_COM_ERROR otherwise.
+*/
+xplrCom_error_t xplrComSetGreetingMessage(int8_t dvcProfile,
+                                          const char *pStr,
+                                          void (*pCallback)(uDeviceHandle_t, void *),
+                                          void *pCallbackParam);
+
+/**
+ * @brief Function that performs a full reboot to the module. Network gets disconnected and after the operation,
+ *        the module is ready for use.
+ *
+ * @param dvcProfile        device profile to perform the reboot.
+ * @return                  XPLR_COM_OK on success, XPLR_COM_ERROR otherwise.
+*/
+xplrCom_error_t xplrComPowerResetHard(int8_t dvcProfile);
+
+/**
+ * @brief Function that checks if a reboot of the module is controlled (was performed by xplrComPowerResetHard).
+ *
+ * @param dvcProfile        device profile to check for controlled reboot.
+ * @return                  true if the reboot was controlled, false if it was an unexpected reboot.
+*/
+bool xplrComIsRstControlled(int8_t dvcProfile);
 
 /**
  * @brief FSM handling the device connection to the network.
@@ -171,20 +206,21 @@ void xplrComCellPowerResume(int8_t dvcProfile);
 xplrCom_error_t xplrComCellGetDeviceInfo(int8_t dvcProfile, char *model, char *fw, char *imei);
 
 /**
- * @brief Function that halts the logging of the com module
- * 
- * @param dvcProfile device profile id. Stored in xplrCom_cell_config_t
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrComHaltLogModule(int8_t dvcProfile);
+int8_t xplrComCellInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the com module
- * 
- * @param dvcProfile device profile id. Stored in xplrCom_cell_config_t
- * @return true if succeeded to start the module or false otherwise
+ * @brief   Function that stops logging of the module.
+ *
+ * @return  ESP_OK on success, ESP_FAIL otherwise.
 */
-bool xplrComStartLogModule(int8_t dvcProfile);
+esp_err_t xplrComCellStopLogModule(void);
 
 #ifdef __cplusplus
 }

@@ -28,6 +28,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "./../../hpglib/xplr_hpglib_cfg.h"
+#include "./../../hpglib/src/common/xplr_common.h"
 #include "board.h"
 
 /* ----------------------------------------------------------------
@@ -96,13 +97,14 @@ static xplr_board_error_t board_deconfig_default_gpios(board_gpio_config_t gpio_
 
 xplr_board_error_t xplrBoardInit(void)
 {
-    esp_err_t err[3];
+    esp_err_t err[4];
     xplr_board_error_t ret;
 
     err[0] = board_config_default_gpios(BOARD_GPIO_CONFIG_LEDS);
     err[1] = board_config_default_gpios(BOARD_GPIO_CONFIG_LTE);
     err[2] = board_config_default_gpios(BOARD_GPIO_CONFIG_SD);
-    for (int i = 0; i < 3; i++) {
+    err[3] = xplrSetDeviceMacToUblox();
+    for (int i = 0; i < 4; i++) {
         if (err[i] != ESP_OK) {
             ret = XPLR_BOARD_ERROR;
             break;
@@ -183,9 +185,9 @@ xplr_board_error_t xplrBoardSetPower(xplr_board_peripheral_id_t id, bool on)
     switch (id) {
         case XPLR_PERIPHERAL_LTE_ID:
             if (!on) {
-                // send power off pulse (>3100ms)
+                // send power off pulse (>1500ms)
                 err[0] = gpio_set_level(BOARD_IO_LTE_PWR_ON, 1);
-                vTaskDelay(3100 / portTICK_PERIOD_MS);
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
                 err[1] = gpio_set_level(BOARD_IO_LTE_PWR_ON, 0);
                 for (int i = 0; i < 2; i++) {
                     if (err[i] != ESP_OK) {
@@ -237,14 +239,14 @@ xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode)
 
     switch (mode) {
         case XPLR_BOARD_LED_OFF:
-            err = gpio_set_level(BOARD_IO_LED, 1);
+            err = gpio_set_level(BOARD_IO_LED, 0);
             if (err != ESP_OK) {
                 ret = XPLR_BOARD_ERROR;
                 break;
             } else {
                 ret = XPLR_BOARD_ERROR_OK;
             }
-            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED On failed", ret);
+            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED Off failed", ret);
             break;
         case XPLR_BOARD_LED_ON:
             err = gpio_set_level(BOARD_IO_LED, 1);
@@ -265,7 +267,7 @@ xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode)
             } else {
                 ret = XPLR_BOARD_ERROR_OK;
             }
-            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED On failed", ret);
+            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED Toggle failed", ret);
             break;
 
         default:

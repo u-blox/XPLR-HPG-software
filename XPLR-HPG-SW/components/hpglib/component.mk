@@ -1,3 +1,3 @@
 COMPONENT_ADD_INCLUDEDIRS = src
 COMPONENT_SRCDIRS = src
-COMPONENT_DEPENDS = ubxlib json fatfs 
+COMPONENT_DEPENDS = ubxlib json fatfs ubx_otp

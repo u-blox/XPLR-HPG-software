@@ -38,6 +38,7 @@
 #include "driver/gpio.h"
 #include "cJSON.h"
 #include "xplr_wifi_starter.h"
+#include "xplr_wifi_webserver.h"
 #include "xplr_mqtt.h"
 #include "mqtt_client.h"
 #include "xplr_common.h"
@@ -64,23 +65,17 @@
 #define APP_PRINT_IMU_DATA         0U /* Disables/Enables imu data printing*/
 #define APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
 #define APP_SD_LOGGING_ENABLED     1U /* used to log the debug messages to the sd card. Set to 1 for enabling*/
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
 #if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_AND_PRINT, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_PRINT_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_CONSOLE(tag, message, ...)\
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...)XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
+
 
 #define MAJOR_APP_VER 1
 #define MINOR_APP_VER 0
@@ -96,6 +91,8 @@
 #define APP_FACTORY_MODE_BTN        (BOARD_IO_BTN1)                 /* Button for factory reset */
 #define APP_FACTORY_MODE_TRIGGER    (5U)                            /* Factory reset button press duration in sec */
 #define APP_DEVICE_OFF_MODE_TRIGGER (APP_FACTORY_MODE_TRIGGER - 2U) /* Device off press duration in sec */
+#define APP_INACTIVITY_TIMEOUT      (30)                            /* Time in seconds to trigger an inactivity timeout and cause a restart */
+#define APP_RESTART_ON_ERROR        (1U)                            /* Trigger soft reset if device in error state */
 #define APP_SD_DETECT_UPDATE_PERIOD (1U)                            /* Seconds to update the SD detect pin value */
 #if 1 == APP_PRINT_IMU_DATA
 #define APP_DEADRECK_PRINT_PERIOD   (10U)                           /* Seconds to print dead reckoning */
@@ -105,9 +102,40 @@
  * TYPES
  * -------------------------------------------------------------- */
 
+typedef union appLog_Opt_type {
+    struct {
+        uint8_t appLog           : 1;
+        uint8_t nvsLog           : 1;
+        uint8_t mqttLog          : 1;
+        uint8_t gnssLog          : 1;
+        uint8_t gnssAsyncLog     : 1;
+        uint8_t lbandLog         : 1;
+        uint8_t locHelperLog     : 1;
+        uint8_t thingstreamLog   : 1;
+        uint8_t wifiStarterLog   : 1;
+        uint8_t wifiWebserverLog : 1;
+    } singleLogOpts;
+    uint16_t value;
+} appLog_Opt_t;
+
+typedef struct appLog_type {
+    appLog_Opt_t    logOptions;
+    int8_t          appLogIndex;
+    int8_t          nvsLogIndex;
+    int8_t          mqttLogIndex;
+    int8_t          gnssLogIndex;
+    int8_t          gnssAsyncLogIndex;
+    int8_t          lbandLogIndex;
+    int8_t          locHelperLogIndex;
+    int8_t          thingstreamLogIndex;
+    int8_t          wifiStarterLogIndex;
+    int8_t          wifiWebserverLogIndex;
+} appLog_t;
+
 /* HPG related data vars */
 typedef struct appHpg_type {
     xplrGnssDeviceCfg_t gnssConfig;     /**< GNSS config struct */
+    uint64_t gnssLastAction;
     xplrLbandDeviceCfg_t lbandConfig;   /**< LBAND config struct */
     xplrLbandRegion_t lbandRegion;
     uint32_t lbandFrequency;
@@ -127,9 +155,14 @@ static const char mqttHost[] = "mqtts://pp.services.u-blox.com";
 static const char mqttTopicKeysIp[] = "/pp/ubx/0236/ip";
 static const char mqttTopicCorrectionDataEuIp[] = "/pp/ip/eu";
 static const char mqttTopicCorrectionDataUsIp[] = "/pp/ip/us";
+static const char mqttTopicCorrectionDataKrIp[] = "/pp/ip/kr";
+static const char mqttTopicCorrectionDataAuIp[] = "/pp/ip/au";
+static const char mqttTopicCorrectionDataJpIp[] = "/pp/ip/jp";
 static const char mqttTopicKeysLband[] = "/pp/ubx/0236/Lb";
 static const char mqttTopicCorrectionDataEuLband[] = "/pp/Lb/eu";
 static const char mqttTopicCorrectionDataUsLband[] = "/pp/Lb/us";
+static const char mqttTopicCorrectionDataAuLband[] = "/pp/Lb/au";
+static const char mqttTopicCorrectionDataJpLband[] = "/pp/Lb/jp";
 static const char mqttTopicFrequenciesLband[] = "/pp/frequencies/Lb";
 
 /*
@@ -157,26 +190,14 @@ xplrMqttWifiPayload_t mqttMessage = {
     .dataLength = 0,
     .maxDataLength = APP_MQTT_PAYLOAD_BUF_SIZE
 };
-/*INDENT-OFF*/
-/**
- * Static log configuration struct and variables
- */
-#if (1 == APP_SD_LOGGING_ENABLED)
-static xplrLog_t appLog, errorLog;
-static char appBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
-static char appLogFilename[] = "/APPLOG.TXT";               /**< Follow the same format if changing the filename */
-static char errorLogFilename[] = "/ERRORLOG.TXT";           /**< Follow the same format if changing the filename */
-static uint8_t logFileMaxSize = 100;                        /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U) */
-static xplrLog_size_t logFileMaxSizeType = XPLR_SIZE_MB;    /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB) */
-static bool isLogInitialized = false;                       /**< Flag to check if logging module is initialized */
-static bool cardDetect = false;
-#endif
-/*INDENT-ON*/
+
 /*
  * MQTT client config and handler
  */
 static esp_mqtt_client_config_t mqttClientConfig;
 static xplrMqttWifiClient_t mqttClient;
+static xplrMqttWifiGetItemError_t xplrMqttWifiErr;
+static bool receivedMqttData = false;
 
 /**
  * XPLR NVS struct pointer
@@ -185,11 +206,35 @@ xplrNvs_t nvs;
 
 appHpg_t hpg;
 
+/**
+ * Static log configuration struct and variables
+ */
+
+static appLog_t appLogCfg = {
+    .logOptions.value = ~0, // All modules selected to log
+    .appLogIndex = -1,
+    .nvsLogIndex = -1,
+    .mqttLogIndex = -1,
+    .gnssLogIndex = -1,
+    .gnssAsyncLogIndex = -1,
+    .lbandLogIndex = -1,
+    .locHelperLogIndex = -1,
+    .thingstreamLogIndex = -1,
+    .wifiStarterLogIndex = -1,
+    .wifiWebserverLogIndex = -1
+};
+
+#if (APP_SD_LOGGING_ENABLED == 1)
+static bool cardDetect = false;
+#endif
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
-static void appInitLog(void);
+#if (APP_SD_LOGGING_ENABLED == 1)
+static esp_err_t appInitLogging(void);
+#endif
 static esp_err_t appInitBoard(void);
 static esp_err_t appInitWiFi(void);
 static esp_err_t appInitNvs(void);
@@ -209,12 +254,13 @@ static esp_err_t appPrintImuData(uint8_t periodSecs);
 static char *appTimeFromBoot(void);
 static char *appTimeToFix();
 static void appVersionUpdate();
-static void appDeInitLog(void);
 static void appCheckLogOption(uint8_t periodSecs);
 static void appCheckDrOption(void);
 static void appCheckDrCalibrationStatus(char *status);
+static bool appCheckGnssInactivity(void);
 static void appUpdateWebserverInfo(char *sd, char *dr, char *drCalibration);
 static void appHaltExecution(void);
+static void appTerminate(void);
 static void appFactoryResetTask(void *arg);
 
 void app_main(void)
@@ -222,27 +268,41 @@ void app_main(void)
     bool coldStart = true;
     xplrWifiStarterFsmStates_t wifiState;
 
-    appInitLog();
     bool isMqttInitialized = false;
     xplrMqttWifiClientStates_t  mqttState;
     esp_err_t mqttRes[APP_MAX_TOPIC_CNT];
     esp_err_t brokerErr = ESP_FAIL;
     char *region = NULL;
     char *plan = NULL;
+    bool isCorrData = false;
 
     esp_err_t gnssErr;
     esp_err_t lbandErr;
+#if (APP_SD_LOGGING_ENABLED == 1)
+    esp_err_t logErr;
+#endif
+
+    static bool mqttWifiConnectedInitial = true;
+    static bool mqttGetItemInitial = true;
 
     int8_t tVal = -1;
     uint32_t mqttStats[1][2] = { {0, 0} }; //num of msgs and total bytes received
     char mqttStatsStr[64];
 
-    hpg.lbandRegion = XPLR_LBAND_FREQUENCY_EU; //assign a defaul value to LBAND region.
+    hpg.lbandRegion = XPLR_LBAND_FREQUENCY_EU; //assign a default value to LBAND region.
 
     char sdInfo[256] = {0};
     char drInfo[32] =  {0};
     char drCalibrationInfo[32] =  {0};
 
+#if (APP_SD_LOGGING_ENABLED == 1)
+    logErr = appInitLogging();
+    if (logErr != ESP_OK) {
+        APP_CONSOLE(E, "Logging failed to initialize");
+    } else {
+        APP_CONSOLE(I, "Logging initialized!");
+    }
+#endif
     appInitBoard();
     appInitWiFi();
     appInitNvs();
@@ -261,7 +321,6 @@ void app_main(void)
         appRunHpgFsm();
         xplrWifiStarterFsm();
         wifiState = xplrWifiStarterGetCurrentFsmState();
-
         if ((wifiState == XPLR_WIFISTARTER_STATE_CONNECT_OK) && (!isMqttInitialized)) {
             /*
             * We have connected to user's AP thus all config data should be available.
@@ -294,6 +353,10 @@ void app_main(void)
 
             switch (mqttState) {
                 case XPLR_MQTTWIFI_STATE_CONNECTED:
+                    if (mqttWifiConnectedInitial) {
+                        XPLR_CI_CONSOLE(508, "OK");
+                        mqttWifiConnectedInitial = false;
+                    }
                     /* ok, we are connected to the broker. Lets subscribe to correction topics */
                     region = xplrWifiStarterWebserverDataGet(XPLR_WIFISTARTER_SERVERDATA_CLIENTREGION);
                     plan = xplrWifiStarterWebserverDataGet(XPLR_WIFISTARTER_SERVERDATA_CLIENTPLAN);
@@ -309,7 +372,20 @@ void app_main(void)
                             mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
                                                                       (char *)mqttTopicCorrectionDataUsIp,
                                                                       XPLR_MQTTWIFI_QOS_LVL_0);
+                        } else if (memcmp(region, "KR", strlen("KR")) == 0) {
+                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
+                                                                      (char *)mqttTopicCorrectionDataKrIp,
+                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
+                        } else if (memcmp(region, "AU", strlen("AU")) == 0) {
+                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
+                                                                      (char *)mqttTopicCorrectionDataAuIp,
+                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
+                        } else if (memcmp(region, "JP", strlen("JP")) == 0) {
+                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
+                                                                      (char *)mqttTopicCorrectionDataJpIp,
+                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
                         } else {
+                            APP_CONSOLE(E, "Unsupported region");
                             mqttRes[1] = ESP_FAIL;
                         }
                     } else if (memcmp(plan, "IP+LBAND", strlen(plan)) == 0) {
@@ -324,7 +400,16 @@ void app_main(void)
                             mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
                                                                       (char *)mqttTopicCorrectionDataUsLband,
                                                                       XPLR_MQTTWIFI_QOS_LVL_0);
+                        } else if (memcmp(region, "AU", strlen("AU")) == 0) {
+                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
+                                                                      (char *)mqttTopicCorrectionDataAuLband,
+                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
+                        } else if (memcmp(region, "JP", strlen("JP")) == 0) {
+                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
+                                                                      (char *)mqttTopicCorrectionDataJpLband,
+                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
                         } else {
+                            APP_CONSOLE(E, "Unsupported region");
                             mqttRes[1] = ESP_FAIL;
                         }
                     } else if (memcmp(plan, "LBAND", strlen(plan)) == 0) {
@@ -360,16 +445,23 @@ void app_main(void)
                     if (brokerErr != ESP_OK) {
                         APP_CONSOLE(E, "Subscription plan is %s.", plan);
                         APP_CONSOLE(E, "Failed to subscribe to required topics. Correction data will not be available.");
+                        XPLR_CI_CONSOLE(509, "ERROR");
                     } else {
                         tVal = 1;
                         xplrWifiStarterWebserverDiagnosticsSet(XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED, (void *)&tVal);
                         APP_CONSOLE(D, "Subscription plan is %s.", plan);
                         APP_CONSOLE(D, "Subscribed to required topics successfully.");
+                        XPLR_CI_CONSOLE(509, "OK");
                     }
                     break;
                 case XPLR_MQTTWIFI_STATE_SUBSCRIBED:
                     /* check if we have a msg in any of the topics subscribed */
-                    if (xplrMqttWifiReceiveItem(&mqttClient, &mqttMessage) == XPLR_MQTTWIFI_ITEM_OK) {
+                    xplrMqttWifiErr = xplrMqttWifiReceiveItem(&mqttClient, &mqttMessage);
+                    if (xplrMqttWifiErr == XPLR_MQTTWIFI_ITEM_OK) {
+                        if (mqttGetItemInitial) {
+                            XPLR_CI_CONSOLE(510, "OK");
+                            mqttGetItemInitial = false;
+                        }
                         /* we have a message available. check origin of topic and fwd it to gnss */
                         mqttStats[0][0]++;
                         mqttStats[0][1] += mqttMessage.dataLength;
@@ -394,75 +486,92 @@ void app_main(void)
                                 if (gnssErr != ESP_OK) {
                                     APP_CONSOLE(E, "Failed to send decryption keys!");
                                     appHaltExecution();
+                                } else {
+                                    // Do nothing
                                 }
                             } else { //should be correction data
-                                if (strcmp(region, "EU") == 0) {
-                                    if (strcmp(mqttMessage.topic, mqttTopicCorrectionDataEuIp) == 0) {
-                                        hpg.gnssState = xplrGnssGetCurrentState(0);
-                                        if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
-                                            gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
-                                            if (gnssErr != ESP_OK) {
-                                                APP_CONSOLE(E, "Failed to send correction data!");
-                                            }
+                                if ((strcmp(region, "EU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataEuIp) == 0) ||
+                                    (strcmp(region, "US") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataUsIp) == 0) ||
+                                    (strcmp(region, "KR") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataKrIp) == 0) ||
+                                    (strcmp(region, "AU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataAuIp) == 0) ||
+                                    (strcmp(region, "JP") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataJpIp) == 0)) {
+                                    isCorrData = true;
+                                } else {
+                                    APP_CONSOLE(E, "Region selected not supported...");
+                                }
+
+                                if (isCorrData) {
+                                    hpg.gnssState = xplrGnssGetCurrentState(0);
+                                    if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                                        hpg.gnssLastAction = esp_timer_get_time();
+                                        gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
+                                        if (gnssErr != ESP_OK) {
+                                            APP_CONSOLE(E, "Failed to send correction data!");
+                                            XPLR_CI_CONSOLE(511, "ERROR");
                                         } else {
-                                            APP_CONSOLE(W, "GNSS not READY or in ERROR");
+                                            if (receivedMqttData == false) {
+                                                XPLR_CI_CONSOLE(511, "OK");
+                                                receivedMqttData = true;
+                                            }
                                         }
-                                    }
-                                } else if (strcmp(region, "US") == 0) {
-                                    if (strcmp(mqttMessage.topic, mqttTopicCorrectionDataUsIp) == 0) {
-                                        hpg.gnssState = xplrGnssGetCurrentState(0);
-                                        if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
-                                            gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
-                                            if (gnssErr != ESP_OK) {
-                                                APP_CONSOLE(E, "Failed to send correction data!");
-                                            }
-                                        } else {
-                                            APP_CONSOLE(W, "GNSS not READY or in ERROR");
+                                    } else {
+                                        APP_CONSOLE(W, "GNSS not READY or in ERROR");
+                                        if (appCheckGnssInactivity()) {
+                                            appTerminate();
                                         }
                                     }
                                 } else {
-                                    APP_CONSOLE(E, "Region selected not supported...");
+                                    // Do nothing
                                 }
                             }
                         } else if (memcmp(plan, "IP+LBAND", strlen(plan)) == 0) {
                             if (strcmp(mqttMessage.topic, mqttTopicKeysLband) == 0) {
                                 hpg.gnssState = xplrGnssGetCurrentState(0);
                                 if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                                    hpg.gnssLastAction = esp_timer_get_time();
                                     gnssErr = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
                                     if (gnssErr != ESP_OK) {
                                         APP_CONSOLE(E, "Failed to send decryption keys!");
                                         appHaltExecution();
                                     }
                                 } else {
+                                    if (appCheckGnssInactivity()) {
+                                        appTerminate();
+                                    }
                                     APP_CONSOLE(W, "GNSS not READY or in ERROR");
                                 }
                             } else { //should be correction data
-                                if (strcmp(region, "EU") == 0) {
-                                    if (strcmp(mqttMessage.topic, mqttTopicCorrectionDataEuLband) == 0) {
-                                        hpg.gnssState = xplrGnssGetCurrentState(0);
-                                        if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
-                                            gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
-                                            if (gnssErr != ESP_OK) {
-                                                APP_CONSOLE(E, "Failed to send correction data!");
-                                            }
+                                if ((strcmp(region, "EU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataEuLband) == 0) ||
+                                    (strcmp(region, "US") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataUsLband) == 0) ||
+                                    (strcmp(region, "AU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataAuLband) == 0) ||
+                                    (strcmp(region, "JP") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataJpLband) == 0)) {
+                                    isCorrData = true;
+                                } else {
+                                    APP_CONSOLE(E, "Region selected not supported...");
+                                }
+
+                                if (isCorrData) {
+                                    hpg.gnssState = xplrGnssGetCurrentState(0);
+                                    if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                                        hpg.gnssLastAction = esp_timer_get_time();
+                                        gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
+                                        if (gnssErr != ESP_OK) {
+                                            APP_CONSOLE(E, "Failed to send correction data!");
+                                            XPLR_CI_CONSOLE(511, "ERROR");
                                         } else {
-                                            APP_CONSOLE(W, "GNSS not READY or in ERROR");
+                                            if (receivedMqttData == false) {
+                                                XPLR_CI_CONSOLE(511, "OK");
+                                                receivedMqttData = true;
+                                            }
                                         }
-                                    }
-                                } else if (strcmp(region, "US") == 0) {
-                                    if (strcmp(mqttMessage.topic, mqttTopicCorrectionDataUsLband) == 0) {
-                                        hpg.gnssState = xplrGnssGetCurrentState(0);
-                                        if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
-                                            gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
-                                            if (gnssErr != ESP_OK) {
-                                                APP_CONSOLE(E, "Failed to send correction data!");
-                                            }
-                                        } else {
-                                            APP_CONSOLE(W, "GNSS not READY or in ERROR");
+                                    } else {
+                                        APP_CONSOLE(W, "GNSS not READY or in ERROR");
+                                        if (appCheckGnssInactivity()) {
+                                            appTerminate();
                                         }
                                     }
                                 } else {
-                                    APP_CONSOLE(E, "Region selected not supported...");
+                                    // Do nothing
                                 }
                             }
                         } else if (memcmp(plan, "LBAND", strlen(plan)) == 0) {
@@ -474,12 +583,16 @@ void app_main(void)
                             if (strcmp(mqttMessage.topic, mqttTopicKeysLband) == 0) {
                                 hpg.gnssState = xplrGnssGetCurrentState(0);
                                 if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                                    hpg.gnssLastAction = esp_timer_get_time();
                                     gnssErr = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
                                     if (gnssErr != ESP_OK) {
                                         APP_CONSOLE(E, "Failed to send decryption keys!");
                                         appHaltExecution();
                                     }
                                 } else {
+                                    if (appCheckGnssInactivity()) {
+                                        appTerminate();
+                                    }
                                     APP_CONSOLE(W, "GNSS not READY or in ERROR");
                                 }
                             } else { //should be lband frequency data
@@ -501,9 +614,13 @@ void app_main(void)
                             APP_CONSOLE(E, "Subscription plan %s not supported.", plan);
                             APP_CONSOLE(E, "Failed to send correction data!");
                         }
+                    } else if (xplrMqttWifiErr == XPLR_MQTTWIFI_ITEM_ERROR) {
+                        XPLR_CI_CONSOLE(510, "ERROR");
                     }
                     break;
-
+                case XPLR_MQTTWIFI_STATE_ERROR:
+                    XPLR_CI_CONSOLE(508, "ERROR");
+                    break;
                 default:
                     tVal = -1;
                     xplrWifiStarterWebserverDiagnosticsSet(XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED, (void *)&tVal);
@@ -521,6 +638,7 @@ void app_main(void)
         appTimeToFix();
         appCheckLogOption(APP_SD_DETECT_UPDATE_PERIOD);
         appCheckDrOption();
+
 #if 0
         /**
          * This part of code should be enabled in debugging, thus requires debug messages to be active
@@ -541,38 +659,108 @@ void app_main(void)
 /**
  * Initialize logging to the SD card
 */
-static void appInitLog(void)
+#if (APP_SD_LOGGING_ENABLED == 1)
+static esp_err_t appInitLogging(void)
 {
-#if (1 == APP_SD_LOGGING_ENABLED)
-    if (!isLogInitialized) {
-        xplrLog_error_t err = xplrLogInit(&errorLog,
-                                          XPLR_LOG_DEVICE_ERROR,
-                                          errorLogFilename,
-                                          logFileMaxSize,
-                                          logFileMaxSizeType);
-        if (err == XPLR_LOG_OK) {
-            errorLog.logEnable = true;
-            err = xplrLogInit(&appLog,
-                              XPLR_LOG_DEVICE_INFO,
-                              appLogFilename,
-                              logFileMaxSize,
-                              logFileMaxSizeType);
-        }
-        if (err == XPLR_LOG_OK) {
-            appLog.logEnable = true;
-            isLogInitialized = true;
-        } else {
-            appLog.logEnable = false;
-            errorLog.logEnable = false;
-            APP_CONSOLE(E, "Error initializing logging...");
-        }
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+
+    /* Configure the SD card */
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = ESP_FAIL;
     } else {
-        appLog.logEnable = false;
-        errorLog.logEnable = false;
-        APP_CONSOLE(W, "SD Logging is disabled, skipping log init");
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        /* A time window so that the card gets detected*/
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
+            ret = ESP_FAIL;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = ESP_FAIL;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = ESP_OK;
+            }
+        }
     }
-#endif
+
+    if (ret == ESP_OK) {
+        /* Start logging for each module (if selected in configuration) */
+        if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
+            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                "main_app.log",
+                                                XPLRLOG_FILE_SIZE_INTERVAL,
+                                                XPLRLOG_NEW_FILE_ON_BOOT);
+            if (appLogCfg.appLogIndex >= 0) {
+                APP_CONSOLE(D, "Application logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.nvsLog == 1) {
+            appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
+            if (appLogCfg.nvsLogIndex >= 0) {
+                APP_CONSOLE(D, "NVS logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.mqttLog == 1) {
+            appLogCfg.mqttLogIndex = xplrMqttWifiInitLogModule(NULL);
+            if (appLogCfg.mqttLogIndex >= 0) {
+                APP_CONSOLE(D, "MQTT WiFi logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.gnssLog == 1) {
+            appLogCfg.gnssLogIndex = xplrGnssInitLogModule(NULL);
+            if (appLogCfg.gnssLogIndex >= 0) {
+                APP_CONSOLE(D, "GNSS logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.gnssAsyncLog == 1) {
+            appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(NULL);
+            if (appLogCfg.gnssAsyncLogIndex >= 0) {
+                APP_CONSOLE(D, "GNSS Async logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.lbandLog == 1) {
+            appLogCfg.lbandLogIndex = xplrLbandInitLogModule(NULL);
+            if (appLogCfg.lbandLogIndex >= 0) {
+                APP_CONSOLE(D, "LBAND logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.locHelperLog == 1) {
+            appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(NULL);
+            if (appLogCfg.locHelperLogIndex >= 0) {
+                APP_CONSOLE(D, "Location Helper Service logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.thingstreamLog == 1) {
+            appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(NULL);
+            if (appLogCfg.thingstreamLogIndex >= 0) {
+                APP_CONSOLE(D, "Thingstream logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.wifiStarterLog == 1) {
+            appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(NULL);
+            if (appLogCfg.wifiStarterLogIndex >= 0) {
+                APP_CONSOLE(D, "WiFi Starter logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.wifiWebserverLog == 1) {
+            appLogCfg.wifiWebserverLogIndex = xplrWifiWebserverInitLogModule(NULL);
+            if (appLogCfg.wifiWebserverLogIndex >= 0) {
+                APP_CONSOLE(D, "WiFi Webserver logging instance initialized");
+            }
+        }
+    }
+
+    return ret;
 }
+#endif
 
 /*
  * Initialize XPLR-HPG kit using its board file
@@ -586,9 +774,11 @@ static esp_err_t appInitBoard(void)
     ret = xplrBoardInit();
     if (ret != ESP_OK) {
         APP_CONSOLE(E, "Board initialization failed!");
+        XPLR_CI_CONSOLE(501, "ERROR");
         appHaltExecution();
     } else {
         /* config boot0 pin as input */
+        XPLR_CI_CONSOLE(501, "OK");
         io_conf.pin_bit_mask = 1ULL << APP_FACTORY_MODE_BTN;
         io_conf.mode = GPIO_MODE_INPUT;
         io_conf.pull_up_en = 1;
@@ -601,6 +791,7 @@ static esp_err_t appInitBoard(void)
         xTaskCreate(appFactoryResetTask, "factoryRstTask", 2 * 2048, NULL, 10, NULL);
         APP_CONSOLE(D, "Boot0 pin configured as button OK");
     }
+
     return ret;
 }
 
@@ -645,6 +836,7 @@ static esp_err_t appInitNvs(void)
 static void appConfigGnssSettings(xplrGnssDeviceCfg_t *cfg)
 {
     cfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
+    cfg->hw.dvcType = (xplrLocDeviceType_t)CONFIG_GNSS_MODULE;
     cfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
     cfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
     cfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
@@ -797,6 +989,9 @@ static void appWaitGnssReady(void)
         } else {
             xplrGnssFsm(0);
             hpg.gnssState = xplrGnssGetCurrentState(0);
+            if (appCheckGnssInactivity()) {
+                appTerminate();
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(25));  /* A window so other tasks can run */
@@ -818,16 +1013,20 @@ static void appRunHpgFsm(void)
             }
             break;
         case XPLR_GNSS_STATE_DEVICE_READY:
+            hpg.gnssLastAction = esp_timer_get_time();
             if (hpg.isLbandInit && !xplrLbandIsSendCorrectionDataAsyncRunning(0)) {
                 appRestartLbandAsync();
             }
             break;
         case XPLR_GNSS_STATE_ERROR:
             APP_CONSOLE(E, "GNSS in error state");
-            appHaltExecution();
+            appTerminate();
             break;
 
         default:
+            if (appCheckGnssInactivity()) {
+                appTerminate();
+            }
             break;
     }
 }
@@ -855,6 +1054,7 @@ static void appMqttInit(void)
     mqttClientConfig.client_key_pem = xplrWifiStarterWebserverDataGet(
                                           XPLR_WIFISTARTER_SERVERDATA_CLIENTKEY);
     mqttClientConfig.cert_pem = xplrWifiStarterWebserverDataGet(XPLR_WIFISTARTER_SERVERDATA_ROOTCA);
+
     mqttClientConfig.user_context = &mqttClient.ucd;
 
     /**
@@ -870,24 +1070,38 @@ static esp_err_t appPrintLocation(uint8_t periodSecs)
 {
     static uint64_t prevTime = 0;
     esp_err_t ret;
+    static bool locRTKFirstTime = true;
 
     hpg.gnssState = xplrGnssGetCurrentState(0);
     if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+        hpg.gnssLastAction = esp_timer_get_time();
         if ((MICROTOSEC(esp_timer_get_time() - prevTime) >= periodSecs) &&
             xplrGnssHasMessage(0)) {
             ret = xplrGnssGetLocationData(0, &hpg.location);
             if (ret != ESP_OK) {
                 APP_CONSOLE(W, "Could not get gnss location data!");
+                XPLR_CI_CONSOLE(512, "ERROR");
             } else {
+                if (locRTKFirstTime) {
+                    if ((hpg.location.locFixType == XPLR_GNSS_LOCFIX_FLOAT_RTK) ||
+                        (hpg.location.locFixType == XPLR_GNSS_LOCFIX_FIXED_RTK)) {
+                        locRTKFirstTime = false;
+                        XPLR_CI_CONSOLE(10, "OK");
+                    }
+                }
                 ret = xplrGnssPrintLocationData(&hpg.location);
                 if (ret != ESP_OK) {
                     APP_CONSOLE(W, "Could not print gnss location data!");
+                    XPLR_CI_CONSOLE(512, "ERROR");
+                } else {
+                    XPLR_CI_CONSOLE(512, "OK");
                 }
             }
 
             ret = xplrGnssPrintGmapsLocation(0);
             if (ret != ESP_OK) {
                 APP_CONSOLE(W, "Could not print Gmaps location!");
+                XPLR_CI_CONSOLE(512, "ERROR");
             }
 
             prevTime = esp_timer_get_time();
@@ -896,7 +1110,9 @@ static esp_err_t appPrintLocation(uint8_t periodSecs)
         }
 
     } else {
-        //APP_CONSOLE(W, "GNSS not READY or in ERROR")
+        if (appCheckGnssInactivity()) {
+            appTerminate();
+        }
         ret = ESP_ERR_NOT_FINISHED;
     }
 
@@ -993,6 +1209,7 @@ static esp_err_t appPrintImuData(uint8_t periodSecs)
 
     hpg.gnssState = xplrGnssGetCurrentState(0);
     if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+        hpg.gnssLastAction = esp_timer_get_time();
         if ((MICROTOSEC(esp_timer_get_time() - prevTime) >= periodSecs) &&
             xplrGnssIsDrEnabled(0)) {
             ret = xplrGnssGetImuAlignmentInfo(0, &hpg.imuAlignmentInfo);
@@ -1031,6 +1248,9 @@ static esp_err_t appPrintImuData(uint8_t periodSecs)
             ret = ESP_ERR_NOT_FINISHED;
         }
     } else {
+        if (appCheckGnssInactivity()) {
+            appTerminate();
+        }
         APP_CONSOLE(W, "GNSS not READY or in ERROR")
         ret = ESP_ERR_NOT_FINISHED;
     }
@@ -1152,16 +1372,6 @@ static void appVersionUpdate()
 }
 
 /**
- * Deinitialize logging service
-*/
-static void appDeInitLog(void)
-{
-#if (1 == APP_SD_LOGGING_ENABLED)
-    xplrLogDeInit(&appLog);
-    xplrLogDeInit(&errorLog);
-#endif
-}
-/**
  * Check if SD logging has been enabled
 */
 static void appCheckLogOption(uint8_t periodSecs)
@@ -1172,7 +1382,9 @@ static void appCheckLogOption(uint8_t periodSecs)
     static bool currentOpt = false;
     static bool isLogActive;
     static uint64_t prevTime = 0;
-    xplr_board_error_t boardErr;
+    xplrLog_error_t logErr;
+    xplrSd_error_t sdErr;
+    esp_err_t espErr;
 
     xplrWifiStarterWebserverOptionsGet(XPLR_WIFISTARTER_SERVEOPTS_SD, &logActive);
 
@@ -1182,42 +1394,35 @@ static void appCheckLogOption(uint8_t periodSecs)
     }
 
     if ((MICROTOSEC(esp_timer_get_time() - prevTime) >= periodSecs)) {
-        boardErr = xplrBoardDetectSd();
-        if (boardErr == XPLR_BOARD_ERROR_OK) {
-            cardDetect = true;
-        } else {
-            cardDetect = false;
-        }
+        cardDetect = xplrSdIsCardOn();
         prevTime = esp_timer_get_time();
     }
 
     if (logActive && cardDetect) {
-        isLogInitialized = true;
-        appLog.logEnable = true;
-        errorLog.logEnable = true;
-        if (!isLogActive) {
-            isLogActive = true;
-            isLogActive &= xplrWifiStarterStartLogModule(&wifiOptions);
-            isLogActive &= xplrMqttWifiStartLogModule(&mqttClient);
-            isLogActive &= xplrGnssStartLogModule(XPLR_GNSS_LOG_MODULE_ALL);
-            isLogActive &= xplrNvsStartLogModule(&nvs);
-        }
-        if (optChanged && isLogActive) {
-            APP_CONSOLE(I, "SD Log activated");
+        if (!xplrSdIsCardInit()) {
+            espErr = appInitLogging();
+            if (espErr == ESP_OK) {
+                APP_CONSOLE(I, "SD ON and initialized");
+            } else {
+                APP_CONSOLE(E, "SD Log failed to reactivate");
+            }
         }
     } else {
-        appLog.logEnable = false;
-        errorLog.logEnable = false;
-        isLogInitialized = false;
-        if (isLogActive) {
-            isLogActive &= xplrWifiStarterHaltLogModule(&wifiOptions);
-            isLogActive &= xplrMqttWifiHaltLogModule(&mqttClient);
-            isLogActive &= xplrGnssHaltLogModule(XPLR_GNSS_LOG_MODULE_ALL);
-            isLogActive &= xplrNvsHaltLogModule(&nvs);
-            isLogActive = !isLogActive;
-        }
         if (optChanged && (!isLogActive)) {
-            APP_CONSOLE(W, "SD Log de-activated");
+            logErr = xplrLogDisableAll();
+            if (logErr == XPLR_LOG_OK) {
+                APP_CONSOLE(I, "SD Log de-activated");
+            } else {
+                APP_CONSOLE(E, "Failed to disable the SD logging");
+            }
+        }
+        if (xplrSdIsCardInit()) {
+            sdErr = xplrSdDeInit();
+            if (sdErr == XPLR_SD_OK) {
+                APP_CONSOLE(I, "SD OFF and de-initialized");
+            } else {
+                APP_CONSOLE(E, "SD OFF but failed to de-initialize");
+            }
         }
     }
 #endif
@@ -1282,6 +1487,22 @@ static void appCheckDrCalibrationStatus(char *status)
 }
 
 /**
+ * Check if GNSS module inactivity has reached the TIMEOUT
+*/
+static bool appCheckGnssInactivity(void)
+{
+    bool hasGnssTimedOut;
+
+    if (MICROTOSEC(esp_timer_get_time() - hpg.gnssLastAction) >= APP_INACTIVITY_TIMEOUT) {
+        hasGnssTimedOut = true;
+    } else {
+        hasGnssTimedOut = false;
+    }
+
+    return hasGnssTimedOut;
+}
+
+/**
  * Update webserver info
 */
 static void appUpdateWebserverInfo(char *sd, char *dr, char *drCalibration)
@@ -1289,12 +1510,12 @@ static void appUpdateWebserverInfo(char *sd, char *dr, char *drCalibration)
     bool isGnssDrActive;
 
 #if (1 == APP_SD_LOGGING_ENABLED)
-    if (appLog.logEnable && isLogInitialized) {
+    if (xplrSdIsCardOn()) {
         sprintf(sd,
                 "free:%llukb / used:%llukb / total:%llukb",
-                xplrSdGetFreeSpace(appLog.sd),
-                xplrSdGetUsedSpace(appLog.sd),
-                xplrSdGetTotalSpace(appLog.sd));
+                xplrSdGetFreeSpace(),
+                xplrSdGetUsedSpace(),
+                xplrSdGetTotalSpace());
     } else {
         sprintf(sd, "log is disabled");
     }
@@ -1316,11 +1537,37 @@ static void appUpdateWebserverInfo(char *sd, char *dr, char *drCalibration)
  */
 static void appHaltExecution(void)
 {
-    appDeInitLog();
     xplrWifiStarterDisconnect();
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
+
+static void appTerminate(void)
+{
+    xplrGnssError_t gnssErr;
+    esp_err_t espErr;
+    uint64_t timePrevLoc;
+
+    APP_CONSOLE(E, "GNSS module has reached an inactivity timeout. Reseting...");
+
+    xplrWifiStarterDisconnect();
+    espErr = xplrGnssStopDevice(0);
+    timePrevLoc = esp_timer_get_time();
+    do {
+        gnssErr = xplrGnssFsm(0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if ((MICROTOSEC(esp_timer_get_time() - timePrevLoc) <= APP_INACTIVITY_TIMEOUT) &&
+            gnssErr == XPLR_GNSS_ERROR &&
+            espErr != ESP_OK) {
+            break;
+        }
+    } while (gnssErr != XPLR_GNSS_STOPPED);
+#if (APP_RESTART_ON_ERROR == 1)
+    esp_restart();
+#else
+    appHaltExecution();
+#endif
 }
 
 static void appFactoryResetTask(void *arg)
@@ -1345,7 +1592,6 @@ static void appFactoryResetTask(void *arg)
 
             if (btnPressDuration >= APP_FACTORY_MODE_TRIGGER) {
                 APP_CONSOLE(W, "Factory reset triggered");
-                xplrGnssHaltLogModule(XPLR_GNSS_LOG_MODULE_ALL);
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 xplrWifiStarterDeviceErase();
             }

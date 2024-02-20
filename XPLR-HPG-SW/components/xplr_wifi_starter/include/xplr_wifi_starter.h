@@ -55,14 +55,6 @@ extern "C" {
 #define XPLR_WIFISTARTER_AP_CLIENTS_MAX 1
 
 /* ----------------------------------------------------------------
- * EXTERN VARIABLES
- * ---------------------------------------------------------------*/
-
-extern xplrLog_t wifiStarterLog;
-extern char wifiBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
-
-
-/* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
 
@@ -174,7 +166,6 @@ typedef struct xplrWifiStarterOpts_type {
     xplrWifiStarterMode_t mode;      /**< mode of operation. */
     xplrWifiStarterNvs_t storage;    /**< memory module to store/retrieve wi-fi info. */
     bool webserver;                  /**< activate webserver. */
-    xplrLog_t *logCfg;               /**< pointer to the module's log struct. */
 } xplrWifiStarterOpts_t;
 
 // *INDENT-OFF*
@@ -406,20 +397,21 @@ char* xplrWifiStarterGetApIp(void);
 char* xplrWifiStarterGetApSsid(void);
 
 /**
- * @brief Function that halts the logging of the wifi module
- * 
- * @param wifiOptions  options of wifi starter.
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrWifiStarterHaltLogModule(xplrWifiStarterOpts_t *wifiOptions);
+int8_t xplrWifiStarterInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the wifi module
+ * @brief   Function that stops the logging of the http cell module
  * 
- * @param wifiOptions  options of wifi starter.
- * @return true if succeeded to start the module or false otherwise
+ * @return  ESP_OK on success, ESP_FAIL otherwise.
 */
-bool xplrWifiStarterStartLogModule(xplrWifiStarterOpts_t *wifiOptions);
+esp_err_t xplrWifiStarterStopLogModule(void);
 
 #ifdef __cplusplus
 }

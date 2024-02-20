@@ -158,6 +158,23 @@ esp_err_t xplrWifiWebserverSendLocation(char *jMsg);
  */
 esp_err_t xplrWifiWebserverSendMessage(char *message);
 
+/**
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
+*/
+int8_t xplrWifiWebserverInitLogModule(xplr_cfg_logInstance_t *logCfg);
+
+/**
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  ESP_OK on success, ESP_FAIL otherwise.
+*/
+esp_err_t xplrWifiWebserverStopLogModule(void);
+
 #ifdef __cplusplus
 }
 #endif

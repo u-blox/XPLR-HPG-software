@@ -35,16 +35,12 @@
 /**
  * Debugging print macro
  */
-#if (1 == XPLRGNSS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRLOCATION_LOG_ACTIVE))
-#define XPLRGNSS_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrGnss", __FUNCTION__, __LINE__, ##__VA_ARGS__)
-#elif (1 == XPLRGNSS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-#define XPLRGNSS_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrGnss", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrGnss", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-    XPLRLOG(&locationLog,buff2Log);
-#elif ((0 == XPLRGNSS_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-#define XPLRGNSS_CONSOLE(tag, message, ...)\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrGnss", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    XPLRLOG(&locationLog,buff2Log)
+#if (1 == XPLRGNSS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRGNSS_LOG_ACTIVE))
+#define XPLRGNSS_CONSOLE(tag, message, ...) XPLRLOG(infoLogIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgGnss", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRGNSS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
+#define XPLRGNSS_CONSOLE(tag, message, ...) XPLRLOG(infoLogIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgGnss", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif ((0 == XPLRGNSS_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
+#define XPLRGNSS_CONSOLE(tag, message, ...) XPLRLOG(infoLogIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgGnss", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRGNSS_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -88,12 +84,6 @@
 #define XPLR_GNSS_NMEA_BUFF_SIZE            (256U)
 #define XPLR_GNSS_UBX_BUFF_SIZE             (896U)
 #define XPLR_GNSS_SENS_ERR_BUFF_SIZE        (64U)
-
-/**
- * Set this option to 1 if you want the logging initialization to be blocking
- * (it needs to be initialized without errors, otherwise all gnss init returns error)
-*/
-#define XPLR_GNSS_LOG_BLOCKING  0
 
 /**
  * Set this option to 1 if you want extra debug messages
@@ -158,7 +148,9 @@ typedef union __attribute__((__packed__)) xplrGnssStatus_type {
         uint8_t locMsgDataRefreshed : 1;    /**< check if any type of location metrics was changed */
         uint8_t locMsgDataAvailable : 1;    /**< check if GNSS message is available for reading */
         uint8_t errorFlag           : 1;    /**< send GNSS FSM to error state. Used from functions */
-        uint8_t reserved            : 4;    /**< reserved/padding */
+        uint8_t saveOnShutdown      : 1;    /**< flags FSM to perform Save on Shutdown routine */
+        uint8_t clearBackupConf     : 1;    /**< flags FSM to clear the backup configuration */
+        uint8_t reserved            : 2;    /**< reserved/padding */
     } status;
     uint16_t value;
 } xplrGnssStatus_t;
@@ -178,7 +170,6 @@ typedef struct xplrGnssOptions_type {
     int64_t genericTimer;           /**< Used to time misc actions */
     uint8_t ubxRetries;             /**< ubx lib read command retry */
 } xplrGnssOptions_t;
-/*INDENT-ON*/
 
 /**
  * Settings and data struct for GNSS devices
@@ -188,14 +179,11 @@ typedef struct xplrGnss_type {
     xplrGnssOptions_t options;  /**< options */
     xplrGnssLocData_t locData;  /**< location data */
     xplrGnssDrData_t drData;    /**< dead reckoning data */
-    xplrLog_t *log;             /**< logging struct */
 } xplrGnss_t;
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
-
-// *INDENT-OFF*
 
 /**
  * Default calibration angles
@@ -225,6 +213,7 @@ static const char gnssStrFusionModeEnable[]    = "Enabled";
 static const char gnssStrFusionModeSuspended[] = "Suspended";
 static const char gnssStrFusionModeDisabled[]  = "Disabled";
 
+/*INDENT-OFF*/
 /**
  * Calibration status strings
  * Taken as is from ZED F9R specs file
@@ -235,7 +224,7 @@ static const char gnssStrCalibStatusRpCalib[]  = "IMU-mount roll/pitch angles al
 static const char gnssStrCalibStatusRpyCalib[] = "IMU-mount roll/pitch/yaw angles alignment is ongoing";
 static const char gnssStrCalibStatusCoarse[]   = "coarse IMU-mount alignment are used";
 static const char gnssStrCalibStatusFine[]     = "fine IMU-mount alignment are used";
-
+/*INDENT-ON*/
 /**
  * Sensors type strings
  * Taken as is from ZED F9R specs file
@@ -272,8 +261,6 @@ static const char gnssStrLocfixDgnss[]    = "DGNSS";
 static const char gnssStrLocfixRtkFixed[] = "RTK-FIXED";
 static const char gnssStrLocfixRtkFloat[] = "RTK-FLOAT";
 static const char gnssStrLocfixDeadReck[] = "DEAD RECKONING";
-
-// *INDENT-ON*
 
 /**
  * In order to find the size of each key we have to look at the end of the name.
@@ -325,13 +312,30 @@ static const char gnssStrLocfixDeadReck[] = "DEAD RECKONING";
 /**
  * Common Location Generic GNSS settings
  */
-static const uGnssCfgVal_t gnssGenericSettings[] = {
+static const uGnssCfgVal_t gnssGenericSettings9R[] = {
     {U_GNSS_CFG_VAL_KEY_ID_NMEA_HIGHPREC_L, 1},                 /**< High precision mode */
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_HPPOSLLH_I2C_U1, 1},  /**< HPPOSLLH messages enable on I2C*/
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_PVT_I2C_U1, 1},       /**< PVT messages enable on I2C */
     {U_GNSS_CFG_VAL_KEY_ID_SFCORE_USE_SF_L, 0},                 /**< Disable internal IMU */
 
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_ESF_STATUS_I2C_U1, 1},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_PL_I2C_U1, 1},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_SAT_I2C_U1, 1},       /**< ~700bytes */
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_RXM_COR_I2C_U1, 1},
+
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_NMEA_ID_GGA_I2C_U1, 1},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_NMEA_ID_GLL_I2C_U1, 1},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_NMEA_ID_GSA_I2C_U1, 1},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_NMEA_ID_GSV_I2C_U1, 1},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_NMEA_ID_RMC_I2C_U1, 1},
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_NMEA_ID_VTG_I2C_U1, 1}
+};
+
+static const uGnssCfgVal_t gnssGenericSettings9P[] = {
+    {U_GNSS_CFG_VAL_KEY_ID_NMEA_HIGHPREC_L, 1},                 /**< High precision mode */
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_HPPOSLLH_I2C_U1, 1},  /**< HPPOSLLH messages enable on I2C*/
+    {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_PVT_I2C_U1, 1},       /**< PVT messages enable on I2C */
+
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_PL_I2C_U1, 1},
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_SAT_I2C_U1, 1},       /**< ~700bytes */
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_RXM_COR_I2C_U1, 1},
@@ -354,6 +358,8 @@ static const uGnssCfgVal_t gnssGenericDrSettings[] = {
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_ESF_ALG_I2C_U1, 1},   /**< ESF-ALG calibration information message enable on I2C */
     {U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_ESF_STATUS_I2C_U1, 1} /**< ESF-STATUS calibration status message enable on I2C */
 };
+
+/*INDENT-ON*/
 
 /**
  * Message ID for UBX_NAV_PVT
@@ -401,6 +407,33 @@ static const uGnssMessageId_t msgIdEsfAlg = {
 };
 
 /**
+ * Message ID for UPD-SOS
+ * Save-on-shutdown feature
+*/
+static const uGnssMessageId_t msgIdUpdSoS = {
+    .type = U_GNSS_PROTOCOL_UBX,
+    .id.ubx = 0x0914
+};
+
+/**
+ * Message ID for ACK-ACK
+ * Message acknowledge
+*/
+static const uGnssMessageId_t msgIdAckAck = {
+    .type = U_GNSS_PROTOCOL_UBX,
+    .id.ubx = 0x0501
+};
+
+/**
+ * Message ID for ACK-NACK
+ * Message acknowledge
+*/
+static const uGnssMessageId_t msgIdAckNak = {
+    .type = U_GNSS_PROTOCOL_UBX,
+    .id.ubx = 0x0500
+};
+
+/**
  * All UBX protocol message IDs
  */
 static const uGnssMessageId_t msgIdUbxMessages = {
@@ -433,41 +466,51 @@ static const char nvsNamespace[] = "gnssDvc_";
 /**
  * An array of gnss devices
  */
-static xplrGnss_t dvc[XPLRGNSS_NUMOF_DEVICES] = {{.options.state = {XPLR_GNSS_STATE_UNCONFIGURED, 
-                                                                    XPLR_GNSS_STATE_UNCONFIGURED},
-                                                  .options.xSemWatchdog = NULL,
-                                                  .options.flags.value = 0,
-                                                  .options.asyncIds.ahNmeaId = -1,
-                                                  .options.asyncIds.ahUbxId  = -1,
-                                                  .options.lastActTime = 0,
-                                                  .options.lastWatchdogTime = 0,
-                                                  .options.genericTimer = 0}};
+static xplrGnss_t dvc[XPLRGNSS_NUMOF_DEVICES] = {{
+        .options.state = {
+            XPLR_GNSS_STATE_UNCONFIGURED,
+            XPLR_GNSS_STATE_UNCONFIGURED
+        },
+        .options.xSemWatchdog = NULL,
+        .options.flags.value = 0,
+        .options.asyncIds.ahNmeaId = -1,
+        .options.asyncIds.ahUbxId  = -1,
+        .options.lastActTime = 0,
+        .options.lastWatchdogTime = 0,
+        .options.genericTimer = 0
+    }
+};
 
 static const char *gLocationUrlPart = "https://maps.google.com/?q=";
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
 // Semaphore to guarantee atomic access to the async log task struct
-SemaphoreHandle_t xSemaphore = NULL;
-/* Async logging task struct */
-xplrGnssAsyncLog_t asyncLog = {0};
-/* Flag to indicate that the semaphore for the log struct has been created*/
-static bool semaphoreCreated;
-#endif
+static SemaphoreHandle_t xSemaphore = NULL;
+/* Logging indexes */
+int8_t infoLogIndex = -1;
+int8_t asyncLogIndex = -1;
+RingbufHandle_t     xRingBuffer;        /**< Ring Buffer to store messages
+                                             coming from the GNSS async callback */
+TaskHandle_t        gnssLogTaskHandle;  /**< Handler of the async logging task */
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
 static esp_err_t gnssDeviceOpen(uint8_t dvcProfile);
-static esp_err_t gnssDeviceRestart(uint8_t dvcProfile);
+static esp_err_t gnssDeviceRestart(uint8_t dvcProfile, uint8_t *message);
 static esp_err_t gnssDeviceStop(uint8_t dvcProfile);
 static esp_err_t gnssDeviceClose(uint8_t dvcProfile);
+static esp_err_t gnssSaveOnShutdown(uint8_t dvcProfile);
+static esp_err_t gnssCreateBackup(uint8_t dvcProfile);
+static esp_err_t gnssBackupCreationAck(uint8_t dvcProfile);
+static esp_err_t gnssPollBackupRestore(uint8_t dvcProfile);
+static esp_err_t gnssClearBackup(uint8_t dvcProfile);
 static void gnssResetoptionsFlags(uint8_t dvcProfile);
 static void gnssResetoptionsTimers(uint8_t dvcProfile);
 static int32_t gnssAsyncStopper(uint8_t dvcProfile, int32_t handler);
-static bool gnssUbxIsMessageId(const uGnssMessageId_t *msgIdIncoming, 
+static bool gnssUbxIsMessageId(const uGnssMessageId_t *msgIdIncoming,
                                const uGnssMessageId_t *msgIdToFilter);
-static bool gnssNmeaIsMessageId(const uGnssMessageId_t *msgIdIncoming, 
+static bool gnssNmeaIsMessageId(const uGnssMessageId_t *msgIdIncoming,
                                 const uGnssMessageId_t *msgIdToFilter);
 static void gnssUpdateNextState(uint8_t dvcProfile,
                                 xplrGnssStates_t nextState);
@@ -502,6 +545,9 @@ static esp_err_t gnssFeedWatchdog(xplrGnss_t *gnssDvc);
 static bool gnssCheckWatchdog(uint8_t dvcProfile);
 static esp_err_t gnssDrSetVehicleType(uint8_t dvcProfile);
 static esp_err_t gnssEsfInsParser(xplrGnss_t *locDvc, char *buffer);
+static esp_err_t gnssUpdSoSParser(xplrGnss_t *locDvc, char *buffer);
+static esp_err_t gnssAckAckParser(xplrGnss_t *locDvc, char *buffer);
+static esp_err_t gnssAckNakParser(xplrGnss_t *locDvc, char *buffer);
 static esp_err_t gnssImuSetCalibData(uint8_t dvcProfile);
 static esp_err_t gnssEsfAlgParser(xplrGnss_t *locDvc, char *buffer);
 static esp_err_t gnssEsfStatusParser(xplrGnss_t *locDvc, char *buffer);
@@ -587,16 +633,21 @@ esp_err_t xplrGnssStartDevice(uint8_t dvcProfile, xplrGnssDeviceCfg_t *conf)
         XPLRGNSS_CONSOLE(E, "Invalid argument!");
         ret = ESP_ERR_INVALID_ARG;
     } else {
-        locDvc = &dvc[dvcProfile];
-        if ((locDvc->options.flags.status.gnssIsConfigured == 1) && 
-            (xplrGnssGetCurrentState(dvcProfile) != XPLR_GNSS_STATE_UNCONFIGURED)) {
-            XPLRGNSS_CONSOLE(W, "Gnss with ID [%d] is already configured and running.", dvcProfile);
+        if (conf->hw.dvcType != XPLR_LOCATION_DEVICE_NOT_SUPPORTED) {
+            locDvc = &dvc[dvcProfile];
+            if ((locDvc->options.flags.status.gnssIsConfigured == 1) &&
+                (xplrGnssGetCurrentState(dvcProfile) != XPLR_GNSS_STATE_UNCONFIGURED)) {
+                XPLRGNSS_CONSOLE(W, "Gnss with ID [%d] is already configured and running.", dvcProfile);
+            } else {
+                locDvc->conf = conf;
+                locDvc->options.flags.status.gnssIsConfigured = 1;
+                XPLRGNSS_CONSOLE(D, "GNSS module configured successfully.");
+            }
+            ret = ESP_OK;
         } else {
-            locDvc->conf = conf;
-            locDvc->options.flags.status.gnssIsConfigured = 1;
-            XPLRGNSS_CONSOLE(D, "GNSS module configured successfully.");
+            ret = ESP_FAIL;
+            XPLRGNSS_CONSOLE(E, "GNSS module selected not supported.");
         }
-        ret = ESP_OK;
     }
 
     return ret;
@@ -607,6 +658,7 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
     xplrGnss_t *locDvc = NULL;
     esp_err_t espRet;
     xplrGnssError_t ret;
+    uint8_t restartMsg[4] = {0};
     bool boolRet = gnssIsDvcProfileValid(dvcProfile);
 
     if (boolRet) {
@@ -615,28 +667,10 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
             case XPLR_GNSS_STATE_UNCONFIGURED:
                 if (locDvc->options.flags.status.gnssIsConfigured) {
                     locDvc->options.flags.status.gnssComingFromConf = 1;
-                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ENABLE_LOG);
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_OPEN);
                 } else {
                     // do nothing
                 }
-                ret = XPLR_GNSS_OK;
-                break;
-
-            case XPLR_GNSS_STATE_ENABLE_LOG:
-#if (1 == XPLRGNSS_LOG_ACTIVE && 1 == XPLR_HPGLIB_LOG_ENABLED)
-                XPLRGNSS_CONSOLE(D, "Logging is enabled. Trying to initialize.");
-                espRet = xplrGnssAsyncLogInit(dvcProfile);
-                if (espRet == ESP_OK || !XPLR_GNSS_LOG_BLOCKING) {
-                    XPLRGNSS_CONSOLE(D, "Sucessfully initialized GNSS logging.");
-                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_OPEN);
-                } else {
-                    XPLRGNSS_CONSOLE(E, "GNSS init failed from the async log initialization");
-                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
-                }
-#else
-                XPLRGNSS_CONSOLE(D, "Logging is not enabled. Skipping.");
-                gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_OPEN);
-#endif
                 ret = XPLR_GNSS_OK;
                 break;
 
@@ -649,7 +683,8 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                     // do nothing
                 }
 
-                if (!(MICROTOSEC(esp_timer_get_time() - locDvc->options.lastActTime) > XPLR_GNSS_DEVICE_OPEN_TIMEOUT)) {
+                if (!(MICROTOSEC(esp_timer_get_time() - locDvc->options.lastActTime) >
+                      XPLR_GNSS_DEVICE_OPEN_TIMEOUT)) {
                     espRet = gnssDeviceOpen(dvcProfile);
                     XPLRGNSS_CONSOLE(D, "Trying to open device.");
                     if (espRet == ESP_OK) {
@@ -674,7 +709,7 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                         ret = XPLR_GNSS_BUSY;
                     }
                 } else {
-                    XPLRGNSS_CONSOLE(E, "Openning GNSS device timed out!");
+                    XPLRGNSS_CONSOLE(E, "Opening GNSS device timed out!");
                     XPLRGNSS_CONSOLE(E, "Waited for [%d] seconds!", XPLR_GNSS_DEVICE_OPEN_TIMEOUT);
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_TIMEOUT);
                     ret = XPLR_GNSS_OK;
@@ -760,7 +795,12 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                 if (espRet == ESP_OK) {
                     espRet = xplrGnssStartAllAsyncs(dvcProfile);
                     if (espRet == ESP_OK) {
-                        gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_NVS_INIT);
+                        espRet = gnssPollBackupRestore(dvcProfile);
+                        if (espRet == ESP_OK) {
+                            gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_NVS_INIT);
+                        } else {
+                            gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
+                        }
                     } else {
                         gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
                     }
@@ -776,7 +816,8 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                 espRet = gnssNvsInit(dvcProfile);
                 if (espRet == ESP_OK) {
                     if (locDvc->conf->dr.enable) {
-                        XPLRGNSS_CONSOLE(D, "Detected Dead Reckoning enable option in config. Initializing Dead Reckoning.");
+                        XPLRGNSS_CONSOLE(D,
+                                         "Detected Dead Reckoning enable option in config. Initializing Dead Reckoning.");
                         gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DR_INIT);
                     } else {
                         gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_READY);
@@ -785,6 +826,9 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                 } else {
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
                     XPLRGNSS_CONSOLE(E, "Failed to initialize NVS!");
+                }
+                if (locDvc->conf->backup.isRestored) {
+                    XPLRGNSS_CONSOLE(I, "GNSS module restored from backup memory.");
                 }
                 ret = XPLR_GNSS_OK;
                 break;
@@ -860,7 +904,43 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                 }
                 ret = XPLR_GNSS_OK;
                 break;
-
+            case XPLR_GNSS_STATE_CLEAR_BACKUP_MEMORY:
+                espRet = gnssClearBackup(dvcProfile);
+                if (espRet == ESP_OK) {
+                    XPLRGNSS_CONSOLE(D, "Backup Configuration erased from memory");
+                    locDvc->options.flags.status.clearBackupConf = 0;
+                    locDvc->conf->backup.hasBackup = 0;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_NO_BACKUP;
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_READY);
+                } else if (espRet == ESP_ERR_NOT_FOUND) {
+                    XPLRGNSS_CONSOLE(D, "No saved backup configuration found. Continuing...");
+                    locDvc->options.flags.status.clearBackupConf = 0;
+                    locDvc->conf->backup.hasBackup = 0;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_NO_BACKUP;
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_READY);
+                } else if (espRet == ESP_ERR_NOT_FINISHED) {
+                    // XPLRGNSS_CONSOLE(W, "Waiting for acknowledgment response...");
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Error in backup configuration erase.");
+                    locDvc->options.flags.status.clearBackupConf = 0;
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
+                }
+                break;
+            case XPLR_GNSS_STATE_SAVE_ON_SHUTDOWN:
+                espRet = gnssSaveOnShutdown(dvcProfile);
+                if (espRet == ESP_OK) {
+                    XPLRGNSS_CONSOLE(D, "Save on Shutdown complete. Turning off device");
+                    locDvc->options.flags.status.saveOnShutdown = 0;
+                    locDvc->options.flags.status.gnssRequestStop = 1;
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_READY);
+                } else if (espRet == ESP_ERR_NOT_FINISHED) {
+                    XPLRGNSS_CONSOLE(D, "Waiting for Save on Shutdown routine to finish");
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Error in Save on Shutdown routine");
+                    locDvc->options.flags.status.saveOnShutdown = 0;
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
+                }
+                break;
             case XPLR_GNSS_STATE_DEVICE_READY:
                 if (locDvc->options.flags.status.errorFlag) {
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
@@ -869,12 +949,17 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                 } else if (locDvc->options.flags.status.gnssRequestRestart ||
                            gnssCheckWatchdog(dvcProfile)) {
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_RESTART);
+                } else if (locDvc->options.flags.status.saveOnShutdown) {
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_SAVE_ON_SHUTDOWN);
+                } else if (locDvc->options.flags.status.clearBackupConf) {
+                    XPLRGNSS_CONSOLE(W, "Triggered backup config erase.");
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_CLEAR_BACKUP_MEMORY);
                 } else {
-                    if ((gnssIsDrEnabled(dvcProfile) == false) && 
+                    if ((gnssIsDrEnabled(dvcProfile) == false) &&
                         (locDvc->conf->dr.enable == true)) {
                         gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DR_INIT);
-                    } else if ((gnssIsDrEnabled(dvcProfile) == true) && 
-                        (locDvc->conf->dr.enable == false)) {
+                    } else if ((gnssIsDrEnabled(dvcProfile) == true) &&
+                               (locDvc->conf->dr.enable == false)) {
                         gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_RESTART);
                     } else {
                         // do nothing
@@ -891,9 +976,10 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
 
             case XPLR_GNSS_STATE_DEVICE_RESTART:
                 XPLRGNSS_CONSOLE(D, "Trying to restart GNSS device.");
-                espRet = gnssDeviceRestart(dvcProfile);
+                espRet = gnssDeviceRestart(dvcProfile, restartMsg);
                 if (espRet == ESP_OK) {
                     XPLRGNSS_CONSOLE(D, "Restart succeeded.");
+                    locDvc->options.flags.status.gnssRequestRestart = 0;
                     locDvc->options.flags.status.gnssIsConfigured = 1;
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_WAIT);
                 } else {
@@ -910,17 +996,19 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                     XPLRGNSS_CONSOLE(D, "Device stopped.");
                     locDvc->options.state[0] = XPLR_GNSS_STATE_UNCONFIGURED;
                     locDvc->options.state[1] = locDvc->options.state[0];
+                    ret = XPLR_GNSS_STOPPED;
                 } else {
                     XPLRGNSS_CONSOLE(E, "Failed to stop device!");
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
+                    ret = XPLR_GNSS_ERROR;
                 }
-                ret = XPLR_GNSS_OK;
                 break;
 
             case XPLR_GNSS_STATE_WAIT:
                 switch (locDvc->options.state[1]) {
                     case XPLR_GNSS_STATE_DEVICE_RESTART:
-                        if (MICROTOSEC(esp_timer_get_time() - locDvc->options.genericTimer) > XPLR_GNSS_WAIT_OPEN_AFTER_RESTART) {
+                        if (MICROTOSEC(esp_timer_get_time() - locDvc->options.genericTimer) >
+                            XPLR_GNSS_WAIT_OPEN_AFTER_RESTART) {
                             gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_OPEN);
                         } else {
                             // do nothing
@@ -984,10 +1072,87 @@ esp_err_t xplrGnssStopDevice(uint8_t dvcProfile)
             currentState == XPLR_GNSS_STATE_ERROR ||
             currentState == XPLR_GNSS_STATE_TIMEOUT) {
             locDvc->options.flags.status.gnssRequestStop = 1;
+            XPLRGNSS_CONSOLE(W, "Requested Stop");
             ret = ESP_OK;
         } else {
-            XPLRGNSS_CONSOLE(W, "Gnss device is not in a valid state: Ready, Error or Timeout. Nothing to execute.");
+            XPLRGNSS_CONSOLE(W,
+                             "Gnss device is not in a valid state: Ready, Error or Timeout. Nothing to execute.");
             ret = ESP_OK;
+        }
+    }
+
+    return ret;
+}
+
+esp_err_t xplrGnssSaveOnShutdown(uint8_t dvcProfile)
+{
+    xplrGnss_t *locDvc = NULL;
+    esp_err_t ret;
+    xplrGnssStates_t currentState;
+    bool boolRet = gnssIsDvcProfileValid(dvcProfile);
+
+    if (!boolRet) {
+        ret = ESP_ERR_INVALID_ARG;
+        XPLRGNSS_CONSOLE(E, "Invalid argument!");
+    } else {
+        locDvc = &dvc[dvcProfile];
+        currentState = xplrGnssGetCurrentState(dvcProfile);
+        if (currentState == XPLR_GNSS_STATE_DEVICE_READY ||
+            currentState == XPLR_GNSS_STATE_ERROR ||
+            currentState == XPLR_GNSS_STATE_TIMEOUT) {
+            locDvc->options.flags.status.saveOnShutdown = 1;
+            ret = ESP_OK;
+        } else {
+            XPLRGNSS_CONSOLE(W,
+                             "Gnss device is not in a valid state: Ready, Error or Timeout. Nothing to execute.");
+            ret = ESP_OK;
+        }
+    }
+
+    for (;;) {
+        xplrGnssFsm(dvcProfile);
+        /*Procedure lasts around 1 second*/
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (locDvc->options.flags.status.saveOnShutdown == 0) {
+            break;
+        }
+
+    }
+
+    return ret;
+}
+
+esp_err_t xplrGnssClearBackupConfiguration(uint8_t dvcProfile)
+{
+
+    xplrGnss_t *locDvc = NULL;
+    esp_err_t ret;
+    xplrGnssStates_t currentState;
+    bool boolRet = gnssIsDvcProfileValid(dvcProfile);
+
+    if (!boolRet) {
+        ret = ESP_ERR_INVALID_ARG;
+        XPLRGNSS_CONSOLE(E, "Invalid argument!");
+    } else {
+        locDvc = &dvc[dvcProfile];
+        currentState = xplrGnssGetCurrentState(dvcProfile);
+        if (currentState == XPLR_GNSS_STATE_DEVICE_READY ||
+            currentState == XPLR_GNSS_STATE_ERROR ||
+            currentState == XPLR_GNSS_STATE_TIMEOUT) {
+            locDvc->options.flags.status.clearBackupConf = 1;
+            ret = ESP_OK;
+            do {
+                /*Window for other tasks to run*/
+                vTaskDelay(pdMS_TO_TICKS(100));
+                xplrGnssFsm(dvcProfile);
+                currentState = xplrGnssGetCurrentState(dvcProfile);
+            } while (locDvc->conf->backup.state != XPLR_GNSS_SOS_STATE_NO_BACKUP ||
+                     currentState == XPLR_GNSS_STATE_CLEAR_BACKUP_MEMORY);
+        } else {
+            XPLRGNSS_CONSOLE(W,
+                             "Gnss device is not in a valid state: Ready, Error or Timeout. Nothing to execute.");
+            ret = ESP_OK;
+
         }
     }
 
@@ -1120,10 +1285,10 @@ esp_err_t xplrGnssNmeaMessagesAsyncStart(uint8_t dvcProfile)
                                                                      gnssNmeaProtocolCB,
                                                                      locDvc);
             if (locDvc->options.asyncIds.ahNmeaId < 0) {
-                locDvc->options.asyncIds.ahNmeaId = -1;
                 XPLRGNSS_CONSOLE(E,
                                  "Gnss NMEA async failed to start with error code [%d]",
                                  locDvc->options.asyncIds.ahNmeaId);
+                locDvc->options.asyncIds.ahNmeaId = -1;
                 ret = ESP_FAIL;
             } else {
                 XPLRGNSS_CONSOLE(D, "Started Gnss NMEA async.");
@@ -1214,6 +1379,7 @@ esp_err_t xplrGnssNmeaMessagesAsyncStop(uint8_t dvcProfile)
             XPLRGNSS_CONSOLE(D, "Trying to stop Gnss Get Fix Type async.");
             xSemaphoreGive(locDvc->options.xSemWatchdog);
             intRet = gnssAsyncStopper(dvcProfile, locDvc->options.asyncIds.ahNmeaId);
+            intRet |= gnssAsyncStopper(dvcProfile, locDvc->options.asyncIds.ahUbxId);
             if (intRet == 0) {
                 locDvc->options.asyncIds.ahNmeaId = -1;
                 ret = ESP_OK;
@@ -1385,7 +1551,7 @@ esp_err_t xplrGnssOptionMultiValGet(uint8_t dvcProfile,
 bool xplrGnssIsDrEnabled(uint8_t dvcProfile)
 {
     bool ret, boolRet = gnssIsDvcProfileValid(dvcProfile);
-    
+
     if (boolRet) {
         ret = gnssIsDrEnabled(dvcProfile);
     } else {
@@ -1542,7 +1708,7 @@ bool xplrGnssHasMessage(uint8_t dvcProfile)
 
     if (boolRet) {
         locDvc = &dvc[dvcProfile];
-        if (locDvc->options.flags.status.locMsgDataAvailable && 
+        if (locDvc->options.flags.status.locMsgDataAvailable &&
             locDvc->options.flags.status.locMsgDataRefreshed) {
             ret = true;
         } else {
@@ -1579,7 +1745,7 @@ esp_err_t xplrGnssNvsDeleteCalibrations(uint8_t dvcProfile)
     esp_err_t ret;
     bool boolRet = gnssIsDvcProfileValid(dvcProfile);
 
-    if(boolRet) {
+    if (boolRet) {
         ret = gnssNvsErase(dvcProfile);
     } else {
         XPLRGNSS_CONSOLE(E, "Invalid argument!");
@@ -1587,6 +1753,22 @@ esp_err_t xplrGnssNvsDeleteCalibrations(uint8_t dvcProfile)
     }
 
     return ret;
+}
+
+int64_t xplrGnssGetTimestampUTC(uint8_t dvcProfile)
+{
+    xplrGnss_t *locDvc = NULL;
+    int64_t timestamp;
+    bool boolRet = gnssIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        locDvc = &dvc[dvcProfile];
+        timestamp = locDvc->locData.locData.location.timeUtc;
+    } else {
+        timestamp = -1;
+    }
+
+    return timestamp;
 }
 
 esp_err_t xplrGnssGetGmapsLocation(uint8_t dvcProfile, char *gmapsLocationRes, uint16_t maxLen)
@@ -1734,7 +1916,7 @@ esp_err_t xplrGnssPrintLocationData(xplrGnssLocation_t *locData)
         ret = gnssFixTypeToString(locData, locFixTypeStr, ELEMENTCNT(locFixTypeStr));
         if (ret == ESP_OK) {
 #if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-            if (locationLog.logEnable) {
+            if (xplrLogIsEnabled(asyncLogIndex)) {
                 gnssLogLocationPrinter(locFixTypeStr, locData);
             } else {
                 // do nothing
@@ -1924,7 +2106,7 @@ esp_err_t xplrGnssPrintImuVehicleDynamics(xplrGnssImuVehDynMeas_t *dynamics)
         printf("===============================\n");
         ret = ESP_OK;
 #else
-    ret = ESP_OK;
+        ret = ESP_OK;
 #endif
     }
 
@@ -1992,189 +2174,189 @@ xplrGnssStates_t xplrGnssGetPreviousState(uint8_t dvcProfile)
     return ret;
 }
 
-esp_err_t xplrGnssAsyncLogInit(uint8_t dvcProfile)
-{
-    esp_err_t ret = ESP_FAIL;
 #if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
-    xplrGnss_t *locDvc = NULL;
-    bool boolRet = gnssIsDvcProfileValid(dvcProfile);
+int8_t xplrGnssAsyncLogInit(xplr_cfg_logInstance_t *logCfg)
+{
+    int8_t ret;
     xplrLog_error_t err;
 
-    if (!boolRet) {
-        XPLRGNSS_CONSOLE(E, "Invalid argument!");
-        ret = ESP_ERR_INVALID_ARG;
-    } else {
-        locDvc = &dvc[dvcProfile];
-        if (!asyncLog.isInit) {
-            XPLRGNSS_CONSOLE(I, "Initializing async logging");
-            err = xplrLogInit(&asyncLog.logCfg,
-                              XPLR_LOG_DEVICE_ZED,
-                              "/ZEDLOG.ubx",
-                              4,
-                              XPLR_SIZE_GB);
-            if (err == XPLR_LOG_OK) {
-                // Keep the dvcProfile of the device that initiates logging
-                asyncLog.firstDvcProfile = dvcProfile;
-                // Create the ring buffer
-                asyncLog.xRingBuffer = xRingbufferCreate(XPLR_GNSS_LOG_RING_BUF_SIZE, RINGBUF_TYPE_NOSPLIT);
-                if (asyncLog.xRingBuffer == NULL) {
-                    // Ring buffer creation was unsuccessful so disable logging
-                    asyncLog.isInit = false;
-                    ret = ESP_FAIL;
-                    XPLRGNSS_CONSOLE(E, "Error initializing logging ring buffer!");
-                } else {
-                    // Create Task for SD logging
-                    xTaskCreate(gnssLogTask, "gnssLogTask", 3 * 1024, NULL, 1, &asyncLog.gnssLogTaskHandle);
-                    // Create Semaphore
-                    xSemaphore = xSemaphoreCreateMutex();
-                    // Take Semaphore and then give it to ensure it is created successfully
-                    if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
-                        // Since no errors occurred enable logging and give the mutex
-                        asyncLog.isInit = true;
-                        asyncLog.isEnabled = true;
-                        semaphoreCreated = true;
-                        // Point the dvc log to the task's log struct
-                        locDvc->log = &asyncLog.logCfg;
-                        ret = ESP_OK;
-                        xSemaphoreGive(xSemaphore);
-                    } else {
-                        XPLRGNSS_CONSOLE(E, "Could not create semaphore");
-                        asyncLog.isInit = false;
-                        ret = ESP_FAIL;
-                    }
-                }
+    if (asyncLogIndex < 0) {
+        XPLRGNSS_CONSOLE(I, "Initializing async logging");
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            asyncLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                        XPLR_GNSS_UBX_DEFAULT_FILENAME,
+                                        XPLRLOG_FILE_SIZE_INTERVAL,
+                                        XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            asyncLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                        logCfg->filename,
+                                        logCfg->sizeInterval,
+                                        logCfg->erasePrev);
+        }
+        if (asyncLogIndex >= 0) {
+            // Create the ring buffer
+            xRingBuffer = xRingbufferCreate(XPLR_GNSS_LOG_RING_BUF_SIZE, RINGBUF_TYPE_NOSPLIT);
+            if (xRingBuffer == NULL) {
+                // Ring buffer creation was unsuccessful so disable logging
+                err = xplrLogDisable(asyncLogIndex);
+                ret = -1;
+                XPLRGNSS_CONSOLE(E, "Error initializing logging ring buffer!");
             } else {
-                XPLRGNSS_CONSOLE(E, "Could not initialize async logging");
-                asyncLog.isInit = false;
-                ret = ESP_FAIL;
+                // Create Task for SD logging
+                xTaskCreate(gnssLogTask, "gnssLogTask", 4 * 1024, NULL, 1, &gnssLogTaskHandle);
+                // Create Semaphore
+                if (xSemaphore == NULL) {
+                    xSemaphore = xSemaphoreCreateMutex();
+                }
+                // Take Semaphore and then give it to ensure it is created successfully
+                if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
+                    /* Check that semaphore is functional but taking it and then giving it back */
+                    ret = asyncLogIndex;
+                    xSemaphoreGive(xSemaphore);
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Could not create semaphore");
+                    err = xplrLogDisable(asyncLogIndex);
+                    ret = -1;
+                }
             }
         } else {
-            XPLRGNSS_CONSOLE(W, "Async logging task already initialized");
-            locDvc->log = &asyncLog.logCfg;
-            ret = ESP_OK;
+            XPLRGNSS_CONSOLE(E, "Could not initialize async logging");
+            ret = -1;
+        }
+    } else {
+        if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
+            err = xplrLogEnable(asyncLogIndex);
+            if (err == XPLR_LOG_OK) {
+                ret = asyncLogIndex;
+            } else {
+                ret = -1;
+            }
+            xSemaphoreGive(xSemaphore);
+        } else {
+            XPLRGNSS_CONSOLE(E, "Could not take the semaphore to enable async logging");
+            ret = -1;
         }
     }
-#endif
+
     return ret;
 }
 
-esp_err_t xplrGnssAsyncLogDeInit(uint8_t dvcProfile)
+esp_err_t xplrGnssAsyncLogStop(void)
 {
-    esp_err_t ret = ESP_FAIL;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
-    bool boolRet = gnssIsDvcProfileValid(dvcProfile);
-    xplrLog_error_t err;
+    esp_err_t ret;
+    xplrLog_error_t logErr;
 
-    if (!boolRet) {
-        XPLRGNSS_CONSOLE(E, "Invalid argument!");
-        ret = ESP_ERR_INVALID_ARG;
-    } else {
+    if (xSemaphore != NULL) {
         if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
-            asyncLog.isEnabled = false;
-            /* De init logging*/
-            err = xplrLogDeInit(&asyncLog.logCfg);
-            if (err == XPLR_LOG_OK) {
-                /* Delete the task*/
-                vTaskDelete(asyncLog.gnssLogTaskHandle);
-                /* Free the ring buffer*/
-                vRingbufferDelete(asyncLog.xRingBuffer);
-                XPLRGNSS_CONSOLE(W, "Async logging task disabled");
-                asyncLog.isInit = false;
-                ret = ESP_OK;
-            } else {
-                XPLRGNSS_CONSOLE(E, "Could not terminate logging");
+            logErr = xplrLogDisable(asyncLogIndex);
+            if (logErr != XPLR_LOG_OK) {
                 ret = ESP_FAIL;
+            } else {
+                ret = ESP_OK;
             }
-            /* Free the semaphore*/
             xSemaphoreGive(xSemaphore);
         } else {
             XPLRGNSS_CONSOLE(E, "Could not take the semaphore to terminate async logging");
             ret = ESP_FAIL;
         }
+    } else {
+        ret = ESP_FAIL;
     }
-#endif
+
     return ret;
 }
 
-bool xplrGnssHaltLogModule(xplrGnssLogModule_t module)
+esp_err_t xplrGnssAsyncLogDeInit(void)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
-    switch (module) {
-        case XPLR_GNSS_LOG_MODULE_CONSOLE:
-            locationLog.logEnable = false;
-            ret = !locationLog.logEnable;
-            break;
-        case XPLR_GNSS_LOG_MODULE_UBX:
-            asyncLog.isEnabled = false;
-            ret = !asyncLog.isEnabled;
-            break;
-        case XPLR_GNSS_LOG_MODULE_ALL:
-            locationLog.logEnable = false;
-            asyncLog.isEnabled = false;
-            ret = !(locationLog.logEnable || asyncLog.isEnabled);
-            break;
-        case XPLR_GNSS_LOG_MODULE_INVALID:
-        default:
-            ret = false;
-            XPLRGNSS_CONSOLE(E, "Invalid submodule name. Cannot Halt logging!");
-            break;
-    }
-#else
-    ret = false;
-#endif
-    return ret;
-}
-
-bool xplrGnssStartLogModule(xplrGnssLogModule_t module)
-{
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
+    esp_err_t ret = ESP_FAIL;
     xplrLog_error_t err;
-    switch (module) {
-        case XPLR_GNSS_LOG_MODULE_CONSOLE:
-            err = xplrLogInit(&locationLog,
-                              XPLR_LOG_DEVICE_INFO,
-                              "/location.log",
-                              100,
-                              XPLR_SIZE_MB);
-            if (err == XPLR_LOG_OK) {
-                locationLog.logEnable = true;
-            } else {
-                locationLog.logEnable = false;
-            }
-            ret = locationLog.logEnable;
-            break;
-        case XPLR_GNSS_LOG_MODULE_UBX:
-            xplrGnssAsyncLogInit(0);
-            ret = asyncLog.isInit;
-            break;
-        case XPLR_GNSS_LOG_MODULE_ALL:
-            err = xplrLogInit(&locationLog,
-                              XPLR_LOG_DEVICE_INFO,
-                              "/location.log",
-                              100,
-                              XPLR_SIZE_MB);
-            if (err == XPLR_LOG_OK) {
-                locationLog.logEnable = true;
-            } else {
-                locationLog.logEnable = false;
-            }
-            xplrGnssAsyncLogInit(0);
-            ret = asyncLog.isInit && locationLog.logEnable;
-            break;
-        case XPLR_GNSS_LOG_MODULE_INVALID:
-        default:
-            XPLRGNSS_CONSOLE(E, "Invalid submodule name. Cannot Start logging!");
-            ret = false;
-            break;
+
+    if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
+        /* De init logging*/
+        err = xplrLogDeInit(asyncLogIndex);
+        if (err == XPLR_LOG_OK) {
+            /* Delete the task*/
+            vTaskDelete(gnssLogTaskHandle);
+            /* Free the ring buffer*/
+            vRingbufferDelete(xRingBuffer);
+            XPLRGNSS_CONSOLE(I, "Async logging task disabled");
+            asyncLogIndex = -1;
+            ret = ESP_OK;
+        } else {
+            XPLRGNSS_CONSOLE(E, "Could not terminate logging");
+            ret = ESP_FAIL;
+        }
+        /* Free the semaphore*/
+        xSemaphoreGive(xSemaphore);
+    } else {
+        XPLRGNSS_CONSOLE(E, "Could not take the semaphore to terminate async logging");
+        ret = ESP_FAIL;
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
+int8_t xplrGnssInitLogModule(xplr_cfg_logInstance_t *logCfg)
+{
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (infoLogIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            infoLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                       XPLR_GNSS_INFO_DEFAULT_FILENAME,
+                                       XPLRLOG_FILE_SIZE_INTERVAL,
+                                       XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            infoLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                       logCfg->filename,
+                                       logCfg->sizeInterval,
+                                       logCfg->erasePrev);
+        }
+        ret = infoLogIndex;
+    } else {
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(infoLogIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = infoLogIndex;
+        }
+    }
+
+    return ret;
+}
+
+
+esp_err_t xplrGnssStopLogModule(void)
+{
+    esp_err_t ret;
+    xplrLog_error_t logErr;
+
+    logErr = xplrLogDisable(infoLogIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
+    }
+
+    return ret;
+}
+#endif
+
+esp_err_t xplrGnssFixTypeToString(xplrGnssLocation_t *locData, char *buffer, uint8_t maxLen)
+{
+    esp_err_t ret;
+
+    ret = gnssFixTypeToString(locData, buffer, maxLen);
+
+    return ret;
+}
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
@@ -2191,43 +2373,59 @@ static esp_err_t gnssDeviceOpen(uint8_t dvcProfile)
 {
     xplrGnss_t *locDvc = &dvc[dvcProfile];
     esp_err_t ret;
+
     ret = xplrHlprLocSrvcDeviceOpenNonBlocking(&locDvc->conf->hw,
                                                &locDvc->options.dvcHandler);
     return ret;
 }
 
-static esp_err_t gnssDeviceRestart(uint8_t dvcProfile)
+static esp_err_t gnssDeviceRestart(uint8_t dvcProfile, uint8_t *message)
 {
     esp_err_t ret;
-    uint8_t message[4] = {0};
-    uint8_t buffer[ELEMENTCNT(message) + U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES] = {0};
+    uint8_t buffer[4 + U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES] = {0};
     int16_t length = 0;
+    bool isProfileValid = gnssIsDvcProfileValid(dvcProfile);
 
-    length = uUbxProtocolEncode(0x06, 0x04,
-                                (const char*) message,
-                                ELEMENTCNT(message),
-                                (char*) buffer);
-    if (length > 0) {
-        ret = xplrGnssSendFormattedCommand(dvcProfile, (const char*) buffer, length);
-        if (ret == ESP_OK) {
-            XPLRGNSS_CONSOLE(D, "Reset command issued succesfully");
-            ret = gnssDeviceStop(dvcProfile);
+    if (message == NULL) {
+        XPLRGNSS_CONSOLE(E, "Restart message payload NULL");
+        ret = ESP_ERR_INVALID_ARG;
+    } else if (sizeof(message) != 4) {
+        XPLRGNSS_CONSOLE(E, "Restart message payload out of bounds");
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        ret = ESP_OK;
+    }
+
+    if ((ret == ESP_OK) && isProfileValid) {
+        length = uUbxProtocolEncode(0x06, 0x04,
+                                    (const char *) message,
+                                    sizeof(message),
+                                    (char *) buffer);
+        if (length > 0) {
+            ret = xplrGnssSendFormattedCommand(dvcProfile, (const char *) buffer, length);
             if (ret == ESP_OK) {
-                XPLRGNSS_CONSOLE(D, "Device stop command issued succesfully");
-                XPLRGNSS_CONSOLE(D, "Restart routine executed succesfully.");
+                XPLRGNSS_CONSOLE(D, "Reset command issued successfully");
+                ret = gnssDeviceStop(dvcProfile);
+                if (ret == ESP_OK) {
+                    XPLRGNSS_CONSOLE(D, "Device stop command issued successfully");
+                    XPLRGNSS_CONSOLE(D, "Restart routine executed successfully.");
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Failed to issue reset command!");
+                    XPLRGNSS_CONSOLE(E, "Restart routine failed!");
+                }
             } else {
                 XPLRGNSS_CONSOLE(E, "Failed to issue reset command!");
                 XPLRGNSS_CONSOLE(E, "Restart routine failed!");
+                ret = ESP_FAIL;
             }
         } else {
-            XPLRGNSS_CONSOLE(E, "Failed to issue reset command!");
+            XPLRGNSS_CONSOLE(E, "Encoding UBX command failed with error code [%d]!", length);
             XPLRGNSS_CONSOLE(E, "Restart routine failed!");
             ret = ESP_FAIL;
         }
     } else {
-        XPLRGNSS_CONSOLE(E, "Encoding UBX command failed with error code [%d]!", length);
-        XPLRGNSS_CONSOLE(E, "Restart routine failed!");
-        ret = ESP_FAIL;
+        XPLRGNSS_CONSOLE(E, "Invalid input parameters.");
+        ret = ESP_ERR_INVALID_ARG;
     }
 
     return ret;
@@ -2265,6 +2463,249 @@ static esp_err_t gnssDeviceClose(uint8_t dvcProfile)
     return ret;
 }
 
+/**
+ * Performs Save on Shutdown routine
+*/
+static esp_err_t gnssSaveOnShutdown(uint8_t dvcProfile)
+{
+    esp_err_t ret;
+    int16_t length = 0;
+    uint8_t buffer[4 + U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES] = {0};
+    /**
+     * Restart message payload (HotStart, Controlled GNSS stop). Check page 61 of HPS-1.30 Interface manual
+    */
+    uint8_t restartMsg[4] = {0x00, 0x00, 0x08, 0x00};
+    static bool waitingAck = false;
+    bool isProfileValid = gnssIsDvcProfileValid(dvcProfile);
+
+    if (isProfileValid) {
+        if (!waitingAck) {
+            /*Stop ZED with Controlled GNSS stop and BBR mask of 0 (Hotstart)*/
+            length = uUbxProtocolEncode(0x06,
+                                        0x04,
+                                        (const char *) restartMsg,
+                                        sizeof(restartMsg),
+                                        (char *) buffer);
+            if (length > 0) {
+                ret = xplrGnssSendFormattedCommand(dvcProfile, (const char *) buffer, length);
+                /*Command save of BBR to flash memory with UBX-UPD-SOS-BAC KUP*/
+                if (ret == ESP_OK) {
+                    ret = gnssCreateBackup(dvcProfile);
+                    if (ret == ESP_OK) {
+                        waitingAck = true;
+                    } else {
+                        XPLRGNSS_CONSOLE(E, "Error in backup creation for Save on Shutdown routine");
+                    }
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Error in restarting for Save on Shutdown routine");
+                }
+            } else {
+                ret = ESP_FAIL;
+            }
+        } else {
+            ret = ESP_OK;
+        }
+    } else {
+        XPLRGNSS_CONSOLE(E, "Invalid Device Profile index!");
+        ret = ESP_ERR_INVALID_ARG;
+    }
+
+
+    if (ret == ESP_OK) {
+        /*Poll UBX-UPD-SOS message to see if successful*/
+        ret = gnssBackupCreationAck(dvcProfile);
+    } else {
+        XPLRGNSS_CONSOLE(E, "Save on Shutdown routine failed");
+    }
+
+
+    return ret;
+}
+
+/**
+ * Creates backup configuration for Save on Shutdown feature
+*/
+static esp_err_t gnssCreateBackup(uint8_t dvcProfile)
+{
+    esp_err_t ret;
+    uint8_t backupMsg[4] = {0};
+    uint8_t buffer[4 + U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES] = {0};
+    int16_t length = 0;
+    bool isProfileValid = gnssIsDvcProfileValid(dvcProfile);
+
+    if (isProfileValid) {
+        length = uUbxProtocolEncode(0x09,
+                                    0x14,
+                                    (const char *) backupMsg,
+                                    ELEMENTCNT(backupMsg),
+                                    (char *) buffer);
+        if (length > 0) {
+            ret = xplrGnssSendFormattedCommand(dvcProfile, (const char *) buffer, length);
+            if (ret == ESP_OK) {
+                XPLRGNSS_CONSOLE(D, "Create Backup command issued successfully");
+            } else {
+                XPLRGNSS_CONSOLE(E, "Failed to issue Create Backup command!");
+                XPLRGNSS_CONSOLE(E, "Save on Shutdown routine failed!");
+                ret = ESP_FAIL;
+            }
+        } else {
+            XPLRGNSS_CONSOLE(E, "Encoding UBX command failed with error code [%d]!", length);
+            XPLRGNSS_CONSOLE(E, "Save on Shutdown routine failed!");
+            ret = ESP_FAIL;
+        }
+    } else {
+        XPLRGNSS_CONSOLE(E, "Device profile not found");
+        ret = ESP_ERR_NOT_FOUND;
+    }
+
+    return ret;
+}
+
+/**
+ * Checks for acknowledge message for Save on Shutdown backup creation
+*/
+static esp_err_t gnssBackupCreationAck(uint8_t dvcProfile)
+{
+    esp_err_t ret;
+    xplrGnss_t *locDvc;
+    bool isProfileValid = gnssIsDvcProfileValid(dvcProfile);
+
+    if (isProfileValid) {
+        locDvc = &dvc[dvcProfile];
+        switch (locDvc->conf->backup.state) {
+            case XPLR_GNSS_SOS_STATE_ERROR:
+                XPLRGNSS_CONSOLE(E, "Backup Creation resulted to an error");
+                ret = ESP_FAIL;
+                break;
+            case XPLR_GNSS_SOS_STATE_INITIAL:
+            case XPLR_GNSS_SOS_STATE_FAILED_RESTORE:
+            case XPLR_GNSS_SOS_STATE_RESTORED:
+            case XPLR_GNSS_SOS_STATE_NO_BACKUP:
+                XPLRGNSS_CONSOLE(D, "Backup Creation routine has not responded yet...");
+                ret = ESP_ERR_NOT_FINISHED;
+                break;
+            case XPLR_GNSS_SOS_STATE_UNKNOWN:
+                XPLRGNSS_CONSOLE(E, "Backup Creation was not acknowledged by the device");
+                ret = ESP_FAIL;
+                break;
+            case XPLR_GNSS_SOS_STATE_ACKNOWLEDGED:
+                XPLRGNSS_CONSOLE(D, "Backup Creation routine was successful!");
+                ret = ESP_OK;
+                break;
+            default:
+                XPLRGNSS_CONSOLE(E, "Invalid state to Backup Creation routine");
+                ret = ESP_FAIL;
+                break;
+        }
+    } else {
+        XPLRGNSS_CONSOLE(E, "Device profile not found");
+        ret = ESP_ERR_NOT_FOUND;
+    }
+
+    return ret;
+}
+
+/**
+ * Polls UBX-UPD-SOS message to check if configuration was restored from backup
+*/
+static esp_err_t gnssPollBackupRestore(uint8_t dvcProfile)
+{
+    esp_err_t ret;
+    uint8_t buffer[U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES] = {0};
+    int16_t length = 0;
+    bool isProfileValid = gnssIsDvcProfileValid(dvcProfile);
+
+    if (isProfileValid) {
+        dvc[dvcProfile].conf->backup.cmdAck = 0;
+        length = uUbxProtocolEncode(0x09, 0x14, NULL, 0, (char *)buffer);
+        if (length > 0) {
+            ret = xplrGnssSendFormattedCommand(dvcProfile, (const char *) buffer, length);
+            if (ret == ESP_OK) {
+                XPLRGNSS_CONSOLE(D, "Poll UPD-SOS message command issued successfully");
+            } else {
+                XPLRGNSS_CONSOLE(E, "Failed to issue Poll UPD-SOS message command!");
+                ret = ESP_FAIL;
+            }
+        } else {
+            XPLRGNSS_CONSOLE(E, "Encoding UBX command failed with error code [%d]!", length);
+            ret = ESP_FAIL;
+        }
+    } else {
+        XPLRGNSS_CONSOLE(E, "Device profile not found");
+        ret = ESP_ERR_NOT_FOUND;
+    }
+
+    return ret;
+}
+
+/**
+ * Sends the command to clear the backup configuration from memory
+*/
+static esp_err_t gnssClearBackup(uint8_t dvcProfile)
+{
+    esp_err_t ret;
+    xplrGnss_t *locDvc = &dvc[dvcProfile];
+    uint8_t message[4] = {0x01, 0x00, 0x00, 0x00};
+    uint8_t buffer[4 + U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES] = {0};
+    int16_t length = 0;
+    static bool waitingAck = false;
+    bool isProfileValid = gnssIsDvcProfileValid(dvcProfile);
+
+    if (isProfileValid) {
+        /*Check if system was restored from backup */
+        if (locDvc->conf->backup.isRestored) {
+            if (!waitingAck) {
+                locDvc->conf->backup.cmdAck = 0;
+                /*Clear backup*/
+                length = uUbxProtocolEncode(0x09,
+                                            0x14,
+                                            (const char *) message,
+                                            ELEMENTCNT(message),
+                                            (char *) buffer);
+                if (length > 0) {
+                    ret = xplrGnssSendFormattedCommand(dvcProfile, (const char *) buffer, length);
+                    if (ret == ESP_OK) {
+                        XPLRGNSS_CONSOLE(D, "Clear Backup command issued successfully");
+                        waitingAck = true;
+                    } else {
+                        XPLRGNSS_CONSOLE(E, "Failed to issue Clear Backup command!");
+                        ret = ESP_FAIL;
+                    }
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Encoding UBX command failed with error code [%d]!", length);
+                    ret = ESP_FAIL;
+                }
+            } else {
+                ret = ESP_OK;
+            }
+
+            if (ret == ESP_OK) {
+                /*Check if a ACK message for UPD-SOS has arrived*/
+                if (locDvc->conf->backup.cmdAck == 1) {
+                    XPLRGNSS_CONSOLE(D, "Stored backup configuration erased from memory");
+                    ret = ESP_OK;
+                } else if (locDvc->conf->backup.cmdAck == 0) {
+                    ret = ESP_ERR_NOT_FINISHED;
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Failed to erase stored backup configuration from memory");
+                    ret = ESP_FAIL;
+                }
+            } else {
+                XPLRGNSS_CONSOLE(E, "Failed to command a backup clear");
+                ret = ESP_FAIL;
+            }
+        } else {
+            XPLRGNSS_CONSOLE(D, "System not restored from backup, cannot erase backup");
+            ret = ESP_ERR_NOT_FOUND;
+        }
+    } else {
+        XPLRGNSS_CONSOLE(E, "Device profile not found");
+        ret = ESP_ERR_NOT_FOUND;
+    }
+
+    return ret;
+}
+
 static void gnssResetoptionsFlags(uint8_t dvcProfile)
 {
     xplrGnss_t *locDvc = &dvc[dvcProfile];
@@ -2293,8 +2734,7 @@ static esp_err_t gnssFixTypeToString(xplrGnssLocation_t *locData, char *buffer, 
         XPLRGNSS_CONSOLE(E, "Invalid argument!");
         ret = ESP_ERR_INVALID_ARG;
     } else {
-        switch (locData->locFixType)
-        {
+        switch (locData->locFixType) {
             case XPLR_GNSS_LOCFIX_INVALID:
                 writeLen = snprintf(buffer, maxLen, gnssStrLocfixInvalid);
                 break;
@@ -2694,11 +3134,11 @@ static esp_err_t gnssEsfStatusParser(xplrGnss_t *locDvc, char *buffer)
             locDvc->drData.status.numSens = buffer[21];
 
             for (numSens = 0; numSens < buffer[21]; numSens++) {
-                locDvc->drData.status.sensor[numSens].type  = buffer[22 + (4*numSens)] & 0b00111111;
-                locDvc->drData.status.sensor[numSens].used  = (buffer[22 + (4*numSens)] >> 6) & 1;
-                locDvc->drData.status.sensor[numSens].ready = (buffer[22 + (4*numSens)] >> 7) & 1;
+                locDvc->drData.status.sensor[numSens].type  = buffer[22 + (4 * numSens)] & 0b00111111;
+                locDvc->drData.status.sensor[numSens].used  = (buffer[22 + (4 * numSens)] >> 6) & 1;
+                locDvc->drData.status.sensor[numSens].ready = (buffer[22 + (4 * numSens)] >> 7) & 1;
 
-                switch (buffer[23 + (4*numSens)] & 0b00000011) {
+                switch (buffer[23 + (4 * numSens)] & 0b00000011) {
                     case 0:
                         locDvc->drData.status.sensor[numSens].calibStatus = XPLR_GNNS_SENSOR_CALIB_NOT_CALIBRATED;
                         break;
@@ -2716,8 +3156,8 @@ static esp_err_t gnssEsfStatusParser(xplrGnss_t *locDvc, char *buffer)
                         break;
                 }
 
-                locDvc->drData.status.sensor[numSens].freq = buffer[24 + (4*numSens)];
-                locDvc->drData.status.sensor[numSens].faults.allFaults = buffer[25 + (4*numSens)];
+                locDvc->drData.status.sensor[numSens].freq = buffer[24 + (4 * numSens)];
+                locDvc->drData.status.sensor[numSens].faults.allFaults = buffer[25 + (4 * numSens)];
             }
         }
 
@@ -2754,6 +3194,127 @@ static esp_err_t gnssEsfInsParser(xplrGnss_t *locDvc, char *buffer)
 }
 
 /**
+ * UPD-SOS
+ * Save on Shutdown backup status parser
+*/
+static esp_err_t gnssUpdSoSParser(xplrGnss_t *locDvc, char *buffer)
+{
+    esp_err_t ret;
+    uint8_t cmd;
+    uint8_t response;
+
+    if ((locDvc == NULL) || (buffer == NULL)) {
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        /*Check page 173 of HPS 1.30 Interface manual for more information on the parsing of the message*/
+        cmd = (uint8_t) buffer[6];
+        response = (uint8_t) buffer[6 + 4];
+        switch (cmd) {
+            case 2U:
+                /*Backup creation acknowledge*/
+                if (response == 0) {
+                    locDvc->conf->backup.hasBackup = 0;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_UNKNOWN;
+                } else if (response == 1) {
+                    locDvc->conf->backup.hasBackup = 1;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_ACKNOWLEDGED;
+                } else {
+                    locDvc->conf->backup.hasBackup = 0;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_ERROR;
+                }
+                break;
+            case 3U:
+                /*System restored from backup*/
+                if (response == 0x00) {
+                    locDvc->conf->backup.isRestored = 0;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_UNKNOWN;
+                } else if (response == 0x01) {
+                    locDvc->conf->backup.isRestored = 0;
+                    locDvc->conf->backup.hasBackup = 1;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_FAILED_RESTORE;
+                } else if (response == 0x02) {
+                    locDvc->conf->backup.isRestored = 1;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_RESTORED;
+                } else if (response == 0x03) {
+                    locDvc->conf->backup.isRestored = 0;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_NO_BACKUP;
+                } else {
+                    locDvc->conf->backup.isRestored = 0;
+                    locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_ERROR;
+                }
+                break;
+            default:
+                locDvc->conf->backup.hasBackup = 0;
+                locDvc->conf->backup.isRestored = 0;
+                locDvc->conf->backup.state = XPLR_GNSS_SOS_STATE_ERROR;
+                break;
+
+        }
+        if (locDvc->conf->backup.state == XPLR_GNSS_SOS_STATE_ERROR) {
+            ret = ESP_FAIL;
+        } else {
+            ret = ESP_OK;
+        }
+    }
+
+    return ret;
+}
+
+/**
+ * ACK-ACK Parser
+ * Acknowledgment message parser
+*/
+static esp_err_t gnssAckAckParser(xplrGnss_t *locDvc, char *buffer)
+{
+    esp_err_t ret;
+    uint16_t response;
+
+    if ((locDvc == NULL) || (buffer == NULL)) {
+        XPLRGNSS_CONSOLE(E, "Invalid argument!");
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        response = uUbxProtocolUint16Decode(buffer + 6);
+        response = ((response << 8) & 0xFF00) | ((response >> 8) & 0x00FF);
+        /*Check if msgIdUpdSoS responded ACK*/
+        if (response == msgIdUpdSoS.id.ubx) {
+            ret = ESP_OK;
+            locDvc->conf->backup.cmdAck = 1;
+        } else {
+            ret = ESP_OK;
+        }
+    }
+
+    return ret;
+}
+
+/**
+ * ACK-NACK Parser
+ * Acknowledgment message parser
+*/
+static esp_err_t gnssAckNakParser(xplrGnss_t *locDvc, char *buffer)
+{
+    esp_err_t ret;
+    uint16_t response;
+
+    if ((locDvc == NULL) || (buffer == NULL)) {
+        XPLRGNSS_CONSOLE(E, "Invalid argument!");
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        response = uUbxProtocolUint16Decode(buffer + 6);
+        response = ((response << 8) & 0xFF00) | ((response >> 8) & 0x00FF);
+        /*Check if msgIdUpdSoS responded NACK*/
+        if (response == msgIdUpdSoS.id.ubx) {
+            ret = ESP_OK;
+            locDvc->conf->backup.cmdAck = -1;
+        } else {
+            ret = ESP_FAIL;
+        }
+    }
+
+    return ret;
+}
+
+/**
  * Geolocation parser
  */
 static esp_err_t gnssGeolocationParser(xplrGnss_t *locDvc, char *buffer)
@@ -2763,7 +3324,7 @@ static esp_err_t gnssGeolocationParser(xplrGnss_t *locDvc, char *buffer)
     int32_t year;
     int64_t t = -1;
 
-    switch(locDvc->conf->hw.dvcConfig.deviceType) {
+    switch (locDvc->conf->hw.dvcConfig.deviceType) {
         case U_DEVICE_TYPE_GNSS:
             locDvc->locData.locData.location.type = U_LOCATION_TYPE_GNSS;
             break;
@@ -2813,6 +3374,7 @@ static esp_err_t gnssGeolocationParser(xplrGnss_t *locDvc, char *buffer)
         locDvc->locData.locData.location.longitudeX1e7 = (int32_t) uUbxProtocolUint32Decode(buffer + 30);
         locDvc->locData.locData.location.latitudeX1e7 = (int32_t) uUbxProtocolUint32Decode(buffer + 34);
 
+        /*INDENT-OFF*/
         if (buffer[26] == 0x03) {
             locDvc->locData.locData.location.altitudeMillimetres = (int32_t) uUbxProtocolUint32Decode(buffer + 42);
         } else {
@@ -2821,6 +3383,7 @@ static esp_err_t gnssGeolocationParser(xplrGnss_t *locDvc, char *buffer)
 
         locDvc->locData.locData.location.radiusMillimetres = (int32_t) uUbxProtocolUint32Decode(buffer + 46);
         locDvc->locData.locData.location.speedMillimetresPerSecond = (int32_t) uUbxProtocolUint32Decode(buffer + 66);
+        /*INDENT-ON*/
 
         locDvc->options.flags.status.locMsgDataAvailable = 1;
         locDvc->options.flags.status.locMsgDataRefreshed = 1;
@@ -2836,7 +3399,7 @@ static esp_err_t gnssGeolocationParser(xplrGnss_t *locDvc, char *buffer)
 /**
  * Callback UBX id checker
  */
-static bool gnssUbxIsMessageId(const uGnssMessageId_t *msgIdIncoming, 
+static bool gnssUbxIsMessageId(const uGnssMessageId_t *msgIdIncoming,
                                const uGnssMessageId_t *msgIdToFilter)
 {
     bool ret;
@@ -2854,7 +3417,7 @@ static bool gnssUbxIsMessageId(const uGnssMessageId_t *msgIdIncoming,
 /**
  * Callback NMEA id checker
  */
-static bool gnssNmeaIsMessageId(const uGnssMessageId_t *msgIdIncoming, 
+static bool gnssNmeaIsMessageId(const uGnssMessageId_t *msgIdIncoming,
                                 const uGnssMessageId_t *msgIdToFilter)
 {
     bool ret;
@@ -2881,7 +3444,7 @@ static esp_err_t gnssCalibModeToString(xplrGnssImuCalibMode_t *type,
     esp_err_t ret;
     int writeLen;
 
-    if ((type == NULL) || (typeStr== NULL)) {
+    if ((type == NULL) || (typeStr == NULL)) {
         XPLRGNSS_CONSOLE(E, "Invalid argument!");
         ret = ESP_ERR_INVALID_ARG;
     } else {
@@ -3135,10 +3698,10 @@ static esp_err_t gnssImuAlignStatPrinter(xplrGnssImuFusionStatus_t *status)
             if (ret == ESP_OK) {
                 printf("Sensor type: %s\n", tmpStr);
                 printf("Used: %d | Ready: %d\n",
-                        status->sensor[numSens].used,
-                        status->sensor[numSens].ready);
+                       status->sensor[numSens].used,
+                       status->sensor[numSens].ready);
                 printf("Sensor observation frequency: %d Hz\n",
-                        status->sensor[numSens].freq);
+                       status->sensor[numSens].freq);
                 memset(tmpStr, 0, sizeof(tmpStr));
                 ret = gnssSensorMeasErrToString(&status->sensor[numSens].faults,
                                                 tmpStr,
@@ -3167,8 +3730,8 @@ static esp_err_t gnssImuAlignStatPrinter(xplrGnssImuFusionStatus_t *status)
 /**
  * String helper for sensor error type
  */
-static esp_err_t gnssSensorMeasErrToString(xplrGnssImuEsfStatSensorFaults_t *faults, 
-                                           char *errStr, 
+static esp_err_t gnssSensorMeasErrToString(xplrGnssImuEsfStatSensorFaults_t *faults,
+                                           char *errStr,
                                            uint8_t maxLen)
 {
     esp_err_t ret;
@@ -3307,7 +3870,7 @@ static esp_err_t gnssNvsInit(uint8_t dvcProfile)
 
 /**
  * Loads calibration data from NVS if present.
- * If not populates default invalid values 
+ * If not populates default invalid values
  * (i.e. values which are out of bounds)
  */
 static esp_err_t gnssNvsLoad(uint8_t dvcProfile)
@@ -3384,7 +3947,7 @@ static esp_err_t gnssNvsReadConfig(uint8_t dvcProfile)
     size_t size = NVS_KEY_NAME_MAX_SIZE;
     xplrNvs_error_t err[4];
 
-    err[0] = xplrNvsReadString(&storage->nvs,"id", storage->id, &size);
+    err[0] = xplrNvsReadString(&storage->nvs, "id", storage->id, &size);
 
     err[1] = xplrNvsReadU32(&storage->nvs,
                             "yaw",
@@ -3506,7 +4069,7 @@ static bool gnssCheckYawValLimits(uint32_t yaw)
 static bool gnssCheckPitchValLimits(int16_t pitch)
 {
     bool ret;
-    if ((pitch < gnssSensMinValPitch) || 
+    if ((pitch < gnssSensMinValPitch) ||
         (pitch > gnssSensMaxValPitch)) {
         ret = false;
     } else {
@@ -3521,7 +4084,7 @@ static bool gnssCheckPitchValLimits(int16_t pitch)
 static bool gnssCheckRollValLimits(int16_t roll)
 {
     bool ret;
-    if ((roll < gnssSensMinValRoll) || 
+    if ((roll < gnssSensMinValRoll) ||
         (roll > gnssSensMaxValRoll)) {
         ret = false;
     } else {
@@ -3555,11 +4118,33 @@ static bool gnssCheckAlignValsLimits(uint8_t dvcProfile)
  */
 static esp_err_t gnssLocSetGenericSettings(uint8_t dvcProfile)
 {
+    xplrGnss_t *locDvc = NULL;
     esp_err_t ret;
-    ret = xplrGnssOptionMultiValSet(dvcProfile,
-                                    gnssGenericSettings,
-                                    ELEMENTCNT(gnssGenericSettings),
-                                    U_GNSS_CFG_VAL_LAYER_RAM);
+
+    locDvc = &dvc[dvcProfile];
+    switch (locDvc->conf->hw.dvcType) {
+        case XPLR_LOCATION_DEVICE_ZED_F9R:
+            XPLRGNSS_CONSOLE(D, "Configuring ZED-F9R.");
+            ret = xplrGnssOptionMultiValSet(dvcProfile,
+                                            gnssGenericSettings9R,
+                                            ELEMENTCNT(gnssGenericSettings9R),
+                                            U_GNSS_CFG_VAL_LAYER_RAM);
+            break;
+        case XPLR_LOCATION_DEVICE_ZED_F9P:
+            XPLRGNSS_CONSOLE(D, "Configuring ZED-F9P.");
+            ret = xplrGnssOptionMultiValSet(dvcProfile,
+                                            gnssGenericSettings9P,
+                                            ELEMENTCNT(gnssGenericSettings9P),
+                                            U_GNSS_CFG_VAL_LAYER_RAM);
+            locDvc->conf->dr.enable = false;
+            break;
+
+        default:
+            XPLRGNSS_CONSOLE(E, "GNSS module selected not supported");
+            ret = ESP_FAIL;
+            break;
+    }
+
     return ret;
 }
 
@@ -3672,7 +4257,8 @@ static bool gnssCheckWatchdog(uint8_t dvcProfile)
     bool ret;
 
     if (xSemaphoreTake(locDvc->options.xSemWatchdog, portMAX_DELAY) == pdTRUE) {
-        if (MICROTOSEC(esp_timer_get_time() - locDvc->options.lastWatchdogTime) > XPLR_GNSS_WATCHDOG_TIMEOUT_SECS) {
+        if (MICROTOSEC(esp_timer_get_time() - locDvc->options.lastWatchdogTime) >
+            XPLR_GNSS_WATCHDOG_TIMEOUT_SECS) {
             XPLRGNSS_CONSOLE(E,
                              "Watchdog triggered. No messages in the last [%d] seconds!",
                              XPLR_GNSS_WATCHDOG_TIMEOUT_SECS);
@@ -3733,7 +4319,7 @@ static void gnssLocationPrinter(char *pLocFixTypeStr, xplrGnssLocation_t *locDat
  */
 static void gnssLocPrintLocType(xplrGnssLocation_t *locData)
 {
-    printf("Location type: %d\n", locData->location.type); 
+    printf("Location type: %d\n", locData->location.type);
 }
 
 /**
@@ -3749,11 +4335,11 @@ static void gnssLocPrintFixType(char *pLocFixTypeStr)
  */
 static void gnssLocPrintLongLat(xplrGnssLocation_t *locData)
 {
-    printf("Location latitude: %f (raw: %d)\n", 
-           locData->location.latitudeX1e7  * (1e-7),
+    printf("Location latitude: %.6f (raw: %d)\n",
+           (float)locData->location.latitudeX1e7  * (1e-7),
            locData->location.latitudeX1e7);
-    printf("Location longitude: %f (raw: %d)\n", 
-           locData->location.longitudeX1e7 * (1e-7),
+    printf("Location longitude: %.6f (raw: %d)\n",
+           (float)locData->location.longitudeX1e7 * (1e-7),
            locData->location.longitudeX1e7);
 }
 
@@ -3763,8 +4349,8 @@ static void gnssLocPrintLongLat(xplrGnssLocation_t *locData)
 static void gnssLocPrintAlt(xplrGnssLocation_t *locData)
 {
     if (locData->location.altitudeMillimetres != INT_MIN) {
-        printf("Location altitude: %f (m) | %d (mm)\n", 
-               locData->location.altitudeMillimetres * (1e-3),
+        printf("Location altitude: %f (m) | %d (mm)\n",
+               (float)locData->location.altitudeMillimetres * (1e-3),
                locData->location.altitudeMillimetres);
     } else {
         printf("Location altitude: N/A\n");
@@ -3777,9 +4363,9 @@ static void gnssLocPrintAlt(xplrGnssLocation_t *locData)
 static void gnssLocPrintRad(xplrGnssLocation_t *locData)
 {
     if (locData->location.radiusMillimetres != -1) {
-        printf("Location radius: %f (m) | %d (mm)\n", 
-        locData->location.radiusMillimetres * (1e-3),
-        locData->location.radiusMillimetres);
+        printf("Location radius: %f (m) | %d (mm)\n",
+               locData->location.radiusMillimetres * (1e-3),
+               locData->location.radiusMillimetres);
     } else {
         printf("Location radius: N/A\n");
     }
@@ -3872,8 +4458,7 @@ static void gnssLocPrintTime(xplrGnssLocation_t *locData)
         printf("Calendar Time UTC: Error Parsing Time\n");
     }
 }
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
 static void gnssLogTask(void *pvParams)
 {
     char *item;
@@ -3884,29 +4469,28 @@ static void gnssLogTask(void *pvParams)
         // Take semaphore
         if (xSemaphore != NULL) {
             if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
-                if (asyncLog.isEnabled) {
+                if (xplrLogIsEnabled(asyncLogIndex)) {
                     // Get items waiting number
-                    vRingbufferGetInfo(asyncLog.xRingBuffer, NULL, NULL, NULL, NULL, &cntWaiting);
+                    vRingbufferGetInfo(xRingBuffer, NULL, NULL, NULL, NULL, &cntWaiting);
                     // if items found log them to the SD
                     if (cntWaiting > 0) {
                         for (int i = 0; i < cntWaiting; i++) {
                             // take all messages and log
-                            item = (char *)xRingbufferReceiveFromISR(asyncLog.xRingBuffer, &retSize);
+                            item = (char *)xRingbufferReceiveFromISR(xRingBuffer, &retSize);
                             if (retSize > XPLR_GNSS_LOG_RING_BUF_SIZE) {
                                 XPLRGNSS_CONSOLE(E, "token larger than slot!");
                             } else {
-                                if (item != NULL) {
-                                    xplrSdWriteFileU8(asyncLog.logCfg.sd,
-                                                      asyncLog.logCfg.logFilename,
-                                                      (uint8_t *)item,
-                                                      retSize,
-                                                      XPLR_FILE_MODE_APPEND);
+                                if (retSize > 1023) {
+                                    XPLRGNSS_CONSOLE(W, "Item too large to fit in the logging buffer");
+                                } else if (item != NULL) {
+                                    XPLRLOG(asyncLogIndex, XPLR_LOG_SD_ONLY, "%s", item)
                                 } else {
                                     XPLRGNSS_CONSOLE(W, "Empty item came from ring buffer!");
                                 }
                             }
                             // return the item to ringbuffer to free the slot
-                            vRingbufferReturnItem(asyncLog.xRingBuffer, (void *)item);
+                            vRingbufferReturnItem(xRingBuffer, (void *)item);
+                            item = NULL;
                         }
                     } else {
                         //Do nothing
@@ -3922,20 +4506,17 @@ static void gnssLogTask(void *pvParams)
         }
     }
 }
-#endif
 
-#if (1 == XPLRGNSS_LOG_ACTIVE) && (1 == XPLR_HPGLIB_LOG_ENABLED)
 static void gnssLogCallback(char *buffer, uint16_t length)
 {
     BaseType_t ringRet, dummy;
-
     /* Check if semaphore was created*/
-    if (semaphoreCreated){
+    if (xSemaphore != NULL) {
         // Take semaphore
         if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
-            if (asyncLog.isEnabled && asyncLog.isInit) {
+            if (xplrLogIsEnabled(asyncLogIndex)) {
                 // Send item to ring buffer
-                ringRet = xRingbufferSendFromISR(asyncLog.xRingBuffer,
+                ringRet = xRingbufferSendFromISR(xRingBuffer,
                                                  buffer,
                                                  length,
                                                  &dummy);
@@ -3954,13 +4535,10 @@ static void gnssLogCallback(char *buffer, uint16_t length)
         }
     }
 }
-#endif
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
 // Function that logs the print location messages to the SD card
 static void gnssLogLocationPrinter(char *pLocFixTypeStr, xplrGnssLocation_t *locData)
 {
-
     size_t maxBuff = 511;
     char temp[1024] = {0};
     char timeToHuman[32];
@@ -4052,16 +4630,16 @@ static void gnssLogLocationPrinter(char *pLocFixTypeStr, xplrGnssLocation_t *loc
 
     strncat(temp, "===============================\n", maxBuff);
 
-    XPLRLOG(&locationLog, temp);
+    XPLRLOG(infoLogIndex, XPLR_LOG_SD_ONLY, temp);
 }
 #endif
 
 /* ----------------------------------------------------------------
  * STATIC CALLBACK FUNCTION DEFINITIONS
- * -------------------------------------------------------------- */
+* -------------------------------------------------------------- */
 
 /**
- * All payloads in this callback are in binary form
+* All payloads in this callback are in binary form
  * **/
 static void gnssUbxProtocolCB(uDeviceHandle_t gnssHandle,
                               const uGnssMessageId_t *msgIdToFilter,
@@ -4108,6 +4686,27 @@ static void gnssUbxProtocolCB(uDeviceHandle_t gnssHandle,
                     } else {
                         // do nothing
                     }
+                } else if (gnssUbxIsMessageId(msgIdToFilter, &msgIdUpdSoS)) {
+                    ret = gnssUpdSoSParser(locDvc, buffer);
+                    if (ret != ESP_OK) {
+                        XPLRGNSS_CONSOLE(W, "GNSS UPD-SOS parser failed!");
+                    } else {
+                        //Message is parsed. Do nothing
+                    }
+                } else if (gnssUbxIsMessageId(msgIdToFilter, &msgIdAckAck)) {
+                    ret = gnssAckAckParser(locDvc, buffer);
+                    if (ret != ESP_OK) {
+                        XPLRGNSS_CONSOLE(W, "GNSS ACK-ACK parser failed!");
+                    } else {
+                        //Message is parsed. Do nothing
+                    }
+                } else if (gnssUbxIsMessageId(msgIdToFilter, &msgIdAckNak)) {
+                    ret = gnssAckNakParser(locDvc, buffer);
+                    if (ret != ESP_OK) {
+                        XPLRGNSS_CONSOLE(W, "GNSS ACK-NACK parser failed!");
+                    } else {
+                        //Message is parsed. Do nothing
+                    }
                 }
             } else {
                 XPLRGNSS_CONSOLE(W,
@@ -4127,7 +4726,7 @@ static void gnssUbxProtocolCB(uDeviceHandle_t gnssHandle,
 }
 
 /**
- * All payloads in this callback are in text form
+* All payloads in this callback are in text form
  * **/
 static void gnssNmeaProtocolCB(uDeviceHandle_t gnssHandle,
                                const uGnssMessageId_t *msgIdToFilter,
@@ -4159,9 +4758,9 @@ static void gnssNmeaProtocolCB(uDeviceHandle_t gnssHandle,
                     // do nothing
                 }
             } else {
-                XPLRGNSS_CONSOLE(W, 
+                XPLRGNSS_CONSOLE(W,
                                  "NMEA protocol async length read missmatch: read [%d] bytes - message must be size [%d]!",
-                                 cbRead, 
+                                 cbRead,
                                  errorCodeOrLength);
             }
         } else {

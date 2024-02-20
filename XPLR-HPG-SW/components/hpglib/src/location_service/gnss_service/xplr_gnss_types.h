@@ -53,7 +53,8 @@
 typedef enum {
     XPLR_GNSS_ERROR = -1,   /**< process returned with errors. */
     XPLR_GNSS_OK = 0,       /**< indicates success of returning process. */
-    XPLR_GNSS_BUSY          /**< indicates process is busy. */
+    XPLR_GNSS_BUSY,         /**< indicates process is busy. */
+    XPLR_GNSS_STOPPED       /**< indicates module has stopped */
 } xplrGnssError_t;
 
 /** States describing the MQTT Client. */
@@ -63,7 +64,6 @@ typedef enum {
     XPLR_GNSS_STATE_TIMEOUT,                /**< timeout state. */
     XPLR_GNSS_STATE_ERROR,                  /**< error state. */
     XPLR_GNSS_STATE_DEVICE_READY = 0,       /**< ok state. */
-    XPLR_GNSS_STATE_ENABLE_LOG,             /**< enables logging if configured. */
     XPLR_GNSS_STATE_DEVICE_OPEN,            /**< opening device state. */
     XPLR_GNSS_STATE_CREATE_SEMAPHORE,       /**< creating semaphore state. */
     XPLR_GNSS_STATE_SET_GEN_LOC_SETTINGS,   /**< setting up generic GNSS settings. */
@@ -79,6 +79,8 @@ typedef enum {
     XPLR_GNSS_STATE_WAIT,                   /**< wait non blocking state. */
     XPLR_GNSS_STATE_DEVICE_STOP,            /**< stops device - unconfigured state. */
     XPLR_GNSS_STATE_NVS_UPDATE,             /**< update/save data to NVS. */
+    XPLR_GNSS_STATE_SAVE_ON_SHUTDOWN,       /**< perform save on shutdown routine. */
+    XPLR_GNSS_STATE_CLEAR_BACKUP_MEMORY,    /**< clears previously save backup configuration from memory. */
 } xplrGnssStates_t;
 
 /**
@@ -303,12 +305,37 @@ typedef struct xplrGnssCorrectionCfg_type {
 } xplrGnssCorrectionCfg_t;
 
 /**
+ * Enumeration that contains the different Save on Shutdown
+ * configuration states
+ */
+typedef enum {
+    XPLR_GNSS_SOS_STATE_ERROR = -1,     /**< Invalid or error state. */
+    XPLR_GNSS_SOS_STATE_INITIAL = 0,    /**< Initial state*/
+    XPLR_GNSS_SOS_STATE_UNKNOWN,        /**< Unknown or Not Acknowledged state. */
+    XPLR_GNSS_SOS_STATE_ACKNOWLEDGED,   /**< Acknowledged state. */
+    XPLR_GNSS_SOS_STATE_FAILED_RESTORE, /**< Failed to restore backup configuration */
+    XPLR_GNSS_SOS_STATE_RESTORED,       /**< Successfully restored backup configuration from memory */
+    XPLR_GNSS_SOS_STATE_NO_BACKUP       /**< No backup found in memory */
+} xplrGnssSoSConfigStates_t;
+
+/**
+ * Struct that contains the Save on Shutdown configuration flags
+*/
+typedef struct xplrGnssShutdownCfg_type {
+    xplrGnssSoSConfigStates_t state;    /**< State of Save on Shutdown */
+    bool isRestored;                    /**< Flag indicating module has successfully restored configuration from backup */
+    bool hasBackup;                     /**< Flag indicating module has saved backup configuration in flash */
+    int cmdAck;                         /**< Flag indicating module has acknowledged clear backup configuration command */
+} xplrGnssShutdownCfg_t;
+
+/**
  * Struct that contains location metrics
  */
 typedef struct xplrGnssDeviceCfg_type {
     xplrLocationDevConf_t hw;           /**< Hardware specific settings. */
     xplrGnssDeadReckoningCfg_t dr;      /**< Dead Reckoning settings. */
     xplrGnssCorrectionCfg_t corrData;   /**< Correction data settings. */
+    xplrGnssShutdownCfg_t backup;       /**< Configuration for Save On Shutdown */
 } xplrGnssDeviceCfg_t;
 
 /**
@@ -321,18 +348,6 @@ typedef enum{
     XPLR_GNSS_LOG_MODULE_ALL            /**< All gnss log submodules */
 } xplrGnssLogModule_t;
 
-/**
- * Struct that contains the required variables for the async logging
- * of gnss messages.
-*/
-typedef struct xplrGnssAsyncLog_type{
-    RingbufHandle_t     xRingBuffer;        /**< Ring Buffer to store messages coming from the GNSS async callback */
-    TaskHandle_t        gnssLogTaskHandle;  /**< Handler of the async logging task */
-    xplrLog_t           logCfg;             /**< log struct for the async logging*/
-    uint8_t             firstDvcProfile;    /**< The device profile of the first device initializing the logging task */
-    bool                isInit;             /**< Flag raised when the first device has initialized the logging task */
-    bool                isEnabled;          /**< Flag that enables/halts the logging task */
-} xplrGnssAsyncLog_t;
 /*INDENT-ON*/
 
 #endif

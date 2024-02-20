@@ -240,11 +240,15 @@ Z-axis acceleration (gravity-free): 0.00 m/s^2
 ...
 ```
 
-**NOTE:** Vehicle dynamics will only be printed if the module has been calibrated.
+**NOTE:**
+- Vehicle dynamics will only be printed if the module has been calibrated.
+- Dead reckoning is only available in ZED-F9R GNSS module.
 
 <br>
 
 ## Build instructions
+
+### Building using Visual Studio Code
 Building this example requires to edit a minimum set of files in order to select the corresponding source files and configure Wi-Fi and MQTT settings using Kconfig.
 Please follow the steps described below:
 
@@ -280,7 +284,13 @@ Please follow the steps described below:
    #define XPLRLOG_DEBUG_ACTIVE               (1U)
    #define XPLRSD_DEBUG_ACTIVE                (1U)
    ```
-4. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
+4. Open the [app](./main/hpg_wifi_mqtt_correction_sd_config_file.c) and select if you need logging to the SD card for your application.
+   ```
+   #define APP_SD_LOGGING_ENABLED      0U
+   ```
+   This is a general option that enables or disables the SD logging functionality for all the modules. <br> 
+   To enable/disable the individual module debug message SD logging:
+   - Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
    For more information about the **logging service of hpglib** follow **[this guide](./../../../components/hpglib/src/log_service/README.md)**
    ```
    ...
@@ -289,26 +299,37 @@ Please follow the steps described below:
    #define XPLRGNSS_LOG_ACTIVE                (1U)
    ...
    #define XPLRLOCATION_LOG_ACTIVE            (1U)
+   #define XPLRNVS_LOG_ACTIVE                 (1U)
    ...
    #define XPLR_THINGSTREAM_LOG_ACTIVE        (1U)
    #define XPLRWIFISTARTER_LOG_ACTIVE         (1U)
    ...
    #define XPLRMQTTWIFI_LOG_ACTIVE            (1U)
-   ...
-   #define XPLRCREDJSONPARSER_LOG_ACTIVE      (1U)
    ```
+   - Alternatively, you can enable or disable the individual module debug message logging to the SD card by modifying the value of the `appLog.logOptions.allLogOpts` bit map, located in the [app](./main/hpg_wifi_mqtt_correction_sd_config_file.c). This gives the user the ability to enable/disable each logging instance in runtime, while the macro options in the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) give the option to the user to fully disable logging and ,as a result, have a smaller memory footprint.
 5. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
 6. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
 7. Navigate to the `Board Options` section and select the board you wish to build the example for.
-8. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point SSID` and configure you **Access Point's SSID** as needed.
-9. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure you **Access Point's Password** as needed.
-10. Download the required configuration file from **Thingstream** by following this **[guide](./../../../docs/README_thingstream_ucenter_config.md)**, then copy the downloaded file in your SD card and insert it in the SD card slot of your board.
-11. Copy and paste the name of your file in the **[static char configFilename[128]](./main/hpg_wifi_mqtt_correction_sd_config_file.c)** variable.
-12. Change **APP_REGION** macro , declared in [app mqtt pp](./../02_hpg_cell_mqtt_correction_certs/main/hpg_cell_mqtt_correction_certs.c), according to your **[Thingstream](https://developer.thingstream.io/home)** service location.\
-   Possible values are **XPLR_THINGSTREAM_PP_REGION_EU** and **XPLR_THINGSTREAM_PP_REGION_US** as they are the only supported regions at the moment.
-13. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
+8. Under the `Board Options` settings make sure to select the GNSS module that your kit is equipped with. By default ZED-F9R is selected.
+9. Navigate to the [Dead Reckoning](./../../../docs/README_dead_reckoning.md) and Enable/Disable it according to your needs.
+10. Go to `XPLR HPG Options -> Correction Data Source -> Choose correction data source for your GNSS module` and select the **Correction data source** you need for your GNSS module.
+11. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point SSID` and configure you **Access Point's SSID** as needed.
+12. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure you **Access Point's Password** as needed.
+13. Download the required configuration file from **Thingstream** by following this **[guide](./../../../docs/README_thingstream_ucenter_config.md)**, then copy the downloaded file in your SD card and insert it in the SD card slot of your board.
+14. Go to `XPLR HPG Options -> u-center Config -> u-center Config Filename` and paste the name of your configuration file in your SD card.
+15. Change **APP_REGION** macro ,according to your **[Thingstream](https://developer.thingstream.io/home)** service location.
+16. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
 
+### Building using ESP-IDF from a command line
+1. Navigate to the `XPLR-HPG-SW` root folder.
+2. In [CMakeLists](./../../../CMakeLists.txt) select the `hpg_wifi_mqtt_correction_sd_config_file` project, making sure that all other projects are commented out.
+3. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to be logged in the SD card or the debug UART.
+4. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `idf.py menuconfig`.
+5. Navigate to the fields mentioned above from step 7 through 15 and provide the appropriate configuration. When finished press `q` and answer `Y` to save the configuration.
+6. Run `idf.py build` to compile the project.
+7. Run `idf.py -p COMX flash` to flash the binary to the board, where **COMX** is the `COM Port` that the XPLR-HPGx has enumerated on.
+8. Run `idf.py monitor -p COMX` to monitor the debug UART output.
 
 ## Kconfig/Build Definitions-Macros
 This is a description of definitions and macros configured by **[Kconfig](./../../../docs/README_kconfig.md)**.\
@@ -318,7 +339,9 @@ In most cases, these values can be directly overwritten in the source code or ju
 Name | Default value | Belongs to | Description | Manual overwrite notes
 --- | --- | --- | --- | ---
 **`CONFIG_BOARD_XPLR_HPGx_C21x`** | "CONFIG_BOARD_XPLR_HPG2_C214" | **[boards](./../../../components/boards)** | Board variant to build firmware for.|
-**`CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE`** | "Disabled" | **[hpg_gnss_lband_correction](./main/hpg_gnss_lband_correction.c)** | Enables or Disables Dead Reckoning functionality. |
+**`CONFIG_GNSS_MODULE`** | "ZED-F9R" | **[boards](./../../../components/boards)** | Selects the GNSS module equipped. |
+**`CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE`** | "Disabled" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_sd_config_file.c)** | Enables or Disables Dead Reckoning functionality. |
+**`CONFIG_XPLR_CORRECTION_DATA_SOURCE`** | "Correction via IP" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_sd_config_file.c)** | Selects the source of the correction data to be forwarded to the GNSS module. |
 **`CONFIG_XPLR_WIFI_SSID`** | "ssid" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_sd_config_file.c)** | AP SSID name to try and connect to. | You can replace this value by either directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.v
 **`CONFIG_XPLR_WIFI_PASSWORD`** | "password" | **[hpg_hpg_wifi_mqtt_correction_certs](./main/hpg_wifi_mqtt_correction_sd_config_file.c)** | AP password to try and connect to.| You can replace this value by either directly editing source code in the app or using **[KConfig](./../../../docs/README_kconfig.md)**.
 <br>
@@ -338,7 +361,12 @@ Name | Description
 **`APP_LOCATION_PRINT_PERIOD `** | Period in seconds on how often we want our print location function \[**`appPrintLocation(uint8_t periodSecs)`**\] to execute. Can be changed as desired.
 **`APP_DEAD_RECKONING_PRINT_PERIOD`** | Interval, in seconds, of how often we want the location to be printed.
 **`APP_GNSS_I2C_ADDR `** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
-**`APP_REGION`** | Thingstream service location.
+**`APP_LBAND_I2C_ADDR`** | I2C address for **[NEO-D9S](https://www.u-blox.com/en/product/neo-d9s-series)**  module.
+**`APP_REGION`** | Thingstream service region.
+**`APP_ENABLE_CORR_MSG_WDG`** | Option to enable the correction message watchdog mechanism.
+**`APP_INACTIVITY_TIMEOUT`** | Time in seconds to trigger an inactivity timeout and cause a restart.
+**`APP_RESTART_ON_ERROR`** | Trigger soft reset if device in error state.
+**`APP_SD_HOT_PLUG_FUNCTIONALITY`** | Option to enable the hot plug functionality of the SD card driver (being able to insert and remove the card in runtime).
 <br>
 
 ## Modules-Components used
@@ -351,6 +379,7 @@ Name | Description
 **[xplr_mqtt](./../../../components/xplr_mqtt)** | XPLR MQTT manager.
 **[hpglib/thingstream_service](./../../../components/hpglib/src/thingstream_service/)** | XPLR thingstream parser.
 **[hpglib/location_services/xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)** | XPLR GNSS location device manager.
+**[hpglib/location_services/xplr_lband_service](./../../../components/hpglib/src/location_service/lband_service/)** | XPLR LBAND service manager.
 **[hpglib/location_services/location_service_helpers](./../../../components/hpglib/src/location_service/location_service_helpers/)** | Internally used by **[xplr_gnss_service](./../../../components/hpglib/src/location_service/gnss_service/)**.
 **[hpglib/log_service](./../../../components/hpglib/src/log_service/)** | XPLR logging service.
 **[hpglib/sd_service](./../../../components/hpglib/src/sd_service/)** | XPLR SD card driver.

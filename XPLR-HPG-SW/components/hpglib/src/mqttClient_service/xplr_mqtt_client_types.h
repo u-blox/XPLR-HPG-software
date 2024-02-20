@@ -153,7 +153,8 @@ typedef struct xplrCell_mqtt_client_type {
     (int32_t numUnread, void *received);
     void (*disconnected)                            /**< function pointer to client disconnect callback. */
     (int32_t status, void *param);
-    xplrLog_t                       *logCfg;        /**< Pointer to the log struct. */
+    int64_t                         lastActionTime; /**< Last action time. Used to trigger watchdog */
+    bool                            enableWdg;      /**< Option to enable module's watchdog timer */
 } xplrCell_mqtt_client_t;
 
 #ifdef __cplusplus

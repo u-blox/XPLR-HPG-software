@@ -58,43 +58,37 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
+#define APP_PRINT_IMU_DATA         0U /* Disables/Enables imu data printing*/
 #define APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
-#define APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 0 for disabling */
+#define APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 1 for enabling*/
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
 #if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0) XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_AND_PRINT, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_PRINT_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_CONSOLE(tag, message, ...)\
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define APP_CONSOLE(message, ...) do{} while(0)
-#endif
-
-/**
- * Logging configuration macros
-*/
-#if (1 == APP_SD_LOGGING_ENABLED)
-static char appLogFilename[] =
-    "/APPLOG.TXT";               /**< Follow the same format if changing the filename*/
-static char errorLogFilename[] =
-    "/ERRORLOG.TXT";           /**< Follow the same format if changing the filename*/
-static uint8_t logFileMaxSize =
-    100;                        /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U)*/
-static xplrLog_size_t logFileMaxSizeType =
-    XPLR_SIZE_MB;    /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB)*/
 #endif
 
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
+
+typedef union appLog_Opt_type {
+    struct {
+        uint8_t appLog          : 1;
+        uint8_t comLog          : 1;
+    } singleLogOpts;
+    uint8_t allLogOpts;
+} appLog_Opt_t;
+
+typedef struct appLog_type {
+    appLog_Opt_t    logOptions;
+    int8_t          appLogIndex;
+    int8_t          comLogIndex;
+} appLog_t;
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -113,11 +107,11 @@ static uNetworkCfgCell_t netConfig;
 /* hpg com service configuration struct  */
 static xplrCom_cell_config_t cellConfig;
 
-#if (1 == APP_SD_LOGGING_ENABLED)
-/* static log configuration struct*/
-static xplrLog_t appLog, errorLog;
-static char appBuff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
-#endif
+static appLog_t appLogCfg = {
+    .logOptions.allLogOpts = ~0, // All modules selected to log
+    .appLogIndex = -1,
+    .comLogIndex = -1
+};
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -125,19 +119,26 @@ static char appBuff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
 
 /* configures cell settings. Needs to be called once, before calling the xplrComCellFsmConnect() function*/
 static void configCellSettings(xplrCom_cell_config_t *cfg);
-static void appInitLog(void);
 #if (1 == APP_SD_LOGGING_ENABLED)
-static void appDeInitLog(void);
+static esp_err_t appInitLogging(void);
+static void appDeInitLogging(void);
 #endif
+static void appHaltExecution(void);
 
 /* ----------------------------------------------------------------
  * MAIN APP
  * -------------------------------------------------------------- */
 void app_main(void)
 {
-
-    /* Initialize logging first to catch any potential errors*/
-    appInitLog();
+#if (APP_SD_LOGGING_ENABLED == 1)
+    esp_err_t espRet;
+    espRet = appInitLogging();
+    if (espRet != ESP_OK) {
+        APP_CONSOLE(E, "Logging failed to initialize");
+    } else {
+        APP_CONSOLE(I, "Logging initialized!");
+    }
+#endif
 
     APP_CONSOLE(I, "XPLR-HPG kit Demo: CELL Register\n");
 
@@ -148,9 +149,11 @@ void app_main(void)
 
     hpgComRes = xplrUbxlibInit(); /* Initialise the ubxlib APIs we will need */
     if (hpgComRes == XPLR_COM_OK) {
+        XPLR_CI_CONSOLE(2101, "OK");
         configCellSettings(&cellConfig); /* Setup configuration parameters for hpg com */
         hpgComRes = xplrComCellInit(&cellConfig); /* Initialize hpg com */
     } else {
+        XPLR_CI_CONSOLE(2101, "ERROR");
         APP_CONSOLE(E, "Cell setting init failed with code %d.\n", hpgComRes);
     }
 
@@ -164,6 +167,7 @@ void app_main(void)
             switch (xplrComCellFsmConnectGetState(cellConfig.profileIndex)) {
                 case XPLR_COM_CELL_CONNECTED:
                     APP_CONSOLE(I, "Cell module is Online.");
+                    XPLR_CI_CONSOLE(2102, "OK");
                     appFinished = true;
                     APP_CONSOLE(I, "App finished.");
                     /* quick blink 5 times*/
@@ -178,6 +182,7 @@ void app_main(void)
                     APP_CONSOLE(W, "Cell module is Offline.");
                     appFinished = true;
                     APP_CONSOLE(E, "App finished with errors.");
+                    XPLR_CI_CONSOLE(2102, "ERROR");
                     /* slow blink 5 times*/
                     for (int i = 0; i < 5; i++) {
                         xplrBoardSetLed(XPLR_BOARD_LED_TOGGLE);
@@ -190,13 +195,14 @@ void app_main(void)
                     appFinished = false;
                     break;
             }
-        }
-#if (1 == APP_SD_LOGGING_ENABLED)
-        if (appFinished && appLog.logEnable && errorLog.logEnable) {
+        } else {
             xplrBoardSetPower(XPLR_PERIPHERAL_LTE_ID, false);
-            appDeInitLog();
-        }
+#if (1 == APP_SD_LOGGING_ENABLED)
+            appDeInitLogging();
 #endif
+            appHaltExecution();
+        }
+
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
@@ -204,6 +210,99 @@ void app_main(void)
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
+
+#if (APP_SD_LOGGING_ENABLED == 1)
+static esp_err_t appInitLogging(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+
+    /* Configure the SD card */
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = ESP_FAIL;
+    } else {
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        /* A time window so that the card gets detected*/
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
+            ret = ESP_FAIL;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = ESP_FAIL;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = ESP_OK;
+            }
+        }
+    }
+
+    if (ret == ESP_OK) {
+        /* Start logging for each module (if selected in configuration) */
+        if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
+            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                "main_app.log",
+                                                XPLRLOG_FILE_SIZE_INTERVAL,
+                                                XPLRLOG_NEW_FILE_ON_BOOT);
+            if (appLogCfg.appLogIndex >= 0) {
+                APP_CONSOLE(D, "Application logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.comLog == 1) {
+            appLogCfg.comLogIndex = xplrComCellInitLogModule(NULL);
+            if (appLogCfg.comLogIndex >= 0) {
+                APP_CONSOLE(D, "COM Cell logging instance initialized");
+            }
+        }
+    }
+
+    return ret;
+}
+
+static void appDeInitLogging(void)
+{
+    xplrLog_error_t logErr;
+    xplrSd_error_t sdErr = XPLR_SD_ERROR;
+
+    logErr = xplrLogDisableAll();
+    if (logErr != XPLR_LOG_OK) {
+        APP_CONSOLE(E, "Error disabling logging");
+    } else {
+        logErr = xplrLogDeInitAll();
+        if (logErr != XPLR_LOG_OK) {
+            APP_CONSOLE(E, "Error de-initializing logging");
+        } else {
+            // Do nothing
+        }
+    }
+
+    if (logErr == XPLR_LOG_OK) {
+        sdErr = xplrSdStopCardDetectTask();
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Error stopping the the SD card detect task");
+        }
+    }
+
+    if (logErr == XPLR_LOG_OK) {
+        sdErr = xplrSdDeInit();
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Error de-initializing the SD card");
+        }
+    } else {
+        //Do nothing
+    }
+
+    if (logErr == XPLR_LOG_OK && sdErr == XPLR_SD_OK) {
+        APP_CONSOLE(I, "Logging service de-initialized successfully");
+    }
+}
+#endif
 
 static void configCellSettings(xplrCom_cell_config_t *cfg)
 {
@@ -253,28 +352,10 @@ static void configCellSettings(xplrCom_cell_config_t *cfg)
     cfg->bandList[5] = 0;
 }
 
-static void appInitLog(void)
+static void appHaltExecution(void)
 {
-#if (1 == APP_SD_LOGGING_ENABLED)
-    xplrLog_error_t err = xplrLogInit(&errorLog, XPLR_LOG_DEVICE_ERROR, errorLogFilename,
-                                      logFileMaxSize, logFileMaxSizeType);
-    if (err == XPLR_LOG_OK) {
-        errorLog.logEnable = true;
-        err = xplrLogInit(&appLog, XPLR_LOG_DEVICE_INFO, appLogFilename, logFileMaxSize,
-                          logFileMaxSizeType);
+    APP_CONSOLE(W, "App finished halting execution...");
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    if (err == XPLR_LOG_OK) {
-        appLog.logEnable = true;
-    } else {
-        APP_CONSOLE(E, "Error initializing logging...");
-    }
-#endif
 }
-
-#if (1 == APP_SD_LOGGING_ENABLED)
-static void appDeInitLog(void)
-{
-    xplrLogDeInit(&appLog);
-    xplrLogDeInit(&errorLog);
-}
-#endif

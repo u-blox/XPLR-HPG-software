@@ -38,10 +38,10 @@ This is possible with the [HPG library](./XPLR-HPG-SW/components/) , a library d
 
 In addition to the [HPG library](./XPLR-HPG-SW/components/), the HPG software includes [examples](./XPLR-HPG-SW/examples/) that showcase the usage of the software in realistic scenarios and use cases such as:
 
-* [Achieving High Precision GNSS via LBand Satellite correction data](./XPLR-HPG-SW/examples/positioning/02_hpg_gnss_lband_correction/) (case 1)
+* Correction data over L-band satellite ([cell](./XPLR-HPG-SW/examples/positioning/02_hpg_gnss_lband_correction/) and [wi-fi](./XPLR-HPG-SW/examples/shortrange/03_hpg_wifi_mqtt_correction_certs/)) (case 1)
 
-* [Achieving High Precision GNSS via correction data taken from Thingstream, using Cellular.](./XPLR-HPG-SW/examples/cellular/02_hpg_cell_mqtt_correction_certs/) (case 2)
+* [Correction data over Cellular](./XPLR-HPG-SW/examples/cellular/02_hpg_cell_mqtt_correction_certs/) (case 2)
 
-* [Achieving High Precision GNSS via correction data taken from Thingstream, using WiFi.](./XPLR-HPG-SW/examples/shortrange/03_hpg_wifi_mqtt_correction_certs/) (case 3)
+* [Correction data over Wi-Fi](./XPLR-HPG-SW/examples/shortrange/03_hpg_wifi_mqtt_correction_certs/) (case 3)
 
 XPLR-HPG hardware come preflashed with the [Captive Portal](./XPLR-HPG-SW/examples/shortrange/05_hpg_wifi_mqtt_correction_captive_portal/) demo application, showcasing some key features of the kits. Through this application a user friendly, web based interface is available to the user for configuring and evaluating the XPLR-HPG kits.

@@ -16,7 +16,7 @@ Examples provided are tested and verified to run under Windows using the tools r
 ### Dependencies
 * [Microsoft VS Code](https://code.visualstudio.com/).
 * [ESP-IDF extension for VS Code](https://github.com/espressif/vscode-esp-idf-extension/blob/master/docs/tutorial/install.md).
-* [ESP-IDF core](https://github.com/espressif/esp-idf/tree/v4.4.2) version 4.4.2
+* [ESP-IDF core](https://github.com/espressif/esp-idf/tree/v4.4.4) version 4.4.4
 * [ubxlib for HPG](https://github.com/u-blox/ubxlib/tree/hpg)
 * [CP210x USB-to-Serial driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers?tab=downloads)
 * **LARA** (cellular module) firmware should be: **00.13,A00.01**
@@ -111,3 +111,6 @@ Again, for more info regarding ```menuconfig``` it is strongly recommended to go
 It is possible to flash pre-compiled binaries, without using VS Code or having to download and install the ESP-IDF framework.<br>
 As an example we have provided, in binary format, the [Captive Portal Demo](./examples/shortrange/05_hpg_wifi_mqtt_correction_captive_portal/) application under the [releases](./bin/releases/) folder along with [flashing instructions](./docs/README_flashing_guide.md).<br>
 If need be to create binaries from another example, it is required to build the project and grab the generated binaries from the `./build` folder. Minor adjustments to match the `project_name`, `selected target` and `com port` in the build command will be needed but the process should be straight forward.
+
+## FAQ Section
+If in doubt when trying to evaluate an example, having trouble compiling, flashing it to your device or you are seeing errors in your debug console, don't forget to have a look at the [FAQ](./docs/README_faq.md) section and the README file of the example your are trying to build / flash.

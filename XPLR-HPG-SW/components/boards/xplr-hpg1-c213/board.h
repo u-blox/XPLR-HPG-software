@@ -180,7 +180,8 @@ typedef enum xplr_board_info_type {
 /** Board peripheral to control / take action on. */
 typedef enum xplr_board_peripheral_id_type {
     XPLR_PERIPHERAL_NA = -1,
-    XPLR_PERIPHERAL_LTE_ID       /**< cellular module available on the board. */
+    XPLR_PERIPHERAL_LTE_ID,       /**< cellular module available on the board. */
+    XPLR_PERIPHERAL_SD_DETECT
 } xplr_board_peripheral_id_t;
 
 /** LED specific commands. */

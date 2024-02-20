@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef XPLR_NTRIP_CLIENT_H_
-#define XPLR_NTRIP_CLIENT_H_
+#ifndef XPLR_CELL_NTRIP_CLIENT_H_
+#define XPLR_CELL_NTRIP_CLIENT_H_
 
 /* Only header files representing a direct and unavoidable
  * dependency between the API of this module and the API
@@ -23,6 +23,7 @@
  * please keep #includes to your .c files. */
 
 #include "xplr_cell_ntrip_client_types.h"
+#include "xplr_common.h"
 #include "./../../../components/ubxlib/ubxlib.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -55,40 +56,40 @@ extern "C" {
  * @param  client           client handle
  * @param  ntripSemaphore   semaphore handle used by NTRIP client (needs to be created in application)
  *
- * @return XPLR_CELL_NTRIP_OK on success, XPLR_CELL_NTRIP_ERROR otherwise.
+ * @return XPLR_NTRIP_OK on success, XPLR_NTRIP_ERROR otherwise.
  */
-xplrCell_ntrip_error_t xplrCellNtripInit(xplrCell_ntrip_client_t *client,
-                                         SemaphoreHandle_t ntripSemaphore);
+xplr_ntrip_error_t xplrCellNtripInit(xplrCell_ntrip_client_t *client,
+                                     SemaphoreHandle_t ntripSemaphore);
 
 /**
  * @brief Provide a GGA NMEA message to the NTRIP client.
- *        Use this function when xplrCellNtripGetClientState returns XPLR_CELL_NTRIP_STATE_REQUEST_GGA
+ *        Use this function when xplrCellNtripGetClientState returns XPLR_NTRIP_STATE_REQUEST_GGA
  *
  * @param  client           client handle
  * @param  buffer           buffer containing GGA message
  * @param  ggaSize          size of GGA message
  *
- * @return XPLR_CELL_NTRIP_OK on success, XPLR_CELL_NTRIP_ERROR otherwise.
+ * @return XPLR_NTRIP_OK on success, XPLR_NTRIP_ERROR otherwise.
  */
-xplrCell_ntrip_error_t xplrCellNtripSendGGA(xplrCell_ntrip_client_t *client,
-                                            char *buffer,
-                                            uint32_t ggaSize);
+xplr_ntrip_error_t xplrCellNtripSendGGA(xplrCell_ntrip_client_t *client,
+                                        char *buffer,
+                                        uint32_t ggaSize);
 
 /**
  * @brief Get correction data from the NTRIP client buffer
- *        Use this function after xplrCellNtripGetClientState returns XPLR_CELL_NTRIP_STATE_CORRECTION_DATA_AVAILABLE
+ *        Use this function after xplrCellNtripGetClientState returns XPLR_NTRIP_STATE_CORRECTION_DATA_AVAILABLE
  *
  * @param  client           client handle
  * @param  buffer           buffer to hoold correction data
  * @param  bufferSize       size of buffer
  * @param  corrDataSize     pointer to uint32_t, size of correction data in buffer
  *
- * @return XPLR_CELL_NTRIP_OK on success, XPLR_CELL_NTRIP_ERROR otherwise.
+ * @return XPLR_NTRIP_OK on success, XPLR_NTRIP_ERROR otherwise.
  */
-xplrCell_ntrip_error_t xplrCellNtripGetCorrectionData(xplrCell_ntrip_client_t *client,
-                                                      char *buffer,
-                                                      uint32_t bufferSize,
-                                                      uint32_t *corrDataSize);
+xplr_ntrip_error_t xplrCellNtripGetCorrectionData(xplrCell_ntrip_client_t *client,
+                                                  char *buffer,
+                                                  uint32_t bufferSize,
+                                                  uint32_t *corrDataSize);
 
 /**
  * @brief Used in the APP to retrieve NTRIP client FSM state
@@ -98,7 +99,7 @@ xplrCell_ntrip_error_t xplrCellNtripGetCorrectionData(xplrCell_ntrip_client_t *c
  *
  * @return xplrCell_ntrip_status_t enum indicating the status of the NTRIP client
  */
-xplrCell_ntrip_state_t xplrCellNtripGetClientState(xplrCell_ntrip_client_t *client);
+xplr_ntrip_state_t xplrCellNtripGetClientState(xplrCell_ntrip_client_t *client);
 
 /**
  * @brief Used in the APP to retrieve a detailed enum of the last error
@@ -107,14 +108,15 @@ xplrCell_ntrip_state_t xplrCellNtripGetClientState(xplrCell_ntrip_client_t *clie
  *
  * @param  client   client handle
  *
- * @return xplrCell_ntrip_detailed_error_t enum according to error
+ * @return xplr_ntrip_detailed_error_t enum according to error
  */
-xplrCell_ntrip_detailed_error_t xplrCellNtripGetDetailedError(xplrCell_ntrip_client_t *client);
+xplr_ntrip_detailed_error_t xplrCellNtripGetDetailedError(xplrCell_ntrip_client_t *client);
 
 /**
  * @brief Set connection configuration
  *
  * @param  client           client handle
+ * @param  config           pointer to NTRIP configuration data structure
  * @param  host             NTRIP caster host
  * @param  port             NTRIP caster port
  * @param  mountpoint       the mountpoit you want to get data from
@@ -122,6 +124,7 @@ xplrCell_ntrip_detailed_error_t xplrCellNtripGetDetailedError(xplrCell_ntrip_cli
  * @param  ggaNecessary     flag indicates if caster requires periodic GGA message
  */
 void xplrCellNtripSetConfig(xplrCell_ntrip_client_t *client,
+                            xplr_ntrip_config_t *config,
                             const char *host,
                             uint16_t port,
                             const char *mountpoint,
@@ -149,29 +152,30 @@ void xplrCellNtripSetCredentials(xplrCell_ntrip_client_t *client,
  *
  * @param  client           client handle
  *
- * @return XPLR_CELL_NTRIP_OK on success, XPLR_CELL_NTRIP_ERROR otherwise
+ * @return XPLR_NTRIP_OK on success, XPLR_NTRIP_ERROR otherwise
  */
-xplrCell_ntrip_error_t xplrCellNtripDeInit(xplrCell_ntrip_client_t *client);
+xplr_ntrip_error_t xplrCellNtripDeInit(xplrCell_ntrip_client_t *client);
 
 /**
- * @brief Function that halts the logging of the ntrip cell module
- * 
- * @param  client           client handle
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrCellNtripHaltLogModule(xplrCell_ntrip_client_t *client);
+int8_t xplrCellNtripInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the ntrip cell module
- * 
- * @param  client           client handle
- * @return true if succeeded to start the module or false otherwise
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
 */
-bool xplrCellNtripStartLogModule(xplrCell_ntrip_client_t *client);
+esp_err_t xplrCellNtripStopLogModule(void);
 
 #ifdef __cplusplus
 }
 #endif
-#endif // XPLR_NTRIP_CLIENT_H_
+#endif // XPLR_CELL_NTRIP_CLIENT_H_
 
 // End of file

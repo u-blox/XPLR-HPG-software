@@ -58,20 +58,13 @@
 
 #define  APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
 #define  APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 1 for enabling*/
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
 #if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_AND_PRINT, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_PRINT_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_CONSOLE(tag, message, ...)\
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...) XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -95,9 +88,35 @@
 
 #define APP_TOPICS_ARRAY_MAX_SIZE   (25U)
 
+/*
+ * Option to enable/disable the hot plug functionality for the SD card
+ */
+#define APP_SD_HOT_PLUG_FUNCTIONALITY   (1U) & APP_SD_LOGGING_ENABLED
+
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
+
+typedef union appLog_Opt_type {
+    struct {
+        uint8_t appLog          : 1;
+        uint8_t nvsLog          : 1;
+        uint8_t ztpLog          : 1;
+        uint8_t thingstreamLog  : 1;
+        uint8_t wifistarterLog  : 1;
+    } singleLogOpts;
+    uint8_t allLogOpts;
+} appLog_Opt_t;
+
+typedef struct appLog_type {
+    appLog_Opt_t    logOptions;
+    int8_t          appLogIndex;
+    int8_t          ztpLogIndex;
+    int8_t          thingstreamLogIndex;
+    int8_t          nvsLogIndex;
+    int8_t          wifiStarterLogIndex;
+} appLog_t;
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -147,31 +166,36 @@ static uint32_t bufferStackPointer = 0;
  * Error return types
  */
 xplrWifiStarterError_t wifistarterErr;
-/*INDENT-OFF*/
-/**
- * Static log configuration struct and variables
- */
-#if (1 == APP_SD_LOGGING_ENABLED)
-static xplrLog_t appLog, errorLog;
-static char appBuff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
-static char appLogFilename[] = "/APPLOG.TXT";               /**< Follow the same format if changing the filename*/
-static char errorLogFilename[] = "/ERRORLOG.TXT";           /**< Follow the same format if changing the filename*/
-static uint8_t logFileMaxSize = 100;                        /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U)*/
-static xplrLog_size_t logFileMaxSizeType = XPLR_SIZE_MB;    /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB)*/
+
+static appLog_t appLogCfg = {
+    .logOptions.allLogOpts = ~0,
+    .appLogIndex = -1,
+    .nvsLogIndex = -1,
+    .ztpLogIndex = -1,
+    .thingstreamLogIndex = -1,
+    .wifiStarterLogIndex = -1
+};
+
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+TaskHandle_t cardDetectTaskHandler;
 #endif
-/*INDENT-ON*/
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
-
+#if (APP_SD_LOGGING_ENABLED == 1)
+static esp_err_t appInitLogging(void);
+static void appDeInitLogging(void);
+#endif
 static esp_err_t appInitBoard(void);
 static void appInitWiFi(void);
 static esp_err_t appGetRootCa(void);
 static void appApplyThingstreamCreds(void);
-static void appInitLog(void);
-static void appDeInitLog(void);
 static void appHaltExecution(void);
 static void appDeviceOffTask(void *arg);
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appCardDetectTask(void *arg);
+#endif
 /* ---------------------------------------------------------------
  * CALLBACK FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -183,7 +207,14 @@ void app_main(void)
     xplrWifiStarterError_t wifistarterErr;
     esp_err_t ret;
     xplr_thingstream_error_t tsErr;
-
+#if (APP_SD_LOGGING_ENABLED == 1)
+    ret = appInitLogging();
+    if (ret != ESP_OK) {
+        APP_CONSOLE(E, "Logging failed to initialize");
+    } else {
+        APP_CONSOLE(I, "Logging initialized!");
+    }
+#endif
     appInitBoard();
     appInitWiFi();
 
@@ -200,27 +231,36 @@ void app_main(void)
                     thingstreamSettings.connType = XPLR_THINGSTREAM_PP_CONN_WIFI;
                     tsErr = xplrThingstreamInit(ztpToken, &thingstreamSettings);
                     if (tsErr == XPLR_THINGSTREAM_OK) {
+                        XPLR_CI_CONSOLE(202, "OK");
                         ret = appGetRootCa();
                         if (ret == ESP_OK) {
+                            XPLR_CI_CONSOLE(203, "OK");
                             ret = xplrZtpGetPayloadWifi(&thingstreamSettings,
                                                         &ztpData);
                             if (ret != ESP_OK) {
                                 APP_CONSOLE(E, "Performing HTTPS POST failed!");
+                                XPLR_CI_CONSOLE(204, "ERROR");
                             } else {
                                 if (ztpData.httpReturnCode == HttpStatus_Ok) {
+                                    XPLR_CI_CONSOLE(204, "OK");
                                     appApplyThingstreamCreds();
-                                    xplrWifiStarterDisconnect();
+                                    ret = xplrWifiStarterDisconnect();
+                                    if (ret == ESP_OK) {
+                                        gotZtp = true;
+                                    }
                                 } else {
                                     APP_CONSOLE(W, "HTTPS request returned code: %d", ztpData.httpReturnCode);
+                                    XPLR_CI_CONSOLE(204, "ERROR");
                                 }
                             }
                         } else {
                             APP_CONSOLE(E, "Error in fetching Root CA certificate");
+                            XPLR_CI_CONSOLE(203, "ERROR");
                         }
                     } else {
                         APP_CONSOLE(E, "error in xplr_thingstream_init");
+                        XPLR_CI_CONSOLE(202, "ERROR");
                     }
-                    gotZtp = true;
                 }
                 break;
 
@@ -243,11 +283,125 @@ void app_main(void)
         vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 
+#if (APP_SD_LOGGING_ENABLED == 1)
+    appDeInitLogging();
+#endif
     APP_CONSOLE(I, "ALL DONE!!!");
-    appDeInitLog();
 }
 
+#if (APP_SD_LOGGING_ENABLED == 1)
+static esp_err_t appInitLogging(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
 
+    /* Configure the SD card */
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = ESP_FAIL;
+    } else {
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        /* A time window so that the card gets detected*/
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
+            ret = ESP_FAIL;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = ESP_FAIL;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = ESP_OK;
+            }
+        }
+    }
+
+    if (ret == ESP_OK) {
+        /* Start logging for each module (if selected in configuration) */
+        if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
+            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                "main_app.log",
+                                                XPLRLOG_FILE_SIZE_INTERVAL,
+                                                XPLRLOG_NEW_FILE_ON_BOOT);
+            if (appLogCfg.appLogIndex > 0) {
+                APP_CONSOLE(D, "Application logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.nvsLog == 1) {
+            appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
+            if (appLogCfg.nvsLogIndex > 0) {
+                APP_CONSOLE(D, "NVS logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.ztpLog == 1) {
+            appLogCfg.ztpLogIndex = xplrZtpInitLogModule(NULL);
+            if (appLogCfg.ztpLogIndex > 0) {
+                APP_CONSOLE(D, "ZTP logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.thingstreamLog == 1) {
+            appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(NULL);
+            if (appLogCfg.thingstreamLogIndex > 0) {
+                APP_CONSOLE(D, "Thingstream logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.wifistarterLog == 1) {
+            appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(NULL);
+            if (appLogCfg.wifiStarterLogIndex > 0) {
+                APP_CONSOLE(D, "WiFi Starter logging instance initialized");
+            }
+        }
+    }
+
+    return ret;
+}
+
+static void appDeInitLogging(void)
+{
+    xplrLog_error_t logErr;
+    xplrSd_error_t sdErr = XPLR_SD_ERROR;
+
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+    vTaskDelete(cardDetectTaskHandler);
+#endif
+    logErr = xplrLogDisableAll();
+    if (logErr != XPLR_LOG_OK) {
+        APP_CONSOLE(E, "Error disabling logging");
+    } else {
+        logErr = xplrLogDeInitAll();
+        if (logErr != XPLR_LOG_OK) {
+            APP_CONSOLE(E, "Error de-initializing logging");
+        } else {
+            //Do nothing
+        }
+    }
+
+    if (logErr == XPLR_LOG_OK) {
+        sdErr = xplrSdStopCardDetectTask();
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Error stopping the the SD card detect task");
+        }
+    }
+
+    if (logErr == XPLR_LOG_OK) {
+        sdErr = xplrSdDeInit();
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Error de-initializing the SD card");
+        }
+    } else {
+        //Do nothing
+    }
+
+    if (logErr == XPLR_LOG_OK && sdErr == XPLR_SD_OK) {
+        APP_CONSOLE(I, "Logging service de-initialized successfully");
+    }
+}
+#endif
 /*
  * Initialize XPLR-HPG kit using its board file
  */
@@ -256,7 +410,6 @@ static esp_err_t appInitBoard(void)
     gpio_config_t io_conf = {0};
     esp_err_t ret;
 
-    appInitLog();
     APP_CONSOLE(I, "Initializing board.");
     ret = xplrBoardInit();
     if (ret != ESP_OK) {
@@ -283,6 +436,18 @@ static esp_err_t appInitBoard(void)
         }
     }
 
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+    if (xTaskCreate(appCardDetectTask,
+                    "hotPlugTask",
+                    4 * 1024,
+                    NULL,
+                    20,
+                    &cardDetectTaskHandler) == pdPASS) {
+        APP_CONSOLE(D, "Hot plug for SD card OK");
+    } else {
+        APP_CONSOLE(W, "Hot plug for SD card failed");
+    }
+#endif
     return ret;
 }
 
@@ -296,6 +461,9 @@ static void appInitWiFi(void)
     ret = xplrWifiStarterInitConnection(&wifiOptions);
     if (ret != ESP_OK) {
         APP_CONSOLE(E, "WiFi station mode initialization failed!");
+        XPLR_CI_CONSOLE(201, "ERROR");
+    } else {
+        XPLR_CI_CONSOLE(201, "OK");
     }
 }
 
@@ -367,38 +535,12 @@ static void appApplyThingstreamCreds(void)
     tsErr = xplrThingstreamPpConfig(ztpData.payload, ppRegion, &thingstreamSettings);
     if (tsErr != XPLR_THINGSTREAM_OK) {
         APP_CONSOLE(E, "Error in ZTP payload parsing");
+        XPLR_CI_CONSOLE(205, "ERROR");
         appHaltExecution();
     } else {
         APP_CONSOLE(I, "ZTP Payload parsed successfully");
+        XPLR_CI_CONSOLE(205, "OK");
     }
-    /*INDENT-ON*/
-}
-
-/**
- * Function responsible to initialize the logging service
-*/
-static void appInitLog(void)
-{
-#if (1 == APP_SD_LOGGING_ENABLED)
-    xplrLog_error_t err = xplrLogInit(&errorLog,
-                                      XPLR_LOG_DEVICE_ERROR,
-                                      errorLogFilename,
-                                      logFileMaxSize,
-                                      logFileMaxSizeType);
-    if (err == XPLR_LOG_OK) {
-        errorLog.logEnable = true;
-        err = xplrLogInit(&appLog,
-                          XPLR_LOG_DEVICE_INFO,
-                          appLogFilename,
-                          logFileMaxSize,
-                          logFileMaxSizeType);
-    }
-    if (err == XPLR_LOG_OK) {
-        appLog.logEnable = true;
-    } else {
-        APP_CONSOLE(E, "Error initializing logging...");
-    }
-#endif
 }
 
 /**
@@ -458,17 +600,6 @@ static esp_err_t httpClientEventCB(esp_http_client_event_handle_t evt)
     return ESP_OK;
 }
 
-/**
- * Function responsible to terminate/deinitialize the logging service
-*/
-static void appDeInitLog(void)
-{
-#if (1 == APP_SD_LOGGING_ENABLED)
-    xplrLogDeInit(&appLog);
-    xplrLogDeInit(&errorLog);
-#endif
-}
-
 /*
  * Function to halt app execution
  */
@@ -511,3 +642,50 @@ static void appDeviceOffTask(void *arg)
         vTaskDelay(pdMS_TO_TICKS(100)); //wait for btn release.
     }
 }
+
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appCardDetectTask(void *arg)
+{
+    bool prvState = xplrSdIsCardOn();
+    bool currState;
+    esp_err_t espErr;
+
+    for (;;) {
+        currState = xplrSdIsCardOn();
+
+        /* Check if state has changed */
+        if (currState ^ prvState) {
+            if (currState) {
+                if (!xplrSdIsCardInit()) {
+                    espErr = appInitLogging();
+                    if (espErr == ESP_OK) {
+                        APP_CONSOLE(I, "Logging is enabled!");
+                    } else {
+                        APP_CONSOLE(E, "Failed to enable logging");
+                    }
+                }
+                /* Enable all log instances (the ones enabled during configuration) */
+                if (xplrLogEnableAll() == XPLR_LOG_OK) {
+                    APP_CONSOLE(I, "Logging is re-enabled!");
+                } else {
+                    APP_CONSOLE(E, "Failed to re-enable logging");
+                }
+            } else {
+                if (xplrSdIsCardInit()) {
+                    xplrSdDeInit();
+                }
+                if (xplrLogDisableAll() == XPLR_LOG_OK) {
+                    APP_CONSOLE(I, "Logging is disabled!");
+                } else {
+                    APP_CONSOLE(E, "Failed to disable logging");
+                }
+            }
+        } else {
+            // Do nothing
+        }
+        prvState = currState;
+        /* Window for other tasks to run */
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+#endif
