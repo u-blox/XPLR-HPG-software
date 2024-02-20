@@ -149,7 +149,6 @@ typedef struct xplrCell_http_client_type {
                                                        d element 1 holds previous state */
     bool                            msgAvailable; /**< indicates if a message is available to read. */
     uHttpClientResponseCallback_t   *responseCb;  /**< function pointer to msg received callback. */
-    xplrLog_t                       *logCfg;      /**< pointer to the log struct configuration. */
 } xplrCell_http_client_t;
 
 #ifdef __cplusplus

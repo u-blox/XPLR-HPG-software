@@ -37,17 +37,15 @@
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
+/**
+ * Debugging print macro
+ */
 #if (1 == XPLRCELL_NTRIP_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRCELL_NTRIP_LOG_ACTIVE))
-#define XPLRCELL_NTRIP_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrCellNtrip", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRCELL_NTRIP_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCellNtrip", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRCELL_NTRIP_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_NTRIP_LOG_ACTIVE)
-#define XPLRCELL_NTRIP_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrCellNtrip", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    if (ntripLog.logEnable){\
-        snprintf(&ntripLogBuf[0], ELEMENTCNT(ntripLogBuf), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrCellNtrip", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-        XPLRLOG(&ntripLog,ntripLogBuf);}
+#define XPLRCELL_NTRIP_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCellNtrip", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRCELL_NTRIP_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_NTRIP_LOG_ACTIVE)
-#define XPLRCELL_NTRIP_CONSOLE(tag, message, ...) if (ntripLog.logEnable){\
-        snprintf(&ntripLogBuf[0], ELEMENTCNT(ntripLogBuf), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrCellNtrip", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-        XPLRLOG(&ntripLog,ntripLogBuf);}
+#define XPLRCELL_NTRIP_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCellNtrip", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRCELL_NTRIP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -66,10 +64,8 @@ typedef struct xplrBase64 {
     size_t encodedLen;
 } xplrBase64_t;
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_NTRIP_LOG_ACTIVE)
-static xplrLog_t ntripLog;
-static char ntripLogBuf[XPLRLOG_BUFFER_SIZE_SMALL];
-#endif
+bool isNtripCellInit = false;
+static int8_t logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -84,38 +80,26 @@ SemaphoreHandle_t ntripSemaphore;
  * -------------------------------------------------------------- */
 
 static void ntripLoop(xplrCell_ntrip_client_t *client);
-static xplrCell_ntrip_error_t ntripCleanup(xplrCell_ntrip_client_t *client);
+static xplr_ntrip_error_t ntripCleanup(xplrCell_ntrip_client_t *client);
 static xplrBase64_t ntripBase64Encode(char *data, size_t input_length);
 static void ntripFormatRequest(xplrCell_ntrip_client_t *client, char *request);
-static xplrCell_ntrip_error_t ntripCreateSocket(xplrCell_ntrip_client_t *client);
-static xplrCell_ntrip_error_t ntripSetTimeout(xplrCell_ntrip_client_t *client);
-static xplrCell_ntrip_error_t ntripCreateTask(xplrCell_ntrip_client_t *client);
-static xplrCell_ntrip_error_t ntripCheckConfig(xplrCell_ntrip_client_t *client);
-static xplrCell_ntrip_error_t ntripHandleResponse(xplrCell_ntrip_client_t *client,
-                                                  bool icy,
-                                                  bool sourcetable);
-static xplrCell_ntrip_error_t ntripCasterHandshake(xplrCell_ntrip_client_t *client);
+static xplr_ntrip_error_t ntripCreateSocket(xplrCell_ntrip_client_t *client);
+static xplr_ntrip_error_t ntripSetTimeout(xplrCell_ntrip_client_t *client);
+static xplr_ntrip_error_t ntripCreateTask(xplrCell_ntrip_client_t *client);
+static xplr_ntrip_error_t ntripCheckConfig(xplrCell_ntrip_client_t *client);
+static xplr_ntrip_error_t ntripHandleResponse(xplrCell_ntrip_client_t *client,
+                                              bool icy,
+                                              bool sourcetable);
+static xplr_ntrip_error_t ntripCasterHandshake(xplrCell_ntrip_client_t *client);
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
 
-xplrCell_ntrip_error_t xplrCellNtripInit(xplrCell_ntrip_client_t *client,
-                                         SemaphoreHandle_t xplrNtripSemaphore)
+xplr_ntrip_error_t xplrCellNtripInit(xplrCell_ntrip_client_t *client,
+                                     SemaphoreHandle_t xplrNtripSemaphore)
 {
-    xplrCell_ntrip_error_t ret;
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFI_NTRIP_LOG_ACTIVE)
-    /* initialize logging*/
-    xplrLog_error_t logErr;
-    logErr = xplrLogInit(&ntripLog, XPLR_LOG_DEVICE_INFO, "/ntrip.log", 100, XPLR_SIZE_MB);
-    if(logErr == XPLR_LOG_OK){
-        ntripLog.logEnable = true;
-    }else{
-        ntripLog.logEnable = false;
-    }
-    client->logCfg = &ntripLog;
-#endif
+    xplr_ntrip_error_t ret;
 
     // Keep a copy of the APP semaphore
     ntripSemaphore = xplrNtripSemaphore;
@@ -124,40 +108,42 @@ xplrCell_ntrip_error_t xplrCellNtripInit(xplrCell_ntrip_client_t *client,
     ret = ntripCheckConfig(client);
 
     // Begin the NTRIP init
-    if (ret != XPLR_CELL_NTRIP_ERROR) {
+    if (ret != XPLR_NTRIP_ERROR) {
 
         ret = ntripCreateSocket(client);
-        if (ret != XPLR_CELL_NTRIP_OK) {
+        if (ret != XPLR_NTRIP_OK) {
             XPLRCELL_NTRIP_CONSOLE(E, "ntripCreateSocket failed");
         } else {
+            client->timeout = MICROTOSEC(esp_timer_get_time());
             ret = ntripCasterHandshake(client);
         }
     } else {
         // Do nothing
     }
 
-    if (ret != XPLR_CELL_NTRIP_OK) {
+    if (ret != XPLR_NTRIP_OK) {
         XPLRCELL_NTRIP_CONSOLE(E, "NTRIP failed to initialize");
         XPLRCELL_NTRIP_CONSOLE(E, "Running cleanup");
         ret = ntripCleanup(client);
-        if (ret == XPLR_CELL_NTRIP_ERROR) {
+        if (ret == XPLR_NTRIP_ERROR) {
             XPLRCELL_NTRIP_CONSOLE(E, "ntripCleanup failed");
         } else {
             // make the return value ERROR to indicate the init failed
-            ret = XPLR_CELL_NTRIP_ERROR;
+            ret = XPLR_NTRIP_ERROR;
         }
     } else {
         // Do nothing
+        isNtripCellInit = true;
     }
 
     return ret;
 }
 
-xplrCell_ntrip_error_t xplrCellNtripSendGGA(xplrCell_ntrip_client_t *client,
-                                            char *buffer,
-                                            uint32_t ggaSize)
+xplr_ntrip_error_t xplrCellNtripSendGGA(xplrCell_ntrip_client_t *client,
+                                        char *buffer,
+                                        uint32_t ggaSize)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
     int32_t writeSize;
     BaseType_t semaphoreRet;
 
@@ -167,70 +153,70 @@ xplrCell_ntrip_error_t xplrCellNtripSendGGA(xplrCell_ntrip_client_t *client,
         client->ggaInterval = MICROTOSEC(esp_timer_get_time());
         if (writeSize == ggaSize) {
             XPLRCELL_NTRIP_CONSOLE(I, "Sent GGA message to caster [%d] bytes", ggaSize);
-            ret = XPLR_CELL_NTRIP_OK;
-            client->state = XPLR_CELL_NTRIP_STATE_READY;
+            ret = XPLR_NTRIP_OK;
+            client->state = XPLR_NTRIP_STATE_READY;
             client->ggaInterval = MICROTOSEC(esp_timer_get_time());
         } else if (writeSize < 0) {
             XPLRCELL_NTRIP_CONSOLE(E,
                                    "Encountered error while sending GGA message to caster, socket errno -> [%d]",
                                    errno);
-            ret = XPLR_CELL_NTRIP_ERROR;
-            client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-            client->error = XPLR_CELL_NTRIP_SOCKET_ERROR;
+            ret = XPLR_NTRIP_ERROR;
+            client->state = XPLR_NTRIP_STATE_ERROR;
+            client->error = XPLR_NTRIP_SOCKET_ERROR;
         } else {
             XPLRCELL_NTRIP_CONSOLE(E,
                                    "Encountered error while sending GGA message to caster [%d] bytes",
                                    writeSize);
-            ret = XPLR_CELL_NTRIP_ERROR;
-            client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-            client->error = XPLR_CELL_NTRIP_SOCKET_ERROR;
+            ret = XPLR_NTRIP_ERROR;
+            client->state = XPLR_NTRIP_STATE_ERROR;
+            client->error = XPLR_NTRIP_SOCKET_ERROR;
         }
         xSemaphoreGive(ntripSemaphore);
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore");
-        ret = XPLR_CELL_NTRIP_ERROR;
-        client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-        client->error = XPLR_CELL_NTRIP_SEMAPHORE_ERROR;
+        ret = XPLR_NTRIP_ERROR;
+        client->state = XPLR_NTRIP_STATE_ERROR;
+        client->error = XPLR_NTRIP_SEMAPHORE_ERROR;
     }
 
     return ret;
 }
 
-xplrCell_ntrip_error_t xplrCellNtripGetCorrectionData(xplrCell_ntrip_client_t *client,
-                                                      char *buffer,
-                                                      uint32_t bufferSize,
-                                                      uint32_t *corrDataSize)
+xplr_ntrip_error_t xplrCellNtripGetCorrectionData(xplrCell_ntrip_client_t *client,
+                                                  char *buffer,
+                                                  uint32_t bufferSize,
+                                                  uint32_t *corrDataSize)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
     BaseType_t semaphoreRet;
 
     semaphoreRet = xSemaphoreTake(ntripSemaphore, pdMS_TO_TICKS(XPLRCELL_NTRIP_SEMAPHORE_WAIT_MS));
     if (semaphoreRet == pdTRUE) {
         if (bufferSize < XPLRCELL_NTRIP_RECEIVE_DATA_SIZE) {
             XPLRCELL_NTRIP_CONSOLE(I, "Buffer provided is too small");
-            ret = XPLR_CELL_NTRIP_ERROR;
-            client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-            client->error = XPLR_CELL_NTRIP_BUFFER_TOO_SMALL_ERROR;
+            ret = XPLR_NTRIP_ERROR;
+            client->state = XPLR_NTRIP_STATE_ERROR;
+            client->error = XPLR_NTRIP_BUFFER_TOO_SMALL_ERROR;
         } else {
-            memcpy(buffer, client->transfer.corrData, XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
-            *corrDataSize = client->transfer.corrDataSize;
-            ret = XPLR_CELL_NTRIP_OK;
-            client->state = XPLR_CELL_NTRIP_STATE_READY;
+            memcpy(buffer, client->config->transfer.corrData, XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
+            *corrDataSize = client->config->transfer.corrDataSize;
+            ret = XPLR_NTRIP_OK;
+            client->state = XPLR_NTRIP_STATE_READY;
         }
         xSemaphoreGive(ntripSemaphore);
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore");
-        ret = XPLR_CELL_NTRIP_ERROR;
-        client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-        client->error = XPLR_CELL_NTRIP_SEMAPHORE_ERROR;
+        ret = XPLR_NTRIP_ERROR;
+        client->state = XPLR_NTRIP_STATE_ERROR;
+        client->error = XPLR_NTRIP_SEMAPHORE_ERROR;
     }
 
     return ret;
 }
 
-xplrCell_ntrip_state_t xplrCellNtripGetClientState(xplrCell_ntrip_client_t *client)
+xplr_ntrip_state_t xplrCellNtripGetClientState(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_state_t ret;
+    xplr_ntrip_state_t ret;
     BaseType_t semaphoreRet;
 
     semaphoreRet = xSemaphoreTake(ntripSemaphore, pdMS_TO_TICKS(1000));
@@ -240,46 +226,46 @@ xplrCell_ntrip_state_t xplrCellNtripGetClientState(xplrCell_ntrip_client_t *clie
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore, %s has it",
                                pcTaskGetName(xSemaphoreGetMutexHolder(ntripSemaphore)));
-        ret = XPLR_CELL_NTRIP_STATE_BUSY;
+        ret = XPLR_NTRIP_STATE_BUSY;
     }
     return ret;
 }
 
-xplrCell_ntrip_detailed_error_t xplrCellNtripGetDetailedError(xplrCell_ntrip_client_t *client)
+xplr_ntrip_detailed_error_t xplrCellNtripGetDetailedError(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_detailed_error_t ret;
+    xplr_ntrip_detailed_error_t ret;
     BaseType_t semaphoreRet;
 
     semaphoreRet = xSemaphoreTake(ntripSemaphore, pdMS_TO_TICKS(1000));
     if (semaphoreRet == pdTRUE) {
         ret = client->error;
         switch (ret) {
-            case XPLR_CELL_NTRIP_UKNOWN_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_UKNOWN_ERROR");
+            case XPLR_NTRIP_UKNOWN_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_UKNOWN_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_BUSY_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_BUSY_ERROR");
+            case XPLR_NTRIP_BUSY_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_BUSY_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_CONNECTION_RESET_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_CONNECTION_RESET_ERROR");
+            case XPLR_NTRIP_CONNECTION_RESET_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_CONNECTION_RESET_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_BUFFER_TOO_SMALL_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_BUFFER_TOO_SMALL_ERROR");
+            case XPLR_NTRIP_BUFFER_TOO_SMALL_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_BUFFER_TOO_SMALL_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_NO_GGA_TIMEOUT_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_NO_GGA_TIMEOUT_ERROR");
+            case XPLR_NTRIP_NO_GGA_TIMEOUT_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_NO_GGA_TIMEOUT_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_CORR_DATA_TIMEOUT_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_CORR_DATA_TIMEOUT_ERROR");
+            case XPLR_NTRIP_CORR_DATA_TIMEOUT_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_CORR_DATA_TIMEOUT_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_SOCKET_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_SOCKET_ERROR");
+            case XPLR_NTRIP_SOCKET_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_SOCKET_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_UNABLE_TO_CREATE_TASK_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_UNABLE_TO_CREATE_TASK_ERROR");
+            case XPLR_NTRIP_UNABLE_TO_CREATE_TASK_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_UNABLE_TO_CREATE_TASK_ERROR");
                 break;
-            case XPLR_CELL_NTRIP_SEMAPHORE_ERROR:
-                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_CELL_NTRIP_SEMAPHORE_ERROR");
+            case XPLR_NTRIP_SEMAPHORE_ERROR:
+                XPLRCELL_NTRIP_CONSOLE(E, "Detailed error -> XPLR_NTRIP_SEMAPHORE_ERROR");
                 break;
             default:
                 break;
@@ -288,14 +274,14 @@ xplrCell_ntrip_detailed_error_t xplrCellNtripGetDetailedError(xplrCell_ntrip_cli
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore, %s has it",
                                pcTaskGetName(xSemaphoreGetMutexHolder(ntripSemaphore)));
-        ret = XPLR_CELL_NTRIP_STATE_BUSY;
+        ret = XPLR_NTRIP_STATE_BUSY;
     }
     return ret;
 }
 
-xplrCell_ntrip_error_t xplrCellNtripDeInit(xplrCell_ntrip_client_t *client)
+xplr_ntrip_error_t xplrCellNtripDeInit(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
     BaseType_t semaphoreRet;
 
     semaphoreRet = xSemaphoreTake(ntripSemaphore, portMAX_DELAY);
@@ -306,18 +292,17 @@ xplrCell_ntrip_error_t xplrCellNtripDeInit(xplrCell_ntrip_client_t *client)
         client->config_set = false;
         client->credentials_set = false;
         xSemaphoreGive(ntripSemaphore);
+        isNtripCellInit = false;
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     }
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_NTRIP_LOG_ACTIVE)
-    xplrLogDeInit(&ntripLog);
-#endif
 
     return ret;
 }
 
 void xplrCellNtripSetConfig(xplrCell_ntrip_client_t *client,
+                            xplr_ntrip_config_t *config,
                             const char *host,
                             uint16_t port,
                             const char *mountpoint,
@@ -330,17 +315,23 @@ void xplrCellNtripSetConfig(xplrCell_ntrip_client_t *client,
         // No action needed
     }
 
-    memset(client->config.host, 0x00, strlen(client->config.host));
-    memset(client->config.mountpoint, 0x00, strlen(client->config.mountpoint));
+    if (config != NULL) {
+        client->config = config;
 
-    client->config.ggaNecessary = ggaNecessary;
-    strcpy(client->config.host, host);
-    client->config.port = port;
-    strcpy(client->config.mountpoint, mountpoint);
+        memset(client->config->server.host, 0x00, strlen(client->config->server.host));
+        memset(client->config->server.mountpoint, 0x00, strlen(client->config->server.mountpoint));
 
-    client->cellDvcProfile = cellDvcProfile;
+        client->config->server.ggaNecessary = ggaNecessary;
+        strcpy(client->config->server.host, host);
+        client->config->server.port = port;
+        strcpy(client->config->server.mountpoint, mountpoint);
 
-    client->config_set = true;
+        client->cellDvcProfile = cellDvcProfile;
+
+        client->config_set = true;
+    } else {
+        XPLRCELL_NTRIP_CONSOLE(E, "Null configuration pointer");
+    }
 }
 
 void xplrCellNtripSetCredentials(xplrCell_ntrip_client_t *client,
@@ -355,56 +346,70 @@ void xplrCellNtripSetCredentials(xplrCell_ntrip_client_t *client,
         // No action needed
     }
 
-    memset(client->credentials.username, 0x00, strlen(client->credentials.username));
-    memset(client->credentials.password, 0x00, strlen(client->credentials.password));
-    memset(client->credentials.userAgent, 0x00, strlen(client->credentials.userAgent));
+    memset(client->config->credentials.username, 0x00, strlen(client->config->credentials.username));
+    memset(client->config->credentials.password, 0x00, strlen(client->config->credentials.password));
+    memset(client->config->credentials.userAgent, 0x00, strlen(client->config->credentials.userAgent));
 
-    client->credentials.useAuth = useAuth;
+    client->config->credentials.useAuth = useAuth;
 
     if (useAuth) {
-        strcpy(client->credentials.username, username);
-        strcpy(client->credentials.password, password);
+        strcpy(client->config->credentials.username, username);
+        strcpy(client->config->credentials.password, password);
     } else {
         // No action needed
     }
 
-    strcpy(client->credentials.userAgent, userAgent);
+    strcpy(client->config->credentials.userAgent, userAgent);
 
     client->credentials_set = true;
 }
 
-bool xplrCellNtripHaltLogModule(xplrCell_ntrip_client_t *client)
+int8_t xplrCellNtripInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_NTRIP_LOG_ACTIVE)
-    if(client->logCfg != NULL) {
-        client->logCfg->logEnable = false;
-        ret = true;
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLRCELL_NTRIP_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
     } else {
-        ret = false;
-        /* log module is not initialized thus do nothing*/
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
-bool xplrCellNtripStartLogModule(xplrCell_ntrip_client_t *client)
+esp_err_t xplrCellNtripStopLogModule(void)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_NTRIP_LOG_ACTIVE)
-    if(client->logCfg != NULL) {
-        client->logCfg->logEnable = true;
-        ret = true;
+    esp_err_t ret;
+    xplrLog_error_t logErr;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
     } else {
-        /* log module is not initialized thus don't enable logging
-           and return false*/
-        ret = false; 
+        ret = ESP_OK;
     }
-#else 
-    ret = false;
-#endif
+
     return ret;
 }
 
@@ -455,11 +460,11 @@ void ntripFormatRequest(xplrCell_ntrip_client_t *client, char *request)
     char buff[128];
 
     memset(buff, 0x00, strlen(buff));
-    sprintf(buff, "%s:%s", client->credentials.username,
-            client->credentials.password);
+    sprintf(buff, "%s:%s", client->config->credentials.username,
+            client->config->credentials.password);
     encodedBase64 = ntripBase64Encode(buff, strlen(buff));
 
-    if (client->credentials.useAuth) {
+    if (client->config->credentials.useAuth) {
         sprintf(request,
                 "GET /%s HTTP/1.0\r\n"
                 "User-Agent: %s\r\n"
@@ -467,7 +472,7 @@ void ntripFormatRequest(xplrCell_ntrip_client_t *client, char *request)
                 "Authorization: Basic %.*s\r\n"
                 "Connection: close\r\n"
                 "\r\n",
-                client->config.mountpoint, client->credentials.userAgent, encodedBase64.encodedLen,
+                client->config->server.mountpoint, client->config->credentials.userAgent, encodedBase64.encodedLen,
                 encodedBase64.encoded);
     } else {
         sprintf(request,
@@ -476,7 +481,7 @@ void ntripFormatRequest(xplrCell_ntrip_client_t *client, char *request)
                 "Accept: */*\r\n"
                 "Connection: close\r\n"
                 "\r\n",
-                client->config.mountpoint, client->credentials.userAgent);
+                client->config->server.mountpoint, client->config->credentials.userAgent);
     }
 }
 
@@ -490,32 +495,34 @@ void ntripLoop(xplrCell_ntrip_client_t *client)
         semaphoreRet = xSemaphoreTake(ntripSemaphore, pdMS_TO_TICKS(XPLRCELL_NTRIP_SEMAPHORE_WAIT_MS));
         if (semaphoreRet == pdTRUE) {
             switch (client->state) {
-                case XPLR_CELL_NTRIP_STATE_READY:
-                    client->error = XPLR_CELL_NTRIP_NO_ERROR;
+                case XPLR_NTRIP_STATE_READY:
+                    client->error = XPLR_NTRIP_NO_ERROR;
                     if ((MICROTOSEC(esp_timer_get_time()) - client->ggaInterval) > XPLRCELL_NTRIP_GGA_INTERVAL_S
                         &&
-                        client->config.ggaNecessary) {
+                        client->config->server.ggaNecessary) {
                         // Signal APP to give GGA to NTRIP client
-                        client->state = XPLR_CELL_NTRIP_STATE_REQUEST_GGA;
+                        client->state = XPLR_NTRIP_STATE_REQUEST_GGA;
                         client->timeout = MICROTOSEC(esp_timer_get_time());
                     } else {
-                        memset(client->transfer.corrData, 0x00, XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
+                        memset(client->config->transfer.corrData, 0x00, XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
                         // Read from the socket the data sent by the caster
-                        size = uSockRead(client->socket, client->transfer.corrData, XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
+                        size = uSockRead(client->socket,
+                                         client->config->transfer.corrData,
+                                         XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
                         if (size > 0) {
                             // Signal APP to read correction data from buffer
-                            client->state = XPLR_CELL_NTRIP_STATE_CORRECTION_DATA_AVAILABLE;
-                            client->transfer.corrDataSize = size;
+                            client->state = XPLR_NTRIP_STATE_CORRECTION_DATA_AVAILABLE;
+                            client->config->transfer.corrDataSize = size;
                             client->timeout = MICROTOSEC(esp_timer_get_time());
                         } else {
                             if (errno == 11) {
                                 // Nothing to read
-                                client->state = XPLR_CELL_NTRIP_STATE_READY;
+                                client->state = XPLR_NTRIP_STATE_READY;
                             } else if (errno == 5) {
-                                client->state = XPLR_CELL_NTRIP_STATE_CONNECTION_RESET;
+                                client->state = XPLR_NTRIP_STATE_CONNECTION_RESET;
                             } else {
-                                client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-                                client->error = XPLR_CELL_NTRIP_SOCKET_ERROR;
+                                client->state = XPLR_NTRIP_STATE_ERROR;
+                                client->error = XPLR_NTRIP_SOCKET_ERROR;
                                 XPLRCELL_NTRIP_CONSOLE(E,
                                                        "Failed to get correction data, client going to error state (socket errno -> [%d])",
                                                        errno);
@@ -523,20 +530,20 @@ void ntripLoop(xplrCell_ntrip_client_t *client)
                         }
                     }
                     break;
-                case XPLR_CELL_NTRIP_STATE_REQUEST_GGA:
+                case XPLR_NTRIP_STATE_REQUEST_GGA:
                     // APP hasn't provided GGA yet
                     if (MICROTOSEC(esp_timer_get_time()) - client->timeout >= pdMS_TO_TICKS(
                             XPLRCELL_NTRIP_FSM_TIMEOUT_S)) {
-                        client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-                        client->error = XPLR_CELL_NTRIP_NO_GGA_TIMEOUT_ERROR;
+                        client->state = XPLR_NTRIP_STATE_ERROR;
+                        client->error = XPLR_NTRIP_NO_GGA_TIMEOUT_ERROR;
                     }
                     break;
-                case XPLR_CELL_NTRIP_STATE_CORRECTION_DATA_AVAILABLE:
+                case XPLR_NTRIP_STATE_CORRECTION_DATA_AVAILABLE:
                     // APP hasn't read correction data yet
                     if (MICROTOSEC(esp_timer_get_time()) - client->timeout >= pdMS_TO_TICKS(
                             XPLRCELL_NTRIP_FSM_TIMEOUT_S)) {
-                        client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-                        client->error = XPLR_CELL_NTRIP_CORR_DATA_TIMEOUT_ERROR;
+                        client->state = XPLR_NTRIP_STATE_ERROR;
+                        client->error = XPLR_NTRIP_CORR_DATA_TIMEOUT_ERROR;
                     }
                     break;
                 default:
@@ -548,46 +555,46 @@ void ntripLoop(xplrCell_ntrip_client_t *client)
         } else {
             XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore, %s has it",
                                    pcTaskGetName(xSemaphoreGetMutexHolder(ntripSemaphore)));
-            client->state = XPLR_CELL_NTRIP_STATE_BUSY;
+            client->state = XPLR_NTRIP_STATE_BUSY;
         }
 
     }
 }
 
-xplrCell_ntrip_error_t ntripCreateSocket(xplrCell_ntrip_client_t *client)
+xplr_ntrip_error_t ntripCreateSocket(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
     int intRet;
     uSockAddress_t address;
 
     intRet = uSockGetHostByName(xplrComGetDeviceHandler(client->cellDvcProfile),
-                                client->config.host,
+                                client->config->server.host,
                                 &(address.ipAddress));
     if (intRet != U_ERROR_COMMON_SUCCESS) {
         XPLRCELL_NTRIP_CONSOLE(E, "uSockGetHostByName failed");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     } else {
-        address.port = client->config.port;
+        address.port = client->config->server.port;
         client->socket = uSockCreate(xplrComGetDeviceHandler(client->cellDvcProfile),
                                      U_SOCK_TYPE_STREAM,
                                      U_SOCK_PROTOCOL_TCP);
 
         intRet = uSockConnect(client->socket, &address);
         if (intRet != U_ERROR_COMMON_SUCCESS) {
-            XPLRCELL_NTRIP_CONSOLE(E, "uSockConnect failed");
-            ret = XPLR_CELL_NTRIP_ERROR;
+            XPLRCELL_NTRIP_CONSOLE(E, "uSockConnect failed with error %d", intRet);
+            ret = XPLR_NTRIP_ERROR;
         } else {
             XPLRCELL_NTRIP_CONSOLE(I, "Socket connected");
-            ret = XPLR_CELL_NTRIP_OK;
+            ret = XPLR_NTRIP_OK;
         }
     }
 
     return ret;
 }
 
-xplrCell_ntrip_error_t ntripCleanup(xplrCell_ntrip_client_t *client)
+xplr_ntrip_error_t ntripCleanup(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_error_t ret = XPLR_CELL_NTRIP_OK;
+    xplr_ntrip_error_t ret = XPLR_NTRIP_OK;
     int32_t intRet;
 
     client->socketIsValid = false;
@@ -595,17 +602,17 @@ xplrCell_ntrip_error_t ntripCleanup(xplrCell_ntrip_client_t *client)
     intRet = uSockShutdown(client->socket, U_SOCK_SHUTDOWN_READ_WRITE);
     if (intRet != U_ERROR_COMMON_SUCCESS) {
         XPLRCELL_NTRIP_CONSOLE(W, "Error shutting down socket");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     } else {
-        ret = XPLR_CELL_NTRIP_OK;
+        ret = XPLR_NTRIP_OK;
     }
 
     intRet = uSockClose(client->socket);
     if (intRet != U_ERROR_COMMON_SUCCESS) {
         XPLRCELL_NTRIP_CONSOLE(W, "Error closing socket");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     } else {
-        ret = XPLR_CELL_NTRIP_OK;
+        ret = XPLR_NTRIP_OK;
     }
 
     uSockCleanUp();
@@ -614,9 +621,9 @@ xplrCell_ntrip_error_t ntripCleanup(xplrCell_ntrip_client_t *client)
     return ret;
 }
 
-xplrCell_ntrip_error_t ntripSetTimeout(xplrCell_ntrip_client_t *client)
+xplr_ntrip_error_t ntripSetTimeout(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
     int32_t len;
     // Struct used to set the socket timeout
     struct timeval receivingTimeout = {
@@ -631,17 +638,17 @@ xplrCell_ntrip_error_t ntripSetTimeout(xplrCell_ntrip_client_t *client)
                          sizeof(receivingTimeout));
     if (len < 0) {
         XPLRCELL_NTRIP_CONSOLE(E, "failed to set socket receive timeout");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     } else {
-        ret = XPLR_CELL_NTRIP_OK;
+        ret = XPLR_NTRIP_OK;
     }
 
     return ret;
 }
 
-xplrCell_ntrip_error_t ntripCreateTask(xplrCell_ntrip_client_t *client)
+xplr_ntrip_error_t ntripCreateTask(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
     BaseType_t taskRet, semaphoreRet;
 
     semaphoreRet = xSemaphoreTake(ntripSemaphore,
@@ -654,102 +661,102 @@ xplrCell_ntrip_error_t ntripCreateTask(xplrCell_ntrip_client_t *client)
                               &xHandle);
         xSemaphoreGive(ntripSemaphore);
         if (taskRet != pdPASS) {
-            client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-            client->error = XPLR_CELL_NTRIP_UNABLE_TO_CREATE_TASK_ERROR;
+            client->state = XPLR_NTRIP_STATE_ERROR;
+            client->error = XPLR_NTRIP_UNABLE_TO_CREATE_TASK_ERROR;
             XPLRCELL_NTRIP_CONSOLE(I, "failed to create NTRIP task");
             client->socketIsValid = false;
-            ret = XPLR_CELL_NTRIP_ERROR;
+            ret = XPLR_NTRIP_ERROR;
         } else {
-            if (client->config.ggaNecessary) {
-                client->state = XPLR_CELL_NTRIP_STATE_REQUEST_GGA;
+            if (client->config->server.ggaNecessary) {
+                client->state = XPLR_NTRIP_STATE_REQUEST_GGA;
                 client->timeout = MICROTOSEC(esp_timer_get_time());
             } else {
-                client->state = XPLR_CELL_NTRIP_STATE_READY;
+                client->state = XPLR_NTRIP_STATE_READY;
             }
             client->socketIsValid = true;
-            ret = XPLR_CELL_NTRIP_OK;
+            ret = XPLR_NTRIP_OK;
             XPLRCELL_NTRIP_CONSOLE(I, "NTRIP task created");
         }
     } else {
-        client->state = XPLR_CELL_NTRIP_STATE_ERROR;
-        client-> error = XPLR_CELL_NTRIP_SEMAPHORE_ERROR;
+        client->state = XPLR_NTRIP_STATE_ERROR;
+        client-> error = XPLR_NTRIP_SEMAPHORE_ERROR;
         client->socketIsValid = false;
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
         XPLRCELL_NTRIP_CONSOLE(I, "failed to create NTRIP task");
     }
 
     return ret;
 }
 
-xplrCell_ntrip_error_t ntripCheckConfig(xplrCell_ntrip_client_t *client)
+xplr_ntrip_error_t ntripCheckConfig(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
 
     if (!client->config_set) {
         // Check if NTRIP configuration is set
         XPLRCELL_NTRIP_CONSOLE(E, "NTRIP configuration not set");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     } else if (!client->credentials_set) {
         // Check if NTRIP credentials are set
         XPLRCELL_NTRIP_CONSOLE(E, "NTRIP credentials not set");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     } else {
         if (client->socketIsValid) {
             // Cleanup socket if it has already been initialized
             ret = ntripCleanup(client);
-            if (ret == XPLR_CELL_NTRIP_ERROR) {
+            if (ret == XPLR_NTRIP_ERROR) {
                 XPLRCELL_NTRIP_CONSOLE(E, "ntripCleanup failed");
             } else {
                 // No action needed
             }
         } else {
-            ret = XPLR_CELL_NTRIP_OK;
+            ret = XPLR_NTRIP_OK;
         }
     }
 
     return ret;
 }
 
-xplrCell_ntrip_error_t ntripHandleResponse(xplrCell_ntrip_client_t *client,
-                                           bool icy,
-                                           bool sourcetable)
+xplr_ntrip_error_t ntripHandleResponse(xplrCell_ntrip_client_t *client,
+                                       bool icy,
+                                       bool sourcetable)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
 
     if (icy) {
         // The caster responded with ICY (i see you) which means that the client configuration is correct
         XPLRCELL_NTRIP_CONSOLE(I, "Connected to caster");
         XPLRCELL_NTRIP_CONSOLE(I, "NTRIP client initialization successful");
         ret = ntripSetTimeout(client);
-        if (ret != XPLR_CELL_NTRIP_ERROR) {
+        if (ret != XPLR_NTRIP_ERROR) {
             ret = ntripCreateTask(client);
         }
 
     } else if (sourcetable) {
         // The caster responded with SOURCETABLE which means that the mountpoint in the client configuration is probably incorrect
         XPLRCELL_NTRIP_CONSOLE(W, "Got source table, please provide a mountpoint");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
         client->socketIsValid = false;
     } else if (errno == U_SOCK_EHOSTUNREACH) {
         XPLRCELL_NTRIP_CONSOLE(E, "Host unreachable");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
         client->socketIsValid = false;
     } else if (errno == U_SOCK_ECONNRESET) {
         XPLRCELL_NTRIP_CONSOLE(E, "Connection reset by peer");
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
         client->socketIsValid = false;
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Error reading from socket, socket errno -> [%d]", errno);
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
         client->socketIsValid = false;
     }
 
     return ret;
 }
 
-xplrCell_ntrip_error_t ntripCasterHandshake(xplrCell_ntrip_client_t *client)
+xplr_ntrip_error_t ntripCasterHandshake(xplrCell_ntrip_client_t *client)
 {
-    xplrCell_ntrip_error_t ret;
+    xplr_ntrip_error_t ret;
     int32_t len;
     char *strRet;
     // Buffers to send request and receive the response
@@ -786,11 +793,11 @@ xplrCell_ntrip_error_t ntripCasterHandshake(xplrCell_ntrip_client_t *client)
             ret = ntripHandleResponse(client, icy, sourcetable);
         } else {
             XPLRCELL_NTRIP_CONSOLE(E, "Socket read failed, errno [%d]", errno);
-            ret = XPLR_CELL_NTRIP_ERROR;
+            ret = XPLR_NTRIP_ERROR;
         }
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Request failed, sent [%d] bytes, socket errno -> [%d]", len, errno);
-        ret = XPLR_CELL_NTRIP_ERROR;
+        ret = XPLR_NTRIP_ERROR;
     }
 
     return ret;

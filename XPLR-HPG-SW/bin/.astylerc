@@ -40,8 +40,8 @@
 
 # Directories to exclude
 --exclude='components/ubxlib'
---exclude='components/ubxlib'
---exclude='components/esp32-wifi-manager'
+--exclude='components/ubx_otp'
+--exclude='components/ubx_phy_cal'
 --exclude='misc'
 --exclude='media'
 --exclude='_test_output'

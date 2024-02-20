@@ -12,19 +12,19 @@
 **/*sdkconfig.old
 
 #Ignore UBXLib stuff
-/HPG-Compact/components/ubxlib/port/platform/esp-idf/mcu/esp32/runner/build
-/HPG-Compact/components/ubxlib/port/platform/zephyr/runner/build_*
-/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/build
-/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/_build
-/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/build_*
-/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/ses/runner/Output
-/HPG-Compact/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/ses/runner/*.jlink
-/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/Debug
-/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/Release
-/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/.settings
-/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/*.launch
-/HPG-Compact/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/test_only_*
-/HPG-Compact/components/ubxlib/port/platform/static_size/build
+/XPLR-HPG-SW/components/ubxlib/port/platform/esp-idf/mcu/esp32/runner/build
+/XPLR-HPG-SW/components/ubxlib/port/platform/zephyr/runner/build_*
+/XPLR-HPG-SW/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/build
+/XPLR-HPG-SW/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/_build
+/XPLR-HPG-SW/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/gcc/runner/build_*
+/XPLR-HPG-SW/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/ses/runner/Output
+/XPLR-HPG-SW/components/ubxlib/port/platform/nrf5sdk/mcu/nrf52/ses/runner/*.jlink
+/XPLR-HPG-SW/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/Debug
+/XPLR-HPG-SW/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/Release
+/XPLR-HPG-SW/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/.settings
+/XPLR-HPG-SW/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/runner/*.launch
+/XPLR-HPG-SW/components/ubxlib/port/platform/stm32cube/mcu/stm32f4/test_only_*
+/XPLR-HPG-SW/components/ubxlib/port/platform/static_size/build
 sdkconfig
 *.emSession
 *.pyc
@@ -35,4 +35,5 @@ _work
 u_flags.yml
 config.yml
 _build
-/HPG-Compact/components/ubxlib/port/platform/arduino/ubxlib
+/XPLR-HPG-SW/components/ubxlib/port/platform/arduino/ubxlib
+XPLR-HPG-SW/dependencies.lock

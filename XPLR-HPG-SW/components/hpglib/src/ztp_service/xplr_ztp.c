@@ -32,16 +32,11 @@
  * Debugging print macro
  */
 #if (1 == XPLRZTP_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRZTP_LOG_ACTIVE))
-#define XPLRZTP_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrZtp", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRZTP_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgZtp", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRZTP_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRZTP_LOG_ACTIVE)
-#define XPLRZTP_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrZtp", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    if (ztpLog.logEnable){\
-        snprintf(&ztpLogBuf[0], ELEMENTCNT(ztpLogBuf), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrZtp", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-        XPLRLOG(&ztpLog,ztpLogBuf);}
+#define XPLRZTP_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgZtp", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRZTP_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRZTP_LOG_ACTIVE)
-#define XPLRZTP_CONSOLE(tag, message, ...) if (ztpLog.logEnable){\
-        snprintf(&ztpLogBuf[0], ELEMENTCNT(ztpLogBuf), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrZtp", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-        XPLRLOG(&ztpLog,ztpLogBuf);}
+#define XPLRZTP_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgZtp", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRZTP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -53,10 +48,7 @@ static size_t max_buffer_size;
 static xplrCell_http_client_t httpCellClient;
 static xplrCell_http_session_t httpSessionCell;
 static esp_http_client_handle_t httpWifiClient;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRZTP_LOG_ACTIVE)
-static xplrLog_t ztpLog;
-static char ztpLogBuf[XPLRLOG_BUFFER_SIZE_SMALL];
-#endif
+static int8_t logIndex = -1;
 /* ----------------------------------------------------------------
  * CALLBACK FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -115,18 +107,6 @@ esp_err_t xplrZtpGetPayloadWifi(xplr_thingstream_t *thingstream,
         .user_data = ztpData->payload
     };
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRZTP_LOG_ACTIVE)
-    /* initialize logging*/
-    xplrLog_error_t logErr;
-    logErr = xplrLogInit(&ztpLog, XPLR_LOG_DEVICE_INFO, "/ztp.log", 100, XPLR_SIZE_MB);
-    if (logErr == XPLR_LOG_OK) {
-        ztpLog.logEnable = true;
-    } else {
-        ztpLog.logEnable = false;
-    }
-    ztpData->logCfg = &ztpLog;
-#endif
-
     strcat(thingstream->server.serverUrl, thingstream->pointPerfect.urlPath);
     config_post.url = thingstream->server.serverUrl;
     max_buffer_size = ztpData->payloadLength;
@@ -175,17 +155,6 @@ esp_err_t xplrZtpGetPayloadCell(const char *rootCaName,
     xplr_thingstream_error_t tsErr;
     int64_t timeNow, startTime;
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRZTP_LOG_ACTIVE)
-    /* initialize logging*/
-    xplrLog_error_t logErr;
-    logErr = xplrLogInit(&ztpLog, XPLR_LOG_DEVICE_INFO, "/ztp.log", 100, XPLR_SIZE_MB);
-    if (logErr == XPLR_LOG_OK) {
-        ztpLog.logEnable = true;
-    } else {
-        ztpLog.logEnable = false;
-    }
-    ztpData->logCfg = &ztpLog;
-#endif
     if (rootCaName == NULL ||
         thingstream == NULL ||
         ztpData == NULL ||
@@ -236,44 +205,52 @@ esp_err_t xplrZtpGetPayloadCell(const char *rootCaName,
     return ret;
 }
 
-bool xplrZtpHaltLogModule(xplrZtpData_t *ztpData)
+int8_t xplrZtpInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRZTP_LOG_ACTIVE)
-    if(ztpData->logCfg != NULL) {
-        ztpData->logCfg->logEnable = false;
-        ret = true;
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_ZTP_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
     } else {
-        /* log module is not initialized thus do nothing and return false*/
-        ret = false;
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
-bool xplrZtpStartLogModule(xplrZtpData_t *ztpData)
+esp_err_t xplrZtpStopLogModule(void)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRZTP_LOG_ACTIVE)
+    esp_err_t ret;
     xplrLog_error_t logErr;
-    if(ztpData->logCfg != NULL) {
-        ztpData->logCfg->logEnable = true;
-        ret = true;
-    } else {     
-        logErr = xplrLogInit(&ztpLog, XPLR_LOG_DEVICE_INFO, "/ztp.log", 100, XPLR_SIZE_MB);
-        if (logErr == XPLR_LOG_OK) {
-            ztpLog.logEnable = true;
-        } else {
-            ztpLog.logEnable = false;
-        }
-        ztpData->logCfg = &ztpLog;
-        ret = ztpLog.logEnable; 
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
     }
-#else 
-    ret = false;
-#endif
+
     return ret;
 }
 

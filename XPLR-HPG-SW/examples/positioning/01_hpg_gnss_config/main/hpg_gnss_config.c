@@ -57,22 +57,15 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
-#define APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
-#define APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 0 for disabling*/
+#define  APP_SERIAL_DEBUG_ENABLED   1U /* used to print debug messages in console. Set to 0 for disabling */
+#define  APP_SD_LOGGING_ENABLED     0U /* used to log the debug messages to the sd card. Set to 1 for enabling*/
+#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
 #if (1 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0)  XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_AND_PRINT, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == APP_SERIAL_DEBUG_ENABLED && 0 == APP_SD_LOGGING_ENABLED)
-#define APP_LOG_FORMAT(letter, format)  LOG_COLOR_ ## letter #letter " [(%u) %s|%s|%ld|: " format LOG_RESET_COLOR "\n"
-#define APP_CONSOLE(tag, message, ...)  esp_rom_printf(APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_PRINT_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (0 == APP_SERIAL_DEBUG_ENABLED && 1 == APP_SD_LOGGING_ENABLED)
-#define APP_CONSOLE(tag, message, ...)\
-    snprintf(&appBuff2Log[0], ELEMENTCNT(appBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    if(strcmp(#tag, "E") == 0) XPLRLOG(&errorLog,appBuff2Log); \
-    else XPLRLOG(&appLog,appBuff2Log);
+#define APP_CONSOLE(tag, message, ...)  XPLRLOG(appLogCfg.appLogIndex, XPLR_LOG_SD_ONLY, APP_LOG_FORMAT(tag, message), esp_log_timestamp(), "app", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -97,6 +90,28 @@
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
+
+typedef union appLog_Opt_type {
+    struct {
+        uint8_t appLog           : 1;
+        uint8_t nvsLog           : 1;
+        uint8_t gnssLog          : 1;
+        uint8_t gnssAsyncLog     : 1;
+        uint8_t locHelperLog     : 1;
+        uint8_t lbandLog         : 1;
+    } singleLogOpts;
+    uint8_t value;
+} appLog_Opt_t;
+
+typedef struct appLog_type {
+    appLog_Opt_t    logOptions;
+    int8_t          appLogIndex;
+    int8_t          nvsLogIndex;
+    int8_t          gnssLogIndex;
+    int8_t          gnssAsyncLogIndex;
+    int8_t          locHelperLogIndex;
+    int8_t          lbandLogIndex;
+} appLog_t;
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -156,30 +171,35 @@ const uint32_t pKeyVals[] = {
     U_GNSS_CFG_VAL_KEY_ID_NMEA_HIGHPREC_L,
     U_GNSS_CFG_VAL_KEY_ID_MSGOUT_UBX_NAV_HPPOSLLH_I2C_U1,
 };
-/*INDENT-OFF*/
-#if (1 == APP_SD_LOGGING_ENABLED)
-/* log structs and log dump buffer*/
-static xplrLog_t appLog, errorLog;
-static char appBuff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
-static char appLogFilename[] = "/APPLOG.TXT";               /**< Follow the same format if changing the filename*/
-static char errorLogFilename[] = "/ERRORLOG.TXT";           /**< Follow the same format if changing the filename*/
-static uint8_t logFileMaxSize = 100;                        /**< Max file size (e.g. if the desired max size is 10MBytes this value should be 10U)*/
-static xplrLog_size_t logFileMaxSizeType = XPLR_SIZE_MB;    /**< Max file size type (e.g. if the desired max size is 10MBytes this value should be XPLR_SIZE_MB)*/
+
+#if (APP_SERIAL_DEBUG_ENABLED == 1) || (APP_SD_LOGGING_ENABLED == 1)
+static appLog_t appLogCfg = {
+    .logOptions.value = ~0, // All modules selected to log
+    .appLogIndex = -1,
+    .nvsLogIndex = -1,
+    .gnssLogIndex = -1,
+    .gnssAsyncLogIndex = -1,
+    .locHelperLogIndex = -1,
+    .lbandLogIndex = -1,
+};
 #endif
-/*INDENT-ON*/
+
 esp_err_t espRet;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
 
+#if (APP_SD_LOGGING_ENABLED == 1)
+static esp_err_t appInitLogging(void);
+static void appDeInitLogging(void);
+#endif
 static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg);
 static void appConfigLbandSettings(xplrLbandDeviceCfg_t *lbandCfg);
 static esp_err_t appInitAll(void);
 static esp_err_t appPrintDeviceInfos(void);
 static esp_err_t appCloseAllDevices(void);
 static void appHaltExecution(void);
-static void appDeInitLog(void);
 
 /* ----------------------------------------------------------------
  * MAIN APP
@@ -195,9 +215,12 @@ void app_main(void)
 
     espRet = appPrintDeviceInfos();
     if (espRet != ESP_OK) {
+        XPLR_CI_CONSOLE(1103, "ERROR");
         appHaltExecution();
+    } else {
+        APP_CONSOLE(I, "All infos OK!");
+        XPLR_CI_CONSOLE(1103, "OK");
     }
-    APP_CONSOLE(I, "All infos OK!");
 
     gnssState = xplrGnssGetCurrentState(gnssDvcPrfId);
     while (gnssState != XPLR_GNSS_STATE_DEVICE_READY) {
@@ -378,6 +401,7 @@ void app_main(void)
      * You MUST free your pointer after you are done using it
      */
     free(pReply);
+    pReply = NULL;
 
     espRet = appCloseAllDevices();
     if (espRet != ESP_OK) {
@@ -386,8 +410,12 @@ void app_main(void)
     APP_CONSOLE(I, "All devices stopped!");
 
     APP_CONSOLE(I, "ALL DONE");
+    XPLR_CI_CONSOLE(1104, "OK");
 
-    appDeInitLog();
+#if (APP_SD_LOGGING_ENABLED == 1)
+    appDeInitLogging();
+#endif
+    appHaltExecution();
 }
 
 /* ----------------------------------------------------------------
@@ -395,19 +423,93 @@ void app_main(void)
  * -------------------------------------------------------------- */
 
 /**
+ * Initialize logging to the SD card
+*/
+#if (APP_SD_LOGGING_ENABLED == 1)
+static esp_err_t appInitLogging(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+
+    /* Configure the SD card */
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = ESP_FAIL;
+    } else {
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
+            ret = ESP_FAIL;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = ESP_FAIL;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = ESP_OK;
+            }
+        }
+    }
+
+    if (ret == ESP_OK) {
+        /* Start logging for each module (if selected in configuration) */
+        if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
+            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                "main_app.log",
+                                                XPLRLOG_FILE_SIZE_INTERVAL,
+                                                XPLRLOG_NEW_FILE_ON_BOOT);
+            if (appLogCfg.appLogIndex >= 0) {
+                APP_CONSOLE(D, "Application logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.nvsLog == 1) {
+            appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
+            if (appLogCfg.nvsLogIndex >= 0) {
+                APP_CONSOLE(D, "NVS logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.gnssLog == 1) {
+            appLogCfg.gnssLogIndex = xplrGnssInitLogModule(NULL);
+            if (appLogCfg.gnssLogIndex >= 0) {
+                APP_CONSOLE(D, "GNSS logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.gnssAsyncLog == 1) {
+            appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(NULL);
+            if (appLogCfg.gnssAsyncLogIndex >= 0) {
+                APP_CONSOLE(D, "GNSS Async logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.locHelperLog == 1) {
+            appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(NULL);
+            if (appLogCfg.locHelperLogIndex >= 0) {
+                APP_CONSOLE(D, "Location Helper Service logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.lbandLog == 1) {
+            appLogCfg.lbandLogIndex = xplrLbandInitLogModule(NULL);
+            if (appLogCfg.lbandLogIndex >= 0) {
+                APP_CONSOLE(D, "LBAND logging instance initialized");
+            }
+        }
+    }
+
+    return ret;
+}
+#endif
+
+/**
  * Populates gnss settings
  */
 static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
 {
-    /**
-    * Pin numbers are those of the MCU: if you
-    * are using an MCU inside a u-blox module the IO pin numbering
-    * for the module is likely different that from the MCU: check
-    * the data sheet for the module to determine the mapping
-    * DEVICE i.e. module/chip configuration: in this case a gnss
-    * module connected via UART
-    */
     gnssCfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
+    gnssCfg->hw.dvcType = (xplrLocDeviceType_t)CONFIG_GNSS_MODULE;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
@@ -442,7 +544,7 @@ static void appConfigLbandSettings(xplrLbandDeviceCfg_t *lbandCfg)
     * for the module is likely different that from the MCU: check
     * the data sheet for the module to determine the mapping
     * DEVICE i.e. module/chip configuration: in this case an lband
-    * module connected via UART
+    * module connected via I2C
     */
     lbandCfg->hwConf.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
     lbandCfg->hwConf.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
@@ -472,58 +574,48 @@ static void appConfigLbandSettings(xplrLbandDeviceCfg_t *lbandCfg)
 static esp_err_t appInitAll(void)
 {
 #if (1 == APP_SD_LOGGING_ENABLED)
-    xplrLog_error_t logErr;
-    logErr = xplrLogInit(&errorLog,
-                         XPLR_LOG_DEVICE_ERROR,
-                         errorLogFilename,
-                         logFileMaxSize,
-                         logFileMaxSizeType);
-    if (logErr == XPLR_LOG_OK) {
-        errorLog.logEnable = true;
-        logErr = xplrLogInit(&appLog,
-                             XPLR_LOG_DEVICE_INFO,
-                             appLogFilename,
-                             logFileMaxSize,
-                             logFileMaxSizeType);
-        if (logErr == XPLR_LOG_OK) {
-            appLog.logEnable = true;
-        } else {
-            appLog.logEnable = false;
-        }
-    } else {
-        errorLog.logEnable = false;
-    }
+    (void)appInitLogging();
 #endif
 
     espRet = xplrBoardInit();
     if (espRet != ESP_OK) {
         APP_CONSOLE(E, "Board init failed!");
-        return espRet;
     }
 
-    espRet = xplrGnssUbxlibInit();
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "UbxLib init failed!");
-        return espRet;
+
+    if (espRet == ESP_OK) {
+        espRet = xplrGnssUbxlibInit();
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(E, "UbxLib init failed!");
+        } else {
+        }
     }
 
-    APP_CONSOLE(I, "Waiting for GNSS device to come online!");
-    appConfigGnssSettings(&gnssCfg);
-    espRet = xplrGnssStartDevice(gnssDvcPrfId, &gnssCfg);
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "GNSS device config failed!");
-        return espRet;
+    if (espRet == ESP_OK) {
+        APP_CONSOLE(I, "Waiting for GNSS device to come online!");
+        appConfigGnssSettings(&gnssCfg);
+        espRet = xplrGnssStartDevice(gnssDvcPrfId, &gnssCfg);
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(E, "GNSS device config failed!");
+            XPLR_CI_CONSOLE(1101, "ERROR");
+        } else {
+            XPLR_CI_CONSOLE(1101, "OK");
+        }
     }
 
-    APP_CONSOLE(I, "Waiting for LBAND device to come online!");
-    appConfigLbandSettings(&lbandCfg);
-    espRet = xplrLbandStartDevice(lbandDvcPrfId, &lbandCfg);
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "LBAND device config failed!");
-        return espRet;
+    if (espRet == ESP_OK) {
+        APP_CONSOLE(I, "Waiting for LBAND device to come online!");
+        appConfigLbandSettings(&lbandCfg);
+        espRet = xplrLbandStartDevice(lbandDvcPrfId, &lbandCfg);
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(E, "LBAND device config failed!");
+            XPLR_CI_CONSOLE(1102, "ERROR");
+        } else {
+            XPLR_CI_CONSOLE(1102, "OK");
+        }
     }
 
-    return ESP_OK;
+    return espRet;
 }
 
 /**
@@ -579,19 +671,52 @@ esp_err_t appCloseAllDevices(void)
     return ESP_OK;
 }
 
-static void appDeInitLog(void)
-{
 #if (1 == APP_SD_LOGGING_ENABLED)
-    xplrLogDeInit(&appLog);
-    xplrLogDeInit(&errorLog);
-#endif
+static void appDeInitLogging(void)
+{
+    xplrLog_error_t logErr;
+    xplrSd_error_t sdErr;
+    esp_err_t espErr;
+
+
+    logErr = xplrLogDisableAll();
+    if (logErr != XPLR_LOG_OK) {
+        APP_CONSOLE(E, "Error disabling logging");
+    } else {
+        APP_CONSOLE(D, "Logging disabled");
+        logErr = xplrLogDeInitAll();
+        if (logErr != XPLR_LOG_OK) {
+            APP_CONSOLE(E, "Error de-initializing logging instances");
+        } else {
+            espErr = xplrGnssAsyncLogDeInit();
+            if (espErr != XPLR_LOG_OK) {
+                APP_CONSOLE(E, "Error de-initializing async logging");
+            } else {
+                APP_CONSOLE(D, "Logging instances de-initialized");
+                sdErr = xplrSdStopCardDetectTask();
+                if (sdErr != XPLR_SD_OK) {
+                    APP_CONSOLE(E, "Error stopping the card detect task");
+                } else {
+                    sdErr = xplrSdDeInit();
+                    if (sdErr != XPLR_SD_OK) {
+                        APP_CONSOLE(E, "Error de-initializing the SD card");
+                    } else {
+                        APP_CONSOLE(D, "SD card de-initialized");
+                        APP_CONSOLE(I, "Logging service terminated");
+                    }
+                }
+            }
+        }
+    }
 }
+#endif
 
 /**
  * On error halt execution
  */
 static void appHaltExecution(void)
 {
+    xplrMemUsagePrint(0);
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

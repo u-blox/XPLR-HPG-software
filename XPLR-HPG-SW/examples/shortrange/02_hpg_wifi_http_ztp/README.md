@@ -15,35 +15,44 @@ When running the code, depending on the debug settings configured, messages are 
 
 ```
 ...
-D [(1200) xplrWifiStarter|xplrWifiStarterFsm|154|: WiFi init successful!
-D [(1256) xplrWifiStarter|xplrWifiStarterFsm|165|: Register handlers successful!
-D [(1307) xplrWifiStarter|xplrWifiStarterFsm|176|: WiFi set mode successful!
-D [(1377) xplrWifiStarter|xplrWifiStarterFsm|187|: WiFi set config successful!
+D [(1872) hpgWifiStarter|xplrWifiStarterFsm|278|: WiFi init successful!
+D [(1929) hpgWifiStarter|xplrWifiStarterFsm|289|: Register handlers successful!
+D [(1979) hpgWifiStarter|xplrWifiStarterFsm|308|: Wifi credentials configured:1
+D [(2029) hpgWifiStarter|xplrWifiStarterFsm|314|: WiFi mode selected: STATION
+D [(2030) hpgWifiStarter|xplrWifiStarterFsm|322|: WiFi set mode successful!
+D [(2085) hpgWifiStarter|xplrWifiStarterFsm|363|: WiFi set config successful!
 ...
-I [(3998) app|app_main|179|: Performing HTTPS POST request.
-D [(3998) xplrZtp|xplrZtpGetPayload|107|: POST URL: https://api.thingstream.io/ztp/pointperfect/credentials
-D [(4004) xplrZtp|xplrZtpGetDeviceID|190|: Device ID: **********
-D [(4009) xplrZtp|xplrZtpPrivateSetPostData|334|: Post data: {"token":"**********","givenName":"device-name","hardwareId":"**********","tags": []}
-D [(5793) xplrZtp|client_event_post_handler|207|: HTTP_EVENT_ON_CONNECTED!
-D [(6218) xplrZtp|client_event_post_handler|242|: HTTP_EVENT_ON_FINISH
-D [(6218) xplrZtp|xplrZtpGetPayload|152|: HTTPS POST request OK.
-D [(6220) xplrZtp|xplrZtpGetPayload|157|: HTTPS POST: Return Code - 200
-I [(15234) app|appZtpMqttCertificateParse|286|: Parsed Certificate:
------BEGIN CERTIFICATE-----
-**********
------END CERTIFICATE-----
-
-I [(15341) app|appZtpMqttClientIdParse|299|: Parsed MQTT client ID: **********
-I [(15352) app|appZtpMqttSupportParse|324|: Is MQTT supported: true
-I [(15358) app|appZtpDeallocateJSON|348|: Deallocating JSON object.
+I [(3357) app|app_main|230|: Performing HTTPS POST request.
+I (3777) esp-x509-crt-bundle: Certificate validated
 ...
-D [(7539) xplrWifiStarter|xplrWifiStarterFsm|252|: WiFi disconnected successful!
-I [(7542) app|app_main|228|: ALL DONE!!!
+I [(4815) app|appGetRootCa|496|: HTTPS GET request OK: code [200] - payload size [1188].
+D [(4822) hpgZtp|xplrZtpGetPayloadWifi|123|: POST URL: https://api.thingstream.io/ztp/pointperfect/credentials
+D [(4830) hpgZtp|ztpWifiSetHeaders|285|: Successfully set headers for HTTP POST
+D [(4836) hpgThingstream|tsApiMsgCreatePpZtp|1152|: Thingstream API PP ZTP POST of 124 bytes created:
+{
+        "tags": ["ztp"],
+        "token":        "9b5141f8-2eb3-4ab6-ad17-aca6a71ba006",
+        "hardwareId":   "hpg-040148",
+        "givenName":    "xplrHpg"
+}
+D [(4857) hpgZtp|ztpWifiSetPostData|321|: Successfully set POST field
+D [(6045) hpgZtp|httpWifiCallback|510|: HTTP_EVENT_ON_CONNECTED!
+D [(6455) hpgZtp|httpWifiCallback|538|: HTTP_EVENT_ON_FINISH
+D [(6455) hpgZtp|ztpWifiPostMsg|357|: HTTPS POST request OK.
+D [(6455) hpgZtp|ztpWifiPostMsg|364|: HTTPS POST: Return Code - 200
+D [(6466) hpgZtp|ztpWifiHttpCleanup|379|: Client cleanup succeeded!
+...
+I [(6764) app|appApplyThingstreamCreds|530|: ZTP Payload parsed successfully
+...
+D [(6851) hpgWifiStarter|xplrWifiStarterFsm|499|: WiFi disconnected successful!
+I [(6854) app|app_main|282|: ALL DONE!!!
 ...
 ```
 <br>
 
 ## Build instructions
+
+### Building using Visual Studio Code
 Building this example requires to edit a minimum set of files in order to select the corresponding source files and configure Wi-Fi and ZTP settings using Kconfig.
 Please follow the steps described bellow:
 
@@ -69,7 +78,14 @@ Please follow the steps described bellow:
    #define XPLRZTPJSONPARSER_DEBUG_ACTIVE     (1U)
    #define XPLRWIFISTARTER_DEBUG_ACTIVE       (1U)
    ```
-4. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
+4. Open the [app](./main/hpg_wifi_http_ztp.c) and select if you need logging to the SD card for your application.
+   ```
+   #define APP_SD_LOGGING_ENABLED      0U
+   ```
+   This is a general option that enables or disables the SD logging functionality for all the modules. <br> 
+   To enable/disable the individual module debug message SD logging:
+
+   - Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to logged in the SD card.\
    For more information about the **logging service of hpglib** follow **[this guide](./../../../components/hpglib/src/log_service/README.md)**
    ```
    ...
@@ -82,6 +98,7 @@ Please follow the steps described bellow:
    ...
 
    ```
+   - Alternatively, you can enable or disable the individual module debug message logging to the SD card by modifying the value of the `appLog.logOptions.allLogOpts` bit map, located in the [app](./main/hpg_wifi_http_ztp.c). This gives the user the ability to enable/disable each logging instance in runtime, while the macro options in the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) give the option to the user to fully disable logging and ,as a result, have a smaller memory footprint.
 5. From the VS code status bar select the `COM Port` that the XPLR-HPGx has enumerated on and the corresponding MCU platform (`esp32` for **[XPLR-HPG2](https://www.u-blox.com/en/product/xplr-hpg-2)** and `esp32s3` for **[XPLR-HPG1](https://www.u-blox.com/en/product/xplr-hpg-1)**).
 6. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `menu config` by clicking on the "cog" symbol present in the vs code status bar.
 7. Navigate to the `Board Options` section and select the board you wish to build the example for.
@@ -98,6 +115,16 @@ Please follow the steps described bellow:
 **NOTE**:
 - In the described file names above **\[client_id\]** is equal to your specific **DeviceID**.
 <br>
+
+### Building using ESP-IDF from a command line
+1. Navigate to the `XPLR-HPG-SW` root folder.
+2. In [CMakeLists](./../../../CMakeLists.txt) select the `hpg_wifi_http_ztp` project, making sure that all other projects are commented out.
+3. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to be logged in the SD card or the debug UART.
+4. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `idf.py menuconfig`.
+5. Navigate to the fields mentioned above from step 7 through 11 and provide the appropriate configuration. When finished press `q` and answer `Y` to save the configuration.
+6. Run `idf.py build` to compile the project.
+7. Run `idf.py -p COMX flash` to flash the binary to the board, where **COMX** is the `COM Port` that the XPLR-HPGx has enumerated on.
+8. Run `idf.py monitor -p COMX` to monitor the debug UART output.
 
 ## KConfig/Build Definitions-Macros
 This is a description of definitions and macros configured by **[KConfig](./../../../docs/README_kconfig.md)**.\
@@ -126,6 +153,7 @@ Name | Description
 **`APP_ZTP_PAYLOAD_BUF_SIZE`** | A 10 KByte buffer size to store the POST response body from Zero Touch Provisioning.
 **`APP_KEYCERT_PARSE_BUF_SIZE`** | A 2 KByte buffer size used for both key and cert/pem key parsed data from ZTP.
 **`APP_TOPICS_ARRAY_MAX_SIZE`** | Max topics we can parse.
+**`APP_SD_HOT_PLUG_FUNCTIONALITY`** | Option to enable the hot plug functionality of the SD card driver (being able to insert and remove the card in runtime).
 <br>
 
 ## Modules-Components used

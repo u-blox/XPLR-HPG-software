@@ -15,6 +15,13 @@ endif()
 message(STATUS " -----------Board Info---------")
 message(STATUS " IDF_TARGET = ${IDF_TARGET}")
 message(STATUS " Board DIR = ${boards_dir}")
+if(CONFIG_GNSS_MODULE_ZED_F9R)
+    message(STATUS " GNSS Module = ZED-F9R")
+elseif(CONFIG_GNSS_MODULE_ZED_F9P)
+    message(STATUS " GNSS Module = ZED-F9P")
+else()
+    message(STATUS " GNSS Module = None")
+endif()
 message(STATUS " ---------Board Info End---------")
 
 

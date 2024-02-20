@@ -30,6 +30,7 @@
 //#include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_task_wdt.h"
+#include "./../../../../components/hpglib/src/log_service/xplr_log.h"
 
 #if defined(CONFIG_BOARD_XPLR_HPG2_C214)
 #define XPLR_BOARD_SELECTED_IS_C214
@@ -97,8 +98,10 @@ void app_main(void)
      */
     if (xplrBoardIsInit()) {
         printf("XPLR-HPG kit has already initialized. \n");
+        XPLR_CI_CONSOLE(100, "OK");
     } else {
         printf("XPLR-HPG kit has not been initialized. \n");
+        XPLR_CI_CONSOLE(100, "ERROR");
     }
 
     /*
@@ -163,4 +166,5 @@ void app_main(void)
     while (1) {
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
+
 }

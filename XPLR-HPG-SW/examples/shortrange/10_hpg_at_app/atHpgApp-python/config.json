@@ -1,0 +1,45 @@
+{
+    "devices":[
+        {
+        "serialport": "COM6",
+        "baudrate": 115200,
+        "timeout": 5,
+        "description":"C214"
+        }
+    ],
+    "settings":[
+        {
+            "interface": "wi-fi",
+            "ssid": "mySSID",
+            "password": "myPassword",
+            "apn": "internet",
+            "correctionSource": "ts",
+            "correctionModule": "ip",
+            "gnssDR": "0",
+            "sdLog": "0"
+        }
+    ],
+    "ntrip":[
+        {
+            "server": "url",
+            "port": "9999",
+            "mountPoint": "mp",
+            "userAgent": "agent",
+            "username": "myUsernane",
+            "password": "myPassword",
+            "ggaRelay": "1"
+        }
+    ],
+    "thingstream":[
+        {
+            "broker": "pp.services.u-blox.com",
+            "port": "8883",
+            "plan": "ip",
+            "region": "eu",
+            "clientId": "myId",
+            "key": "myKey",
+            "cert": "myCert",
+            "rootCa": "myRootCa"
+        }
+    ]
+}

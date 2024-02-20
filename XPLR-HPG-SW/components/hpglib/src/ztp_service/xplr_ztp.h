@@ -68,7 +68,6 @@ typedef struct xplrZtpData_type {
     char *payload;                  /**< the payload/JSON itself */
     uint16_t payloadLength;         /**< length of payload/JSON. */
     HttpStatus_Code httpReturnCode; /**< HTTP/S return code */
-    xplrLog_t *logCfg;              /**< Pointer to the module's log struct*/
 } xplrZtpData_t;
 
 /* ----------------------------------------------------------------
@@ -108,20 +107,21 @@ esp_err_t xplrZtpGetPayloadCell(const char *rootCaName,
                                 xplrCom_cell_config_t *cellConfig);
 
 /**
- * @brief Function that halts the logging of the ztp module
- * 
- * @param ztpData      a xplrZtpData_type struct that contains payload and http return code.
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrZtpHaltLogModule(xplrZtpData_t *ztpData);
+int8_t xplrZtpInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the ztp module
- * 
- * @param ztpData      a xplrZtpData_type struct that contains payload and http return code.
- * @return true if succeeded to start the module or false otherwise
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
 */
-bool xplrZtpStartLogModule(xplrZtpData_t *ztpData);
+esp_err_t xplrZtpStopLogModule(void);
 
 #ifdef __cplusplus
 }

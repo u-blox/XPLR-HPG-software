@@ -1,0 +1,322 @@
+/*
+ * Copyright 2021 u-blox
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "esp_phy_init.h"
+#include "otp_reader.h"
+#include "esp_log.h"
+#include "phy_init_data.h"
+#include "esp_idf_version.h"
+#include "sdkconfig.h"
+
+#if defined(CONFIG_BOARD_XPLR_HPG1_C213)
+
+#include "esp_err.h"
+#include "esp_efuse.h"
+#include "esp_efuse_table.h"
+#include "ubx_phy_cal.h"
+
+#define FREQ_CHANNEL1_DIV_8kHz \
+    ( 3 ) // 2.412GHz/(8kHz*10^6) = 0,3015 => ~0,3 (*10 to avoid double
+// calculations)
+
+static const char *TAG = "ubx_phy_cal";
+
+static esp_phy_init_data_t ubx_init_data;
+static int8_t calibration_8kHz;
+
+// phy_init_data.h will declare static 'phy_init_data' variable initialized with
+// default init data
+const esp_phy_init_data_t *esp_phy_get_init_data(void)
+{
+    ubx_init_data = phy_init_data;
+    int8_t *init_data = (int8_t *) &ubx_init_data;
+
+    // channel 1 and 11 < 16.5dBm
+    // Others < 17dBm for RED
+
+#if ESP_IDF_VERSION_MAJOR == 4 && ESP_IDF_VERSION_MINOR == 4 && CONFIG_IDF_TARGET_ESP32S3
+
+    // TX Power is in 0.25dBm steps, ie 60 = (60/4) = 15dBm
+    init_data[2] = 0x50; // target_power_qdb_1m_2m
+    init_data[3] = 0x50; // target_power_qdb_5.5m_11m
+    init_data[4] = 0x50; // target_power_qdb_6m_9m
+    init_data[5] = 0x4c; // target_power_qdb_12m_18m
+    init_data[6] = 0x4c; // target_power_qdb_24m_36m
+    init_data[7] = 0x48; // target_power_qdb_48m_54m
+    init_data[8] = 0x4c; // target_power_qdb_HT20_mcs0_mcs1
+    init_data[9] = 0x48; // target_power_qdb_HT20_mcs2_mcs3
+    init_data[10] = 0x48; // target_power_qdb_HT20_mcs4_mcs5
+    init_data[11] = 0x46; // target_power_qdb_HT20_mcs6_mcs7
+    init_data[12] = 0x4a; // target_power_qdb_HT40_mcs0_mcs1
+    init_data[13] = 0x46; // target_power_qdb_HT40_mcs2_mcs3
+    init_data[14] = 0x46; // target_power_qdb_HT40_mcs4_mcs5
+    init_data[15] = 0x44; // target_power_qdb_HT40_mcs6_mcs7
+
+    // init_data[16] = 0; // power_cal_offset (?)
+
+    init_data[18] = 0x01; // fcc enable 1: enable 19-69 bytes to set maximum power
+    init_data[19] = 0x3E; // chan1_pwr_limit_11b
+    init_data[20] = 0x40; // chan2_pwr_limit_11b
+    init_data[21] = 0x40; // chan3_pwr_limit_11b
+    init_data[22] = 0x40; // chan4_pwr_limit_11b
+    init_data[23] = 0x40; // chan5_pwr_limit_11b
+    init_data[24] = 0x40; // chan6_pwr_limit_11b
+    init_data[25] = 0x40; // chan7_pwr_limit_11b
+    init_data[26] = 0x40; // chan8_pwr_limit_11b
+    init_data[27] = 0x40; // chan9_pwr_limit_11b
+    init_data[28] = 0x40; // chan10_pwr_limit_11b
+    init_data[29] = 0x3E; // chan11_pwr_limit_11b
+    init_data[30] = 0x40; // chan12_pwr_limit_11b
+    init_data[31] = 0x40; // chan13_pwr_limit_11b
+    init_data[32] = 0x3E; // chan14_pwr_limit_11b
+    init_data[33] = 0x3E; // chan1_pwr_limit_11g
+    init_data[34] = 0x40; // chan2_pwr_limit_11g
+    init_data[35] = 0x40; // chan3_pwr_limit_11g
+    init_data[36] = 0x40; // chan4_pwr_limit_11g
+    init_data[37] = 0x40; // chan5_pwr_limit_11g
+    init_data[38] = 0x40; // chan6_pwr_limit_11g
+    init_data[39] = 0x40; // chan7_pwr_limit_11g
+    init_data[40] = 0x40; // chan8_pwr_limit_11g
+    init_data[41] = 0x40; // chan9_pwr_limit_11g
+    init_data[42] = 0x40; // chan10_pwr_limit_11g
+    init_data[43] = 0x3E; // chan11_pwr_limit_11g
+    init_data[44] = 0x40; // chan12_pwr_limit_11g
+    init_data[45] = 0x40; // chan13_pwr_limit_11g
+    init_data[46] = 0x40; // chan14_pwr_limit_11g
+    init_data[47] = 0x3E; // chan1_pwr_limit_11n_cbw20
+    init_data[48] = 0x3C; // chan2_pwr_limit_11n_cbw20
+    init_data[49] = 0x3C; // chan3_pwr_limit_11n_cbw20
+    init_data[50] = 0x3F; // chan4_pwr_limit_11n_cbw20
+    init_data[51] = 0x36; // chan5_pwr_limit_11n_cbw20
+    init_data[52] = 0x36; // chan6_pwr_limit_11n_cbw20
+    init_data[53] = 0x38; // chan7_pwr_limit_11n_cbw20
+    init_data[54] = 0x37; // chan8_pwr_limit_11n_cbw20
+    init_data[55] = 0x3C; // chan9_pwr_limit_11n_cbw20
+    init_data[56] = 0x3C; // chan10_pwr_limit_11n_cbw20
+    init_data[57] = 0x3E; // chan11_pwr_limit_11n_cbw20
+    init_data[58] = 0x3C; // chan12_pwr_limit_11n_cbw20
+    init_data[59] = 0x3A; // chan13_pwr_limit_11n_cbw20
+    init_data[60] = 0x40; // chan14_pwr_limit_11n_cbw20
+    init_data[61] = 0x40; // chan3_pwr_limit_11n_cbw40
+    init_data[62] = 0x40; // chan4_pwr_limit_11n_cbw40
+    init_data[63] = 0x40; // chan5_pwr_limit_11n_cbw40
+    init_data[64] = 0x40; // chan6_pwr_limit_11n_cbw40
+    init_data[65] = 0x40; // chan7_pwr_limit_11n_cbw40
+    init_data[66] = 0x40; // chan8_pwr_limit_11n_cbw40
+    init_data[67] = 0x40; // chan9_pwr_limit_11n_cbw40
+    init_data[68] = 0x40; // chan10_pwr_limit_11n_cbw40
+    init_data[69] = 0x3E; // chan11_pwr_limit_11n_cbw40
+
+#else
+#error Configuration are only valid and tested for ESP32S3 IDF v4.4
+#endif
+
+    ESP_LOGI(TAG, "loading PHY init data from application binary");
+    ESP_LOGI(TAG, "NORA-W1 phy calibration applied");
+
+    return (esp_phy_init_data_t *) init_data;
+}
+
+void ubx_phy_cal_init(void)
+{
+    /*
+        init_data takes the necessary correction in unit 8kHz:
+        error_Hz = (err_ppm * rf_freq_ch_production)/10^6
+
+        And then we want unit 8kHz and with correct sign:
+        calibration_unit_8kHz = -error_Hz/8000
+
+        For example, if the ppm_error is -4, we should correct with: -round(-4 *
+        FREQ_CHANNEL1_DIV_8kHz) = 1
+    */
+    int8_t freq_cal_val = 0;
+
+    calibration_8kHz = -1 * freq_cal_val * FREQ_CHANNEL1_DIV_8kHz;
+
+    // Round the calibration and divide by 10 to compensate for the *10 used to
+    // avoid double calculations
+    if (calibration_8kHz < 0) {
+        calibration_8kHz = (int8_t)((calibration_8kHz - 5) / 10);
+    } else {
+        calibration_8kHz = (int8_t)((calibration_8kHz + 5) / 10);
+    }
+
+    ESP_LOGI(TAG,
+             "rf freq calibration enabled, efuse_value = %d(ppm), value_set = "
+             "%d(8kHz)",
+             freq_cal_val,
+             calibration_8kHz);
+}
+
+
+#elif defined(CONFIG_BOARD_XPLR_HPG2_C214) || defined(CONFIG_BOARD_MAZGCH_HPG_SOLUTION)
+
+/*===========================================================================
+* DEFINES
+*=========================================================================*/
+#define MIN_TX_POWER                  0
+#define MAX_TX_POWER                  14
+
+#define PHY_FREQ_OFFSET_ENABLE  (105)
+#define PHY_FREQ_OFFSET_VALUE   (106)
+#define FREQ_CHANNEL1_DIV_8kHz  (3) // 2.412GHz/(8kHz*10^6) = 0,3015 => ~0,3 (*10 to avoid double calculations)
+
+/*===========================================================================
+* DECLARATIONS
+*=========================================================================*/
+static const char *TAG = "ubx_phy_cal";
+
+static esp_phy_init_data_t ubx_init_data;
+
+/*===========================================================================
+* FUNCTIONS
+*=========================================================================*/
+
+/**
+  * Device specific rf calibration value is stored in flash otp area.
+  * Read and apply configuration.
+  */
+static void apply_rf_frequency_calibration(int8_t init_data[])
+{
+    /*
+        init_data takes the necessary correction in unit 8kHz:
+        error_Hz = (err_ppm * rf_freq_ch_production)/10^6
+
+        And then we want unit 8kHz and with correct sign:
+        calibration_unit_8kHz = -error_Hz/8000
+
+        For example, if the otp_ppm_error is -4, we should correct with: -round(-4 * FREQ_CHANNEL1_DIV_8kHz) = 1
+    */
+    int8_t freq_cal_val = 0;
+    if (otp_read_rf_freq_calibration(&freq_cal_val) != ESP_OK) {
+        freq_cal_val = 0;
+        ESP_LOGW(TAG, "No RF calibration value is stored in flash, using 0 (no calibration)");
+    }
+
+    int8_t calibration_8kHz = -1 * freq_cal_val * FREQ_CHANNEL1_DIV_8kHz;
+
+    // Round the calibration and divide by 10 to compensate for the *10 used to avoid double calculations
+    if (calibration_8kHz < 0) {
+        calibration_8kHz = (int8_t)((calibration_8kHz - 5) / 10);
+    } else {
+        calibration_8kHz = (int8_t)((calibration_8kHz + 5) / 10);
+    }
+
+    init_data[PHY_FREQ_OFFSET_VALUE] = calibration_8kHz;
+    init_data[PHY_FREQ_OFFSET_ENABLE] = 1;
+    ESP_LOGI(TAG,
+             "rf freq calibration enabled, value_otp = %d(ppm), value_set = %d(8kHz)",
+             freq_cal_val,
+             calibration_8kHz);
+    ESP_LOGI(TAG, "NINA-W1 phy calibration applied");
+}
+
+// phy_init_data.h will declare static 'phy_init_data' variable initialized with default init data
+const esp_phy_init_data_t *esp_phy_get_init_data()
+{
+    ubx_init_data = phy_init_data;
+    int8_t *init_data = (int8_t *)&ubx_init_data;
+
+    init_data[50] = 0; //msc0
+    init_data[51] = 0; //msc1
+    init_data[52] = 0; //msc2
+    init_data[53] = 0; //msc3
+    init_data[54] = 0; //msc4
+    init_data[55] = 1; //msc5
+    init_data[56] = 3; //msc6
+    init_data[57] = 4; //msc7
+
+    init_data[58] = 1; //11B special rate enable
+    init_data[59] = 2; //11B 1m, 2m
+    init_data[60] = 2; //11B 5.5, 11m
+
+    init_data[61] = 2; //fcc enable 2: enable 62-80 bytes to set maximum power
+    /*
+    0: Maximum Power is (txpwr_qdb_0/4) dbm
+    1: Maximum Power is (txpwr_qdb_1/4) dbm
+    2: Maximum Power is (txpwr_qdb_2/4) dbm
+    3: Maximum Power is (txpwr_qdb_3/4) dbm
+    4: Maximum Power is (txpwr_qdb_4/4) dbm
+    5: Maximum Power is (txpwr_qdb_5/4) dbm
+    6: Maximum Power is ((txpwr_qdb_5/4) - 1) dbm
+    7: Maximum Power is ((txpwr_qdb_5/4) - 2) dbm
+    8: Maximum Power is ((txpwr_qdb_5/4) - 3) dbm
+    9: Maximum Power is ((txpwr_qdb_5/4) - 4) dbm
+    10: Maximum Power is ((txpwr_qdb_5/4) -5) dbm
+    62 to 80
+    bit[3:0] : set the maximum tx power of channel 1 in 11g/n mode. The setting range is 0~10.
+    bit[7:4] : set the maximum tx power of channel 1 in 11b mode. The setting range is 0~10.
+    */
+    //20M
+    init_data[62] = 0x53; //channel 1
+    init_data[63] = 0x52;//channel 2
+    init_data[64] = 0x30;//channel 3
+    init_data[65] = 0x20;//channel 4
+    init_data[66] = 0x20;//channel 5
+    init_data[67] = 0x20;//channel 6
+    init_data[68] = 0x20;//channel 7
+    init_data[69] = 0x20;//channel 8
+    init_data[70] = 0x20;//channel 9
+    init_data[71] = 0x20;//channel 10
+    init_data[72] = 0x22;//channel 11
+    init_data[73] = 0x10;//channel 12
+    init_data[74] = 0x10;//channel 13
+    init_data[75] = 0xAA;//channel 14
+
+    //40M
+    init_data[76] = 0x44; //channel 3, 4
+    init_data[77] = 0x44; //channel 5, 6
+    init_data[78] = 0x44; //channel 7, 8
+    init_data[79] = 0x44; //channel 9, 10
+    init_data[80] = 0x44; //channel 11
+
+#if ESP_IDF_VERSION_MAJOR == 4 && ESP_IDF_VERSION_MINOR == 0
+    init_data[44] = 56; //target power 0
+    init_data[45] = 54; //target power 1
+    init_data[46] = 48; //target power 2
+    init_data[47] = 46; //target power 3
+    init_data[48] = 42; //target power 4
+    init_data[49] = 36; //target power 5
+
+#elif ESP_IDF_VERSION_MAJOR == 4 && ESP_IDF_VERSION_MINOR == 3
+    init_data[44] = 62; //target power 0
+    init_data[45] = 60; //target power 1
+    init_data[46] = 54; //target power 2
+    init_data[47] = 52; //target power 3
+    init_data[48] = 48; //target power 4
+    init_data[49] = 42; //target power 5
+
+#elif ESP_IDF_VERSION_MAJOR == 4 && ESP_IDF_VERSION_MINOR == 4
+    init_data[44] = 62; //target power 0
+    init_data[45] = 60; //target power 1
+    init_data[46] = 54; //target power 2
+    init_data[47] = 52; //target power 3
+    init_data[48] = 48; //target power 4
+    init_data[49] = 42; //target power 5
+
+#else
+#error Configuration are only valid and tested for ESP IDF v4.0, v4.3 and v4.4
+#endif
+    apply_rf_frequency_calibration(init_data);
+
+    ESP_LOGD(TAG, "loading PHY init data from application binary");
+
+    return (esp_phy_init_data_t *)init_data;
+}
+
+#else
+#error "Invalid board selected"
+#endif

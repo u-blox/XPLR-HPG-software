@@ -1,0 +1,9 @@
+menu "XPLR HPG Options"
+    menu "Bluetooth Settings"
+        config XPLR_BLUETOOTH_DEVICE_NAME
+            string "Device name"
+            default "xplr-hpg"
+            help
+                Fill in the Bluetooth device name
+    endmenu
+endmenu

@@ -10,6 +10,8 @@ The example simply initializes the XPLR-HPG kit using the corresponding [board f
 <br>
 
 ## Build instructions
+
+### Building using Visual Studio Code
 To build the example please follow the steps described bellow:
 
 1. Open the `XPLR-HPG-SW` folder in VS code.
@@ -37,6 +39,16 @@ To build the example please follow the steps described bellow:
 7. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
 <br>
+
+### Building using ESP-IDF from a command line
+1. Navigate to the `XPLR-HPG-SW` root folder.
+2. In [CMakeLists](./../../../CMakeLists.txt) select the `hpg_base` project, making sure that all other projects are commented out.
+3. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to be logged in the SD card or the debug UART.
+4. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `idf.py menuconfig`.
+5. Navigate to the `Board Options` section and select the board you wish to build the example for. Press `q` and answer `Y` to save the configuration.
+6. Run `idf.py build` to compile the project.
+7. Run `idf.py -p COMX flash` to flash the binary to the board, where **COMX** is the `COM Port` that the XPLR-HPGx has enumerated on.
+8. Run `idf.py monitor -p COMX` to monitor the debug UART output.
 
 ## Kconfig/Build Definitions-Macros
 This is a description of definitions and macros configured by **[Kconfig](./../../../docs/README_kconfig.md)**.\

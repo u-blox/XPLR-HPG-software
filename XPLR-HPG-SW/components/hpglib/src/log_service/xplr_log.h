@@ -22,111 +22,124 @@
  * the platform/OS must be brought in through u_port* to maintain
  * portability.
  */
-
+#include "xplr_log_types.h"
 #include "./../sd_service/xplr_sd.h"
-#include "./../common/xplr_common.h"
-#include "./../../xplr_hpglib_cfg.h"
 
 /**
  * @file
  * @brief This header file defines the hih level functions
- * required to be able to configure, initialize, terminate 
- * and execute the logging functions to the onboard SD card 
+ * required to be able to configure, initialize, terminate
+ * and execute the logging functions to the onboard SD card
  */
-
-/* ----------------------------------------------------------------
- * COMPILE-TIME MACROS
- * -------------------------------------------------------------- */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED)
-#define XPLRLOG(xplrLog, message, ...) xplrLogFile(xplrLog, message)
-#else
-#define XPLRLOG(message, ...) do{} while(0)
-#endif
-
-#define KB  (1024LLU)
-#define MB  1024*KB
-#define GB  1024*MB
-
-#define LOG_MAXIMUM_NAME_SIZE   20      //Maximum size of log file name
-#define LOG_BUFFER_MAX_SIZE     256     //Maximum size of log buffer
-
 /* ----------------------------------------------------------------
- * STATIC TYPES
+ * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
 
-// *INDENT-OFF*
-
-typedef xplrSd_size_t   xplrLog_size_t;
-
-typedef enum {
-    XPLR_LOG_ERROR = -1,
-    XPLR_LOG_OK
-} xplrLog_error_t;
-
-typedef enum {
-    XPLR_LOG_DEVICE_ERROR = 0,      /**< Errors are to be logged in*/
-    XPLR_LOG_DEVICE_INFO,           /**< General information for the board is to be logged*/
-    XPLR_LOG_DEVICE_ZED,            /**< Device whose data is to be logged is in the ZED family of chips*/
-    XPLR_LOG_DEVICE_NEO             /**< Device whose data is to be logged is in the NEO family of chips */
-} xplrLog_dvcTag_t;
-
-typedef struct xplrLog_type {
-    xplrSd_t            *sd;                                            /**< Pointer to the struct containing the configuration of the SD service*/
-    xplrLog_dvcTag_t    tag;                                            /**< Device tag of the logging to determine the type of data to be logged*/
-    char                buffer[LOG_BUFFER_MAX_SIZE + 1];                /**< Internal buffer that keeps messages and stores them in the SD card when full
-                                                                           < in order to achieve better performance*/
-    char                logFilename[LOG_MAXIMUM_NAME_SIZE + 256 + 1];   /**< Name of the logging file*/
-    uint16_t            bufferIndex;                                    /**< Index to the internal buffer to keep track of how full it is*/
-    uint16_t            maxSize;                                        /**< Maximum logging file size before erase (e.g. if 10MBytes this should be 10)*/
-    xplrLog_size_t      maxSizeType;                                    /**< Maximum logging file size before erase (e.g. if 10MBytes this should be XPLR_SIZE_MB)*/
-    uint64_t            freeSpace;                                      /**< Free space of the SD card in maxSizeType Bytes*/
-    bool                logEnable;                                      /**< Flag that enables/disables logging*/
-} xplrLog_t;
-
-// *INDENT-ON*
-
 /**
- * PUBLIC FUNCTIONS
-*/
-
-/**
- * @brief Function that initializes the log service
+ * @brief Function that initializes the log service for a specific instance
  *
- * @param xplrLog       Pointer to the log struct
  * @param tag           Type of logging desired (In case of Info or Error logging will be in ASCII format, otherwise in binary)
  * @param logFilename   String pointer to the desired filename of the log file
- * @param maxSize       Unsigned integer to show file max allowed size (e.g. if 10MB is to be the max size this value should be 10)
- * @param sizeType      Size type value to indicate the size (e.g. if 10MB is to be the max size this value should be XPLR_SIZE_MB)
- * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+ * @param sizeInterval  Size in bytes. If the file reaches that size the filename gets incremented. If 0 this will happen in default value (4GB)
+ * @param replace       When true, if a file exists with the same name it will be cleared. When false the data will get appended if a file exists with the same name.
+ * @return              Index to the internal log instance array in success, -1 in failure
 */
-xplrLog_error_t xplrLogInit(xplrLog_t *xplrLog,
-                            xplrLog_dvcTag_t tag,
-                            char *logFilename,
-                            uint16_t maxSize,
-                            xplrLog_size_t maxSizeType);
+int8_t xplrLogInit(xplrLog_dvcTag_t tag, char *logFilename, uint64_t sizeInterval, bool replace);
 
 /**
  * @brief Function that de-initializes the logging service
  *
- * @param xplrLog       Pointer to the log struct
+ * @param dvcProfile    Index to the internal log instance array
  * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
 */
-xplrLog_error_t xplrLogDeInit(xplrLog_t *xplrLog);
+xplrLog_error_t xplrLogDeInit(int8_t index);
 
+/**
+ * @brief Function that de-initializes all logging instances
+ *
+ * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+*/
+xplrLog_error_t xplrLogDeInitAll(void);
+
+/**
+ * @brief Function that checks if logging is enabled for the logging instance of the index
+ *
+ * @param index         Index to the internal log instance array
+ * @return              true if logging is enabled, false if it is not
+*/
+bool xplrLogIsEnabled(int8_t index);
+
+/**
+ * @brief Function that enables logging for the specific index
+ *
+ * @param index         Index to the internal log instance array
+ * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+*/
+xplrLog_error_t xplrLogEnable(int8_t index);
+
+/**
+ * @brief Function that disables logging for the specific index
+ *
+ * @param index         Index to the internal log instance array
+ * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+*/
+xplrLog_error_t xplrLogDisable(int8_t index);
+
+/**
+ * @brief Function that enables all logging instances (if initialized with xplrLogInit)
+ *
+ * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+*/
+xplrLog_error_t xplrLogEnableAll(void);
+
+/**
+ * @brief Function that disables all logging instances
+ *
+ * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+*/
+xplrLog_error_t xplrLogDisableAll(void);
+
+/**
+ * @brief Function that gets the logging file size
+ *
+ * @param dvcProfile    Index to the internal log instance array
+ * @return              The size of the file in bytes
+*/
+int64_t xplrLogGetFileSize(int8_t index);
+
+/**
+ * @brief Function that changes the log filename. Must have called xplrLogInit first
+ *        to obtain a valid index.
+ *
+ * @param index         Index to the internal log instance array
+ * @param filename      The desired new filename (must not exceed 63 characters)
+ * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+*/
+xplrLog_error_t xplrLogSetFilename(int8_t index, char *filename);
+
+/**
+ * @brief Function that changes the log device tag. Must have called xplrLogInit first
+ *        to obtain a valid index.
+ *
+ * @param index         Index to the internal log instance array
+ * @param tag           Type of logging desired (In case of Info or Error logging will be in ASCII format, otherwise in binary)
+ * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
+*/
+xplrLog_error_t xplrLogSetDeviceTag(int8_t index, xplrLog_dvcTag_t tag);
 
 /**
  * @brief Function that logs data to the SD card, in the corresponding file.
  *
- * @param xplrLog       Pointer to the log struct
- * @param message       The message to be logged
+ * @param index         Index to the internal log instance array
+ * @param fmt           The format of the message to be logged
  * @return              XPLR_LOG_OK in success or XPLR_LOG_ERROR in failure
 */
-xplrLog_error_t xplrLogFile(xplrLog_t *xplrLog, char *message);
+xplrLog_error_t xplrLogFile(int8_t index, xplrLog_Opt_t opt, char *fmt, ...);
 
 #ifdef __cplusplus
 }

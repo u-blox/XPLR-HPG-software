@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include "string.h"
 #include "esp_task_wdt.h"
+#include "freertos/semphr.h"
 #include "cJSON.h"
 #include "xplr_lband.h"
 #include "./../../../components/hpglib/src/common/xplr_common.h"
@@ -35,15 +36,11 @@
  * Debugging print macro
  */
 #if (1 == XPLRLBAND_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRLOCATION_LOG_ACTIVE))
-#define XPLRLBAND_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRLBAND_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgLband", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRLBAND_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-#define XPLRLBAND_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-    XPLRLOG(&locationLog,buff2Log);
+#define XPLRLBAND_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgLband", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRLBAND_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-#define XPLRLBAND_CONSOLE(tag, message, ...)\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrLband", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    XPLRLOG(&locationLog,buff2Log)
+#define XPLRLBAND_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgLband", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRLBAND_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -92,9 +89,13 @@ typedef struct xplrLbandRunContext_type {
 typedef struct xplrLband_type {
     xplrLbandDeviceCfg_t *dvcCfg;
     xplrLbandRunContext_t options;
-    xplrLog_t dvcLog;
 } xplrLband_t;
 /*INDENT-ON*/
+
+static SemaphoreHandle_t xSemaphore = NULL;
+
+/**< flag showing if data is forwarded to the GNSS module */
+static bool hasFrwdCorrMsg = false;
 
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
@@ -106,6 +107,7 @@ static const char *freqRegions[] = {
 };
 
 static xplrLband_t lbandDvcs[XPLRLBAND_NUMOF_DEVICES] = {NULL};
+static int8_t logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -171,8 +173,8 @@ esp_err_t xplrLbandStartDevice(uint8_t dvcProfile,
         ret = lbandDeviceOpen(dvcProfile);
 
         if (ret == ESP_OK) {
-            ret = xplrLbandOptionMultiValSet(dvcProfile, 
-                                             lbandSettings, 
+            ret = xplrLbandOptionMultiValSet(dvcProfile,
+                                             lbandSettings,
                                              ELEMENTCNT(lbandSettings),
                                              U_GNSS_CFG_VAL_LAYER_RAM);
             if (ret == ESP_OK) {
@@ -200,8 +202,8 @@ esp_err_t xplrLbandStartDevice(uint8_t dvcProfile,
         } else {
             XPLRLBAND_CONSOLE(E, "Failed to open LBAND module!");
         }
-    } 
-    
+    }
+
     return ret;
 }
 
@@ -370,7 +372,9 @@ esp_err_t xplrLbandSetFrequency(uint8_t dvcProfile, uint32_t frequency)
     return ret;
 }
 
-esp_err_t xplrLbandSetFrequencyFromMqtt(uint8_t dvcProfile, char *mqttPayload, xplrLbandRegion_t freqRegion)
+esp_err_t xplrLbandSetFrequencyFromMqtt(uint8_t dvcProfile,
+                                        char *mqttPayload,
+                                        xplrLbandRegion_t freqRegion)
 {
     esp_err_t ret;
     bool boolRet = lbandIsDvcProfileValid(dvcProfile);
@@ -469,6 +473,9 @@ esp_err_t xplrLbandSendCorrectionDataAsyncStart(uint8_t dvcProfile)
     }
 
     if (ret == ESP_OK) {
+        if (xSemaphore == NULL) {
+            xSemaphore = xSemaphoreCreateMutex();
+        }
         if (lbandDvcs[dvcProfile].dvcCfg->destHandler != NULL) {
             if (lbandDvcs[dvcProfile].options.asyncIds.ahCorrData >= 0) {
                 XPLRLBAND_CONSOLE(D, "Looks like LBAND Send Correction Data async is already running!");
@@ -513,6 +520,10 @@ esp_err_t xplrLbandSendCorrectionDataAsyncStop(uint8_t dvcProfile)
             intRet = lbandAsyncStopper(dvcProfile, lbandDvcs[dvcProfile].options.asyncIds.ahCorrData);
 
             if (intRet == 0) {
+                if (xSemaphore != NULL) {
+                    vSemaphoreDelete(xSemaphore);
+                    xSemaphore = NULL;
+                }
                 lbandDvcs[dvcProfile].options.asyncIds.ahCorrData = -1;
                 ret = ESP_OK;
             } else {
@@ -582,6 +593,25 @@ esp_err_t xplrLbandPrintDeviceInfo(uint8_t dvcProfile)
     return ret;
 }
 
+bool xplrLbandHasFrwdMessage(void)
+{
+    bool ret;
+
+    if (xSemaphore == NULL) {
+        ret = false;
+    } else {
+        if (xSemaphoreTake(xSemaphore, XPLR_LBAND_SEMAPHORE_TIMEOUT) == pdTRUE) {
+            ret = hasFrwdCorrMsg;
+            hasFrwdCorrMsg = false;
+            xSemaphoreGive(xSemaphore);
+        } else {
+            ret = false;
+        }
+    }
+
+    return ret;
+}
+
 /**
  * Checks if input device profile is valid
  */
@@ -589,6 +619,55 @@ static bool lbandIsDvcProfileValid(uint8_t dvcProfile)
 {
     bool ret;
     ret = xplrHlprLocSrvcCheckDvcProfileValidity(dvcProfile, XPLRLBAND_NUMOF_DEVICES);
+    return ret;
+}
+
+int8_t xplrLbandInitLogModule(xplr_cfg_logInstance_t *logCfg)
+{
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_LBAND_INFO_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
+    } else {
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
+    }
+
+    return ret;
+}
+
+esp_err_t xplrLbandStopLogModule(void)
+{
+    esp_err_t ret;
+    xplrLog_error_t logErr;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
+    }
+
     return ret;
 }
 
@@ -720,6 +799,7 @@ static void xplrLbandMessageReceivedCB(uDeviceHandle_t gnssHandle,
     char buffer[568];
     int32_t intRet;
     int32_t lbandCbRead;
+    static bool correctionDataSentInitial = true;
 
     if ((errorCodeOrLength > 0) && (errorCodeOrLength <= ELEMENTCNT(buffer))) {
         lbandCbRead = uGnssMsgReceiveCallbackRead(gnssHandle, buffer, errorCodeOrLength);
@@ -733,17 +813,24 @@ static void xplrLbandMessageReceivedCB(uDeviceHandle_t gnssHandle,
                               "Error sending LBAND correction data to LBAND, size mismatch: was [%d] bytes | sent [%d] bytes!",
                               intRet,
                               lbandCbRead);
+            XPLR_CI_CONSOLE(11, "ERROR");
         } else {
+            if (xSemaphoreTake(xSemaphore, XPLR_LBAND_SEMAPHORE_TIMEOUT) == pdTRUE) {
+                hasFrwdCorrMsg = true;
+                xSemaphoreGive(xSemaphore);
+            }
             XPLRLBAND_CONSOLE(D,
                               "Sent LBAND correction data size [%d]",
                               intRet);
-            if (lbandDvcs[0].dvcLog.logEnable) {
-                XPLRLOG(&lbandDvcs[0].dvcLog, buffer);
+            if (correctionDataSentInitial) {
+                XPLR_CI_CONSOLE(11, "OK");
+                correctionDataSentInitial = false;
             }
         }
     } else {
         XPLRLBAND_CONSOLE(W,
                           "Message received [%d bytes] which is invalid! Length must be between [1] and [%d] bytes!",
                           errorCodeOrLength, ELEMENTCNT(buffer));
+        XPLR_CI_CONSOLE(11, "ERROR");
     }
 }

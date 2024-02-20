@@ -101,6 +101,9 @@
               <option selected>Choose region</option>
               <option value="EU">EU</option>
               <option value="US">US</option>
+              <option value="KR">KR</option>
+              <option value="AU">AU</option>
+              <option value="JP">JP</option>
             </select>
             <button class="btn btn-outline-secondary" id="tsRegionBtn" disabled>Set</button>
           </div>
@@ -563,7 +566,7 @@
 
     region = document.getElementById("region").value;
 
-    if (region === "EU" || region === "US") {
+    if (region === "EU" || region === "US" || region === "KR" || region === "AU" || region === "JP") {
       xplr.ppRegion = region;
       document.querySelector("#tsRegionBtn").disabled = false;
     } else {

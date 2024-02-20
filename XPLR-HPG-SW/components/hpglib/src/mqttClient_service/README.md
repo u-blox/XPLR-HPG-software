@@ -24,7 +24,7 @@ Name | Value | Description
 --- | --- | ---
 **`XPLRCELL_MQTT_DEBUG_ACTIVE`** | **`1`** | Controls logging of debug info to console. Present in [xplr_hpglib_cfg](./../../xplr_hpglib_cfg.h).
 **`XPLRCELL_MQTT_NUMOF_CLIENTS`** | **`1`** | Defines number of MQTT clients to be initialized by the library. Present in [xplr_hpglib_cfg](./../../xplr_hpglib_cfg.h).
-
+**`XPLRCELL_MQTT_WATCHDOG_TIMEOUT_SEC`** | **`10U`** | Defines the time in seconds in which the internal watchdog gets triggered. The trigger will occur when no MQTT messages are received for this amount of seconds. It is relevant only when the MQTT broker selected is Thingstream. When connecting with third party MQTT brokers the check for watchdog event, regarding the reception of MQTT messages is disabled.<br> 
 **NOTE:** Currently only **one** client can be initialized. In a future update of [ubxlib](https://www.u-blox.com/en/product/ubxlib) multiple clients will be supported.
 <br>
 

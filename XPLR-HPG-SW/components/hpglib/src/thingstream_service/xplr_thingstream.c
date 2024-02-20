@@ -23,25 +23,23 @@
 #include <stdio.h>
 #include "string.h"
 #include "xplr_thingstream.h"
-#include "cJSON.h"
 #include "xplr_log.h"
+#include "cJSON.h"
 
 #include "./../../../components/hpglib/src/common/xplr_common.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
+/**
+ * Debugging print macro
+ */
 #if (1 == XPLRTHINGSTREAM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLR_THINGSTREAM_LOG_ACTIVE))
-#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRTHINGSTREAM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    if (thingstreamLog.logEnable){\
-        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-        XPLRLOG(&thingstreamLog,buff2Log);}
+#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRTHINGSTREAM_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...) if (thingstreamLog.logEnable){\
-        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrThingstream", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-        XPLRLOG(&thingstreamLog,buff2Log);}
+#define XPLR_THINGSTREAM_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgThingstream", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLR_THINGSTREAM_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -94,6 +92,12 @@ const char thingstreamPpFilterRegionEU[] =             "EU";
 const char thingstreamPpFilterRegionEUAll[] =          "eu";
 const char thingstreamPpFilterRegionUS[] =             "US";
 const char thingstreamPpFilterRegionUSAll[] =          "us";
+const char thingstreamPpFilterRegionKR[] =             "KR";
+const char thingstreamPpFilterRegionKRAll[] =          "kr";
+const char thingstreamPpFilterRegionAU[] =             "AU";
+const char thingstreamPpFilterRegionAUAll[] =          "au";
+const char thingstreamPpFilterRegionJP[] =             "Japan";
+const char thingstreamPpFilterRegionJPAll[] =          "jp";
 const char thingstreamPpFilterKeyDist[] =              "key distribution";
 const char thingstreamPpFilterAssistNow[] =            "AssistNow";
 const char thingstreamPpFilterCorrectionDataIpLb[] =   "L-band + IP correction";
@@ -121,13 +125,7 @@ const char tsCommThingUsernameEnd[] =       "</Username>";
 const char tsCommThingPasswordStart[] =     "<Password>";
 const char tsCommThingPasswordEnd[] =       "</Password>";
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-/**
- * Logging variables
-*/
-static xplrLog_t thingstreamLog;
-static char buff2Log[XPLRLOG_BUFFER_SIZE_LARGE];
-#endif
+static int8_t logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -206,19 +204,6 @@ xplr_thingstream_error_t xplrThingstreamInit(const char *ppToken,
     size_t serverUrlLength;
     size_t ppZtpUrlLength = strlen(thingstreamApiPpCredPath);
     xplr_thingstream_error_t ret;
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-    if (!thingstreamLog.logEnable) {
-        xplrLog_error_t err = xplrLogInit(&thingstreamLog, XPLR_LOG_DEVICE_INFO, "/thing.log", 100,
-                                          XPLR_SIZE_MB);
-        if (err == XPLR_LOG_OK) {
-            thingstreamLog.logEnable = true;
-        } else {
-            thingstreamLog.logEnable = false;
-        }
-        thingstream->logCfg = &thingstreamLog;
-    }
-#endif
 
     if (ppToken != NULL) {
         /* check token length */
@@ -338,6 +323,7 @@ xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
                                                          subType,
                                                          settings->pointPerfect.topicList);
 
+    tsPpSetDescFilter(&settings->pointPerfect);
     if ((settings->connType == XPLR_THINGSTREAM_PP_CONN_WIFI) && (err[0] == XPLR_THINGSTREAM_OK)) {
         tsPpModifyBroker(settings->pointPerfect.brokerAddress);
     } else if ((settings->connType == XPLR_THINGSTREAM_PP_CONN_CELL) &&
@@ -364,7 +350,34 @@ xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
         } else {
             ret = XPLR_THINGSTREAM_OK;
         }
-        settings->pointPerfect.numOfTopics = i;
+    }
+    if (region == XPLR_THINGSTREAM_PP_REGION_AU) {
+        // AU region has 3 MQTT topics
+        settings->pointPerfect.numOfTopics = 3;
+        settings->pointPerfect.lbandSupported = false;
+    } else if (subType == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
+        if ((region == XPLR_THINGSTREAM_PP_REGION_EU) || (region == XPLR_THINGSTREAM_PP_REGION_US)) {
+            // LBAND plan has 3 MQTT topics
+            settings->pointPerfect.numOfTopics = 3;
+        } else {
+            settings->pointPerfect.lbandSupported = false;
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else if (subType == XPLR_THINGSTREAM_PP_PLAN_IP) {
+        // IP plan has 7 MQTT topics
+        settings->pointPerfect.numOfTopics = 7;
+    } else if (subType == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
+        if ((region == XPLR_THINGSTREAM_PP_REGION_EU) || (region == XPLR_THINGSTREAM_PP_REGION_US)) {
+            // IPLBAND plan has 8 MQTT topics
+            settings->pointPerfect.numOfTopics = 8;
+        } else {
+            settings->pointPerfect.numOfTopics = 7;
+            settings->pointPerfect.lbandSupported = false;
+        }
+    } else {
+        // We shouldn't reach this point. If we did something went wrong
+        XPLR_THINGSTREAM_CONSOLE(E, "Could not set number of topics");
+        ret = XPLR_THINGSTREAM_ERROR;
     }
 
     return ret;
@@ -430,11 +443,18 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
             regionFilter = thingstreamPpFilterRegionUS;
             ret = XPLR_THINGSTREAM_OK;
             break;
-        case XPLR_THINGSTREAM_PP_REGION_ALL:
-            regionFilter = " ";
+        case XPLR_THINGSTREAM_PP_REGION_KR:
+            regionFilter = thingstreamPpFilterRegionKR;
             ret = XPLR_THINGSTREAM_OK;
             break;
-
+        case XPLR_THINGSTREAM_PP_REGION_AU:
+            regionFilter = thingstreamPpFilterRegionAU;
+            ret = XPLR_THINGSTREAM_OK;
+            break;
+        case XPLR_THINGSTREAM_PP_REGION_JP:
+            regionFilter = thingstreamPpFilterRegionJP;
+            ret = XPLR_THINGSTREAM_OK;
+            break;
         default:
             XPLR_THINGSTREAM_CONSOLE(E, "Region not supported.");
             ret = XPLR_THINGSTREAM_ERROR;
@@ -509,6 +529,14 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicInfo(const char *data,
                 topicFilter = thingstreamPpFilterRegionUSAll;
                 ret = XPLR_THINGSTREAM_OK;
                 break;
+            case XPLR_THINGSTREAM_PP_TOPIC_ALL_KR:
+                topicFilter = thingstreamPpFilterRegionKRAll;
+                ret = XPLR_THINGSTREAM_OK;
+                break;
+            case XPLR_THINGSTREAM_PP_TOPIC_ALL_JP:
+                topicFilter = thingstreamPpFilterRegionJPAll;
+                ret = XPLR_THINGSTREAM_OK;
+                break;
             case XPLR_THINGSTREAM_PP_TOPIC_ALL:
                 topicFilter = thingstreamPpFilterAll;
                 ret = XPLR_THINGSTREAM_OK;
@@ -574,22 +602,92 @@ xplr_thingstream_error_t xplrThingstreamPpParseTopicsInfoByRegionAll(const char 
                                                                      xplr_thingstream_pp_plan_t planType,
                                                                      xplr_thingstream_pp_topic_t *topics)
 {
-    xplr_thingstream_error_t err[7];
-    xplr_thingstream_error_t ret;
+    xplr_thingstream_error_t err[8];
+    xplr_thingstream_error_t ret = XPLR_THINGSTREAM_ERROR;
+    uint8_t numOfTopics;
+    bool isRegionValid = (region == XPLR_THINGSTREAM_PP_REGION_EU) |
+                         (region == XPLR_THINGSTREAM_PP_REGION_US);
 
     /* iterate through the topics type list and grab the info */
-    for (int8_t i = 0; i < 7; i++) {
-        err[i] = xplrThingstreamPpParseTopicInfo(data,
-                                                 region,
-                                                 planType,
-                                                 (xplr_thingstream_pp_topic_type_t)i,
-                                                 &topics[i]);
-    }
+    if (planType == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
+        if (isRegionValid) {
+            /**
+            * For LBAND plan we need to parse 3 topics:
+            *  - Key distribution
+            *  - Assist Now
+            *  - Frequencies
+            */
+            err[0] = xplrThingstreamPpParseTopicInfo(data,
+                                                     region,
+                                                     planType,
+                                                     XPLR_THINGSTREAM_PP_TOPIC_KEYS_DIST,
+                                                     &topics[0]);
+            err[1] = xplrThingstreamPpParseTopicInfo(data,
+                                                     region,
+                                                     planType,
+                                                     XPLR_THINGSTREAM_PP_TOPIC_ASSIST_NOW,
+                                                     &topics[1]);
+            err[2] = xplrThingstreamPpParseTopicInfo(data,
+                                                     region,
+                                                     planType,
+                                                     XPLR_THINGSTREAM_PP_TOPIC_FREQ,
+                                                     &topics[2]);
+            for (int8_t i = 0; i < 3; i++) {
+                ret = err[i];
+                if (err[i] != XPLR_THINGSTREAM_OK) {
+                    break;
+                }
+            }
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "LBAND plan is not supported in your region");
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
+    } else if (region == XPLR_THINGSTREAM_PP_REGION_AU) {
+        // AU region has 3 MQTT topics
+        for (int8_t i = 0; i < 3; i++) {
+            err[i] = xplrThingstreamPpParseTopicInfo(data,
+                                                     region,
+                                                     planType,
+                                                     (xplr_thingstream_pp_topic_type_t)i,
+                                                     &topics[i]);
+        }
+        for (int8_t i = 0; i < 3; i++) {
+            ret = err[i];
+            if (err[i] != XPLR_THINGSTREAM_OK) {
+                break;
+            }
+        }
+    } else if (region == XPLR_THINGSTREAM_PP_REGION_KR &&
+               planType == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
+        XPLR_THINGSTREAM_CONSOLE(E, "IP+LBAND plan is not supported in Korea region");
+        ret = XPLR_THINGSTREAM_ERROR;
+    } else {
+        /* IP plan has 7 topics, IPLBAND plan has 8 topics (7 + frequencies) */
+        if (planType == XPLR_THINGSTREAM_PP_PLAN_IP) {
+            numOfTopics = 7;
+        } else if (planType == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
+            if (isRegionValid) {
+                numOfTopics = 8;
+            } else {
+                numOfTopics = 7;
+            }
+        } else {
+            numOfTopics = 0;
+            ret = XPLR_THINGSTREAM_ERROR;
+        }
 
-    for (int8_t i = 0; i < 7; i++) {
-        ret = err[i];
-        if (err[i] != XPLR_THINGSTREAM_OK) {
-            break;
+        for (int8_t i = 0; i < numOfTopics; i++) {
+            err[i] = xplrThingstreamPpParseTopicInfo(data,
+                                                     region,
+                                                     planType,
+                                                     (xplr_thingstream_pp_topic_type_t)i,
+                                                     &topics[i]);
+        }
+        for (int8_t i = 0; i < numOfTopics; i++) {
+            ret = err[i];
+            if (err[i] != XPLR_THINGSTREAM_OK) {
+                break;
+            }
         }
     }
 
@@ -875,7 +973,7 @@ xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_regio
                                                        xplr_thingstream_pp_plan_t plan,
                                                        xplr_thingstream_t *instance)
 {
-    xplr_thingstream_error_t ret[4];
+    xplr_thingstream_error_t ret[6];
 
     xplr_thingstream_pp_sub_t sub =  {
         .region = region,
@@ -886,15 +984,59 @@ xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_regio
     ret[0] = tsPpGetKeysTopic(&sub, instance->pointPerfect.topicList[0].path);
     ret[1] = tsPpGetKeysDesc(&sub, instance->pointPerfect.topicList[0].description);
     if (sub.plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-        ret[2] = tsPpGetFreqTopic(&sub, instance->pointPerfect.topicList[1].path);
-        ret[3] = tsPpGetFreqDesc(&sub, instance->pointPerfect.topicList[1].description);
+        if (sub.region == XPLR_THINGSTREAM_PP_REGION_US || sub.region == XPLR_THINGSTREAM_PP_REGION_EU) {
+            ret[2] = tsPpGetFreqTopic(&sub, instance->pointPerfect.topicList[1].path);
+            ret[3] = tsPpGetFreqDesc(&sub, instance->pointPerfect.topicList[1].description);
+            ret[4] = XPLR_THINGSTREAM_OK;
+            ret[5] = XPLR_THINGSTREAM_OK;
+            instance->pointPerfect.numOfTopics = 2;
+            instance->pointPerfect.mqttSupported = false;
+            instance->pointPerfect.lbandSupported = true;
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "LBAND plan available only for EU and US regions");
+            instance->pointPerfect.mqttSupported = false;
+            instance->pointPerfect.lbandSupported = false;
+            instance->pointPerfect.numOfTopics = 1;
+            ret[2] = XPLR_THINGSTREAM_ERROR;
+        }
+    } else if (sub.plan == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
+        if (sub.region == XPLR_THINGSTREAM_PP_REGION_KR) {
+            XPLR_THINGSTREAM_CONSOLE(E, "IPLBAND plan not available for Korea region");
+            instance->pointPerfect.numOfTopics = 1;
+            instance->pointPerfect.mqttSupported = false;
+            instance->pointPerfect.lbandSupported = false;
+            ret[2] = XPLR_THINGSTREAM_ERROR;
+        } else {
+            ret[2] = tsPpGetCorrTopic(&sub, instance->pointPerfect.topicList[1].path);
+            ret[3] = tsPpGetCorrDesc(&sub, instance->pointPerfect.topicList[1].description);
+            if (sub.region == XPLR_THINGSTREAM_PP_REGION_US || sub.region == XPLR_THINGSTREAM_PP_REGION_EU) {
+                ret[4] = tsPpGetFreqTopic(&sub, instance->pointPerfect.topicList[2].path);
+                ret[5] = tsPpGetFreqDesc(&sub, instance->pointPerfect.topicList[2].description);
+                instance->pointPerfect.numOfTopics = 3;
+                instance->pointPerfect.mqttSupported = true;
+                instance->pointPerfect.lbandSupported = true;
+            } else {
+                ret[4] = XPLR_THINGSTREAM_OK;
+                ret[5] = XPLR_THINGSTREAM_OK;
+                instance->pointPerfect.numOfTopics = 2;
+                instance->pointPerfect.mqttSupported = true;
+                instance->pointPerfect.lbandSupported = false;
+            }
+        }
     } else {
+        instance->pointPerfect.mqttSupported = true;
+        instance->pointPerfect.lbandSupported = false;
         ret[2] = tsPpGetCorrTopic(&sub, instance->pointPerfect.topicList[1].path);
         ret[3] = tsPpGetCorrDesc(&sub, instance->pointPerfect.topicList[1].description);
+        ret[4] = XPLR_THINGSTREAM_OK;
+        ret[5] = XPLR_THINGSTREAM_OK;
+        instance->pointPerfect.numOfTopics = 2;
     }
 
+    tsPpSetDescFilter(&instance->pointPerfect);
+
     /** Check for errors*/
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 6; i++) {
         if (ret[i] != XPLR_THINGSTREAM_OK) {
             return XPLR_THINGSTREAM_ERROR;
         }
@@ -910,19 +1052,6 @@ xplr_thingstream_error_t xplrThingstreamPpConfigFromFile(char *data,
     xplr_thingstream_error_t ret;
     xplr_thingstream_error_t err[7];
     uint8_t index;
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-    if (!thingstreamLog.logEnable) {
-        xplrLog_error_t logErr = xplrLogInit(&thingstreamLog, XPLR_LOG_DEVICE_INFO, "/thing.log", 100,
-                                             XPLR_SIZE_MB);
-        if (logErr == XPLR_LOG_OK) {
-            thingstreamLog.logEnable = true;
-        } else {
-            thingstreamLog.logEnable = false;
-        }
-        instance->logCfg = &thingstreamLog;
-    }
-#endif
 
     // Null pointer check
     if (data == NULL) {
@@ -946,6 +1075,28 @@ xplr_thingstream_error_t xplrThingstreamPpConfigFromFile(char *data,
         err[6] = tsPpConfigFileParseTopicsInfoByRegionAll(data,
                                                           region,
                                                           &instance->pointPerfect);
+        if ((instance->connType == XPLR_THINGSTREAM_PP_CONN_WIFI) && (err[0] == XPLR_THINGSTREAM_OK)) {
+            tsPpModifyBroker(instance->pointPerfect.brokerAddress);
+        } else if ((instance->connType == XPLR_THINGSTREAM_PP_CONN_CELL) &&
+                   (err[0] == XPLR_THINGSTREAM_OK)) {
+            //Modify certs and broker
+            xplrAddPortInfo(instance->pointPerfect.brokerAddress, instance->pointPerfect.brokerPort);
+            if ((err[2] == XPLR_THINGSTREAM_OK) &&
+                (err[3] == XPLR_THINGSTREAM_OK) &&
+                (err[4] == XPLR_THINGSTREAM_OK)) {
+                /* remove LFs from certificates */
+                xplrRemoveChar(instance->pointPerfect.clientCert, '\n');
+                xplrRemoveChar(instance->pointPerfect.clientKey, '\n');
+                xplrRemoveChar(instance->server.rootCa, '\n');
+            } else {
+                XPLR_THINGSTREAM_CONSOLE(E, "Certificates are parsed incorrectly!");
+                err[0] = XPLR_THINGSTREAM_ERROR;
+            }
+        } else {
+            //Error
+            XPLR_THINGSTREAM_CONSOLE(E, "Connection type not configured correctly!");
+            err[0] = XPLR_THINGSTREAM_ERROR;
+        }
         // Check for errors and return
         for (index = 0; index < 7; index++) {
             if (err[index] != XPLR_THINGSTREAM_OK) {
@@ -965,19 +1116,6 @@ xplr_thingstream_error_t xplrThingstreamCommConfigFromFile(char *data,
 {
     xplr_thingstream_error_t ret;
     xplr_thingstream_error_t err[4];
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-    if (!thingstreamLog.logEnable) {
-        xplrLog_error_t logErr = xplrLogInit(&thingstreamLog, XPLR_LOG_DEVICE_INFO, "/thing.log", 100,
-                                             XPLR_SIZE_MB);
-        if (logErr == XPLR_LOG_OK) {
-            thingstreamLog.logEnable = true;
-        } else {
-            thingstreamLog.logEnable = false;
-        }
-        instance->logCfg = &thingstreamLog;
-    }
-#endif
 
     // Null Pointer check
     if (data == NULL) {
@@ -1012,93 +1150,52 @@ xplr_thingstream_error_t xplrThingstreamCommConfigFromFile(char *data,
     return ret;
 }
 
-bool xplrThingstreamPpHaltLogModule(xplr_thingstream_t *instance)
+int8_t xplrThingstreamInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-    if(instance->logCfg != NULL) {
-        instance->logCfg->logEnable = false;
-        ret = true;
-    } else {
-        /* log module is not initialized thus do nothing and return false*/
-        ret = false;
-    }
-#else
-    ret = false;
-#endif
-    return ret;
-}
-
-bool xplrThingstreamPpStartLogModule(xplr_thingstream_t *instance)
-{
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    int8_t ret;
     xplrLog_error_t logErr;
-    if(instance->logCfg != NULL) {
-        instance->logCfg->logEnable = true;
-        ret = true;
-    } else {
-        logErr = xplrLogInit(&thingstreamLog,
-                             XPLR_LOG_DEVICE_INFO, 
-                             "/thing.log", 
-                             100,
-                             XPLR_SIZE_MB);
-        if (logErr == XPLR_LOG_OK) {
-            thingstreamLog.logEnable = true;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_THINGSTREAM_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
         } else {
-            thingstreamLog.logEnable = false;
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
         }
-        instance->logCfg = &thingstreamLog;
-        ret = thingstreamLog.logEnable;
-    }
-#else 
-    ret = false;
-#endif
-    return ret;
-}
-
-bool xplrThingstreamCommHaltLogModule(xplr_thingstream_comm_thing_t *instance)
-{
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
-    if(instance->logCfg != NULL) {
-        instance->logCfg->logEnable = false;
-        ret = true;
+        ret = logIndex;
     } else {
-        /* log module is not initialized thus do nothing and return false*/
-        ret = false;
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
-bool xplrThingstreamCommStartLogModule(xplr_thingstream_comm_thing_t *instance)
+esp_err_t xplrThingstreamStopLogModule(void)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLR_THINGSTREAM_LOG_ACTIVE)
+    esp_err_t ret;
     xplrLog_error_t logErr;
-    if(instance->logCfg != NULL) {
-        instance->logCfg->logEnable = true;
-        ret = true;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
     } else {
-        logErr = xplrLogInit(&thingstreamLog,
-                             XPLR_LOG_DEVICE_INFO, 
-                             "/thing.log", 
-                             100,
-                             XPLR_SIZE_MB);
-        if (logErr == XPLR_LOG_OK) {
-            thingstreamLog.logEnable = true;
-        } else {
-            thingstreamLog.logEnable = false;
-        }
-        instance->logCfg = &thingstreamLog;
-        ret = thingstreamLog.logEnable;
+        ret = ESP_OK;
     }
-#else 
-    ret = false;
-#endif
+
     return ret;
 }
 
@@ -1688,11 +1785,12 @@ static xplr_thingstream_pp_plan_t tsPpGetPlanType(bool lbandSupported, bool mqtt
         ret = XPLR_THINGSTREAM_PP_PLAN_IP;
         XPLR_THINGSTREAM_CONSOLE(I,
                                  "Your current Thingstream plan is : PointPerfect IP, thus, valid to receive correction data via MQTT");
+    } else if (lbandSupported) {
+        ret = XPLR_THINGSTREAM_PP_PLAN_LBAND;
+        XPLR_THINGSTREAM_CONSOLE(I, "Your current Thingstream plan is : PointPerfect L-band");
     } else {
         ret = XPLR_THINGSTREAM_PP_PLAN_INVALID;
-        XPLR_THINGSTREAM_CONSOLE(E,
-                                 "Your current Thingstream plan is : PointPerfect L-band, thus, not valid to receive correction data via MQTT");
-        XPLR_THINGSTREAM_CONSOLE(E, "Try using L-band correction data via the MQTT decryption keys...");
+        XPLR_THINGSTREAM_CONSOLE(E, "Invalid Thingstream plan.");
     }
     return ret;
 }
@@ -1781,9 +1879,13 @@ static xplr_thingstream_error_t tsPpGetCorrTopic(xplr_thingstream_pp_sub_t *tspl
                 strcat(corrTopic, "us");
                 break;
             case XPLR_THINGSTREAM_PP_REGION_KR:
-            case XPLR_THINGSTREAM_PP_REGION_ALL:
-                XPLR_THINGSTREAM_CONSOLE(E, "Only EU and US region are currently supported...");
-                ret = XPLR_THINGSTREAM_ERROR;
+                strcat(corrTopic, "kr");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_AU:
+                strcat(corrTopic, "au");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_JP:
+                strcat(corrTopic, "jp");
                 break;
             case XPLR_THINGSTREAM_PP_REGION_INVALID:
             default:
@@ -1828,9 +1930,13 @@ static xplr_thingstream_error_t tsPpGetCorrDesc(xplr_thingstream_pp_sub_t *tspla
                 strcat(corrDesc, "US region");
                 break;
             case XPLR_THINGSTREAM_PP_REGION_KR:
-            case XPLR_THINGSTREAM_PP_REGION_ALL:
-                XPLR_THINGSTREAM_CONSOLE(E, "Only EU and US region are currently supported...");
-                ret = XPLR_THINGSTREAM_ERROR;
+                strcat(corrDesc, "KR region");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_AU:
+                strcat(corrDesc, "AU region");
+                break;
+            case XPLR_THINGSTREAM_PP_REGION_JP:
+                strcat(corrDesc, "JP region");
                 break;
             case XPLR_THINGSTREAM_PP_REGION_INVALID:
             default:
@@ -1908,7 +2014,7 @@ static xplr_thingstream_error_t tsPpConfigFileGetBroker(char *payload, char *bro
                     token = strrchr(element->valuestring, '/');
                     if ((strlen(token) - 1) <= XPLR_THINGSTREAM_URL_SIZE_MAX) {
                         xplrRemovePortInfo(token + 1, brokerAddress, XPLR_THINGSTREAM_URL_SIZE_MAX);
-                        tsPpModifyBroker(brokerAddress);
+                        // tsPpModifyBroker(brokerAddress);
                         ret = XPLR_THINGSTREAM_OK;
                     } else {
                         XPLR_THINGSTREAM_CONSOLE(E, "Parsed Server URI greater than URL max size");
@@ -2271,9 +2377,20 @@ static xplr_thingstream_error_t tsPpConfigFileParseTopicsInfoByRegionAll(char *p
                         corrData = cJSON_GetObjectItem(corrData, "DataTopics");
                         arraySize = cJSON_GetArraySize(corrData);
                         if (arraySize == 1) {
-                            // No correction data topics so no MQTT support
+                            // No correction data topics so plan is LBAND
                             settings->mqttSupported = false;
-                            XPLR_THINGSTREAM_CONSOLE(W, "No MQTT support, thus, no correction data...");
+                            // LBAND plan is supported only in EU and US regions currently
+                            if (region == XPLR_THINGSTREAM_PP_REGION_EU || region == XPLR_THINGSTREAM_PP_REGION_US) {
+                                strcpy(settings->topicList[2].path, "/pp/frequencies/Lb");
+                                strcpy(settings->topicList[2].description, thingstreamPpFilterFreq);
+                                settings->numOfTopics++;
+                                tsPpSetDescFilter(settings);
+                                // We are done! All topics are parsed
+                                ret = XPLR_THINGSTREAM_OK;
+                            } else {
+                                XPLR_THINGSTREAM_CONSOLE(E, "Correction via LBAND is not supported in your region");
+                                ret = XPLR_THINGSTREAM_ERROR;
+                            }
                         } else {
                             // Select topics based on region
                             switch (region) {
@@ -2288,9 +2405,54 @@ static xplr_thingstream_error_t tsPpConfigFileParseTopicsInfoByRegionAll(char *p
                                     settings->mqttSupported = true;
                                     break;
                                 case XPLR_THINGSTREAM_PP_REGION_KR:
+                                    if (settings->lbandSupported == true) {
+                                        // Plan is IPLBAND
+                                        XPLR_THINGSTREAM_CONSOLE(E, "IPLBAND plan is not supported in Korea");
+                                        corrTopic = NULL;
+                                        secondaryTopics = NULL;
+                                        settings->mqttSupported = false;
+                                        /* No LBAND support */
+                                        settings->lbandSupported = false;
+                                    } else {
+                                        // Plan is IP
+                                        corrTopic = cJSON_GetArrayItem(corrData, 4)->valuestring;
+                                        secondaryTopics = cJSON_GetArrayItem(corrData, 5)->valuestring;
+                                        settings->mqttSupported = true;
+                                    }
+                                    break;
+                                case XPLR_THINGSTREAM_PP_REGION_AU:
+                                    if (settings->lbandSupported == true) {
+                                        // Plan is IPLBAND
+                                        corrTopic = cJSON_GetArrayItem(corrData, 4)->valuestring;
+                                        secondaryTopics = NULL;
+                                        settings->mqttSupported = true;
+                                        /* No LBAND support */
+                                        settings->lbandSupported = false;
+                                    } else {
+                                        // Plan is IP
+                                        corrTopic = cJSON_GetArrayItem(corrData, 6)->valuestring;
+                                        secondaryTopics = NULL;
+                                        settings->mqttSupported = true;
+                                    }
+                                    break;
+                                case XPLR_THINGSTREAM_PP_REGION_JP:
+                                    if (settings->lbandSupported == true) {
+                                        // Plan is IPLBAND
+                                        corrTopic = cJSON_GetArrayItem(corrData, 6)->valuestring;
+                                        secondaryTopics = cJSON_GetArrayItem(corrData, 7)->valuestring;
+                                        settings->mqttSupported = true;
+                                        /* No LBAND support */
+                                        settings->lbandSupported = false;
+                                    } else {
+                                        // Plan is IP
+                                        corrTopic = cJSON_GetArrayItem(corrData, 8)->valuestring;
+                                        secondaryTopics = cJSON_GetArrayItem(corrData, 9)->valuestring;
+                                        settings->mqttSupported = true;
+                                    }
+                                    break;
                                 case XPLR_THINGSTREAM_PP_REGION_INVALID:
                                 default:
-                                    XPLR_THINGSTREAM_CONSOLE(E, "Only EU and US regions are currently supported!");
+                                    XPLR_THINGSTREAM_CONSOLE(E, "Region not supported!");
                                     corrTopic = NULL;
                                     secondaryTopics = NULL;
                                     settings->mqttSupported = false;
@@ -2320,6 +2482,16 @@ static xplr_thingstream_error_t tsPpConfigFileParseTopicsInfoByRegionAll(char *p
                                     token = strtok(NULL, ";");
                                 }
                                 tsPpSetDescFilter(settings);
+                                // In IPLBAND plan and EU region the frequencies topic is missing, so we will add it manually...
+                                if (region == XPLR_THINGSTREAM_PP_REGION_EU &&
+                                    settings->mqttSupported &&
+                                    settings->lbandSupported) {
+                                    strcpy(settings->topicList[settings->numOfTopics].path, "/pp/frequencies/Lb");
+                                    strcpy(settings->topicList[settings->numOfTopics].description, secTopicsDesc[index]);
+                                    settings->topicList[settings->numOfTopics].qos = settings->topicList[2].qos;
+                                    settings->numOfTopics++;
+                                    index++;
+                                }
                                 // We are done! All topics are parsed
                                 ret = XPLR_THINGSTREAM_OK;
                             } else {
@@ -2347,44 +2519,41 @@ static xplr_thingstream_error_t tsPpConfigFileParseTopicsInfoByRegionAll(char *p
 static xplr_thingstream_error_t tsPpConfigFileFormatCert(char *cert,
                                                          xplr_thingstream_pp_serverInfo_type_t type)
 {
+    esp_err_t espRet;
     xplr_thingstream_error_t ret;
-    char buf[2048] = {0};
-    char footer[32] = {0};
-    uint16_t times, timesMod;
+    xplr_common_cert_type_t commonCertType;
+
     switch (type) {
+        case XPLR_THINGSTREAM_PP_SERVER_INVALID:
+            commonCertType = XPLR_COMMON_CERT_INVALID;
+            break;
+        case XPLR_THINGSTREAM_PP_SERVER_ADDRESS:
+            commonCertType = XPLR_COMMON_CERT_INVALID;
+            break;
+        case XPLR_THINGSTREAM_PP_SERVER_CERT:
+            commonCertType = XPLR_COMMON_CERT;
+            break;
         case XPLR_THINGSTREAM_PP_SERVER_KEY:
-            strcpy(buf, "-----BEGIN RSA PRIVATE KEY-----\n");
-            strcpy(footer, "-----END RSA PRIVATE KEY-----\n");
-            ret = XPLR_THINGSTREAM_OK;
+            commonCertType = XPLR_COMMON_CERT_KEY;
+            break;
+        case XPLR_THINGSTREAM_PP_SERVER_ID:
+            commonCertType = XPLR_COMMON_CERT_INVALID;
             break;
         case XPLR_THINGSTREAM_PP_SERVER_ROOTCA:
-        case XPLR_THINGSTREAM_PP_SERVER_CERT:
-            strcpy(buf, "-----BEGIN CERTIFICATE-----\n");
-            strcpy(footer, "-----END CERTIFICATE-----\n");
-            ret = XPLR_THINGSTREAM_OK;
+            commonCertType = XPLR_COMMON_CERT_ROOTCA;
             break;
         default:
-            ret = XPLR_THINGSTREAM_ERROR;
+            commonCertType = XPLR_COMMON_CERT_INVALID;
             break;
     }
-    if (cert != NULL && ret == XPLR_THINGSTREAM_OK) {
-        times = strlen(cert) / 64;
-        timesMod = strlen(cert) % 64;
-        for (int i = 0; i <= times; i++) {
-            memcpy(buf + strlen(buf), cert + i * 64, 64);
-            if ((timesMod != 0) || (i != times)) {
-                strcat(buf + strlen(buf), "\n");
-            } else {
-                //Do nothing
-            }
-        }
-        strcat(buf, footer);
-        memset(cert, 0x00, XPLR_THINGSTREAM_CERT_SIZE_MAX);
-        memcpy(cert, buf, XPLR_THINGSTREAM_CERT_SIZE_MAX);
+
+    espRet = xplrPpConfigFileFormatCert(cert, commonCertType, true);
+    if (espRet == ESP_OK) {
+        ret = XPLR_THINGSTREAM_OK;
     } else {
-        XPLR_THINGSTREAM_CONSOLE(E, "Pointer to Certificate is NULL!");
         ret = XPLR_THINGSTREAM_ERROR;
     }
+
     return ret;
 }
 
@@ -2488,11 +2657,15 @@ static void tsPpSetDescFilter(xplr_thingstream_pp_settings_t *settings)
             XPLR_THINGSTREAM_CONSOLE(D, "IP + L-Band plan does support correction data via MQTT!");
         } else {
             thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataIp;
-            XPLR_THINGSTREAM_CONSOLE(D, "IP  plan does support correction data via MQTT!");
+            XPLR_THINGSTREAM_CONSOLE(D, "IP plan does support correction data via MQTT!");
         }
     } else {
-        thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataLb;
-        XPLR_THINGSTREAM_CONSOLE(W, "L-Band plan does not support correction data via MQTT...");
+        if (settings->lbandSupported) {
+            thingstreamPpFilterCorrectionData = thingstreamPpFilterCorrectionDataLb;
+            XPLR_THINGSTREAM_CONSOLE(D, "L-Band plan. Frequency and decryption keys will be fetched via MQTT!");
+        } else {
+            XPLR_THINGSTREAM_CONSOLE(E, "Invalid plan.");
+        }
     }
 }
 // End of file

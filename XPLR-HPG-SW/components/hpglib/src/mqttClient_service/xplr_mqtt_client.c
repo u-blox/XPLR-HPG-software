@@ -43,18 +43,17 @@
 #define XPLRCELL_MQTT_TOKEN_LENGTH              (44-1)
 #define XPLRCELL_MQTT_PP_TOKEN_LENGTH           (XPLRCELL_MQTT_TOKEN_LENGTH - 7)
 #define XPLRCELL_MQTT_PP_MD5_LENGTH             (33)
+#define XPLRCELL_MQTT_WATCHDOG_TIMEOUT_SEC      (10U)
 
+/**
+ * Debugging print macro
+ */
 #if (1 == XPLRCELL_MQTT_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRCELL_MQTT_LOG_ACTIVE))
-#define XPLRCELL_MQTT_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRCELL_MQTT_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCellMqtt", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRCELL_MQTT_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
-#define XPLRCELL_MQTT_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    if (cellMqttLog.logEnable){\
-        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-        XPLRLOG(&cellMqttLog,buff2Log);}
+#define XPLRCELL_MQTT_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCellMqtt", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRCELL_MQTT_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
-#define XPLRCELL_MQTT_CONSOLE(tag, message, ...) if (cellMqttLog.logEnable){\
-        snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrMqttCell", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-        XPLRLOG(&cellMqttLog,buff2Log);}
+#define XPLRCELL_MQTT_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgCellMqtt", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRCELL_MQTT_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -85,10 +84,7 @@ typedef struct xplrCell_Mqtt_type {
 
 static const char nvsNamespace[] = "mqttCell_";
 static xplrCell_mqtt_t mqtt[XPLRCOM_NUMOF_DEVICES];
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
-static xplrLog_t cellMqttLog;
-static char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL];
-#endif
+static int8_t logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -122,6 +118,8 @@ static xplrCell_mqtt_error_t mqttClientUnsubscribeFromTopic(int8_t dvcProfile,
                                                             xplrCell_mqtt_topic_t *topic);
 static xplrCell_mqtt_error_t mqttClientUnsubscribeFromTopicList(int8_t dvcProfile,
                                                                 int8_t clientId);
+static void mqttClientFeedWatchdog(int8_t dvcProfile, int8_t clientId);
+static bool mqttClientCheckWatchdog(int8_t dvcProfile, int8_t clientId);
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
@@ -135,19 +133,6 @@ xplrCell_mqtt_error_t xplrCellMqttInit(int8_t dvcProfile,
     uDeviceHandle_t  handler = xplrComGetDeviceHandler(dvcProfile);
     xplrCell_mqtt_error_t ret;
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
-    xplrLog_error_t err = xplrLogInit(&cellMqttLog,
-                                      XPLR_LOG_DEVICE_INFO,
-                                      "/cellmqtt.log",
-                                      200,
-                                      XPLR_SIZE_MB);
-    if (err == XPLR_LOG_OK) {
-        cellMqttLog.logEnable = true;
-    } else {
-        cellMqttLog.logEnable = false;
-    }
-    client->logCfg = &cellMqttLog;
-#endif
     if (dvcProfile < XPLRCELL_MQTT_NUMOF_CLIENTS) {
         /* Check tha selected mqtt service is supported by the module */
         if (client->settings.useFlexService) {
@@ -207,6 +192,8 @@ void xplrCellMqttDeInit(int8_t dvcProfile, int8_t clientId)
     uMqttClientContext_t *ubxClientPrv = mqtt[dvcProfile].clientContext[clientId];
 
     uMqttClientClose(ubxClientPrv);
+    /* pointer to NULL to avoid dangling pointer */
+    ubxClientPrv = NULL;
     XPLRCELL_MQTT_CONSOLE(D, "Client %d closed ok.", clientId);
 }
 
@@ -220,6 +207,8 @@ xplrCell_mqtt_error_t xplrCellMqttDisconnect(int8_t dvcProfile, int8_t clientId)
     isConnected = uMqttClientIsConnected(ubxClientPrv);
     if (isConnected) {
         ubxErrorCode = uMqttClientDisconnect(ubxClientPrv);
+        /* pointer to NULL to avoid dangling pointer */
+        ubxClientPrv = NULL;
         if (ubxErrorCode != 0) {
             XPLRCELL_MQTT_CONSOLE(E, "Error disconnecting client %d from broker.", clientId);
             ret = XPLR_CELL_MQTT_ERROR;
@@ -228,6 +217,9 @@ xplrCell_mqtt_error_t xplrCellMqttDisconnect(int8_t dvcProfile, int8_t clientId)
             ret = XPLR_CELL_MQTT_OK;
         }
     } else {
+        uMqttClientClose(ubxClientPrv);
+        /* pointer to NULL to avoid dangling pointer */
+        ubxClientPrv = NULL;
         XPLRCELL_MQTT_CONSOLE(W, "Client %d is not connected to a broker.", clientId);
         ret = XPLR_CELL_MQTT_OK;
     }
@@ -333,7 +325,7 @@ int32_t xplrCellMqttUpdateTopicList(int8_t dvcProfile, int8_t clientId)
     xplrCell_mqtt_client_t *client = mqtt[dvcProfile].client[clientId];
     uMqttClientContext_t *ubxClientPrv = mqtt[dvcProfile].clientContext[clientId];
     int32_t ubxErrorCode;
-    bool isConnected;
+    bool isConnected, isAlive;
     char name[XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_NAME] = {0};
     char namePrev[XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_NAME] = {0};
     char buffer[XPLRCELL_MQTT_MAX_SIZE_OF_TOPIC_PAYLOAD] = {0};
@@ -345,7 +337,8 @@ int32_t xplrCellMqttUpdateTopicList(int8_t dvcProfile, int8_t clientId)
     int32_t ret;
 
     isConnected = uMqttClientIsConnected(ubxClientPrv);
-    if (isConnected) {
+    isAlive = mqttClientCheckWatchdog(dvcProfile, clientId);
+    if (isConnected && isAlive) {
         if (client->settings.useFlexService) {
             ret = 0;
         } else {
@@ -372,6 +365,7 @@ int32_t xplrCellMqttUpdateTopicList(int8_t dvcProfile, int8_t clientId)
                     ret = -1;
                 } else {
                     numOfBytesRead = bufferSizeOut;
+                    mqttClientFeedWatchdog(dvcProfile, clientId);
                     XPLRCELL_MQTT_CONSOLE(D,
                                           "Client %d read %d bytes from topic %s.",
                                           clientId,
@@ -391,9 +385,10 @@ int32_t xplrCellMqttUpdateTopicList(int8_t dvcProfile, int8_t clientId)
                             /* topic name read matches topic list.
                             Check if topic name matches an ip or lband correction data and reconstruct it to a single message.
                             In any other case just copy the message to related buffer */
-                            if ((isMsgSegmented) ||
-                                (strlen(name) <= strlen("/aa/bb/cc")) ||
-                                (strlen(name) <= strlen("/aa/bbbbb/cc"))) {
+                            if (((isMsgSegmented) ||
+                                 (strlen(name) <= strlen("/aa/bb/cc")) ||
+                                 (strlen(name) <= strlen("/aa/bbbbb/cc"))) &&
+                                (strstr(name, "ubx") == NULL)) {
                                 if (client->topicList[i].rxBufferSize >= numOfBytesRead + topicBufIdx) {
                                     memcpy(&client->topicList[i].rxBuffer[0 + topicBufIdx], buffer, numOfBytesRead);
                                     topicBufIdx += numOfBytesRead;
@@ -539,10 +534,11 @@ xplrCell_mqtt_error_t xplrCellMqttFsmRun(int8_t dvcProfile, int8_t clientId)
 
             if (ret == XPLR_CELL_MQTT_OK) {
                 fsm[0] = XPLR_CELL_MQTT_CLIENT_FSM_READY;
+                mqttClientFeedWatchdog(dvcProfile, clientId);
                 XPLRCELL_MQTT_CONSOLE(I, "MQTT client is connected.");
             } else {
                 fsm[0] = XPLR_CELL_MQTT_CLIENT_FSM_ERROR;
-                ret = XPLR_CELL_MQTT_BUSY;
+                ret = XPLR_CELL_MQTT_ERROR;
                 XPLRCELL_MQTT_CONSOLE(E, "MQTT client failed to connect, going to Error state.");
             }
 
@@ -553,11 +549,12 @@ xplrCell_mqtt_error_t xplrCellMqttFsmRun(int8_t dvcProfile, int8_t clientId)
             } else {
                 fsm[0] = XPLR_CELL_MQTT_CLIENT_FSM_ERROR;
             }
+
             ret = XPLR_CELL_MQTT_OK;
 
             break;
         case XPLR_CELL_MQTT_CLIENT_FSM_BUSY:
-            ret = XPLR_CELL_MQTT_OK;
+            ret = XPLR_CELL_MQTT_BUSY;
             break;
         case XPLR_CELL_MQTT_CLIENT_FSM_TIMEOUT:
             ret = XPLR_CELL_MQTT_ERROR;
@@ -629,51 +626,58 @@ xplrCell_mqtt_error_t xplrCellMqttFsmRun(int8_t dvcProfile, int8_t clientId)
     return ret;
 }
 
-bool xplrCellMqttHaltLogModule(int8_t dvcProfile, int8_t clientId)
+int8_t xplrCellMqttInitLogModule(xplr_cfg_logInstance_t *logCfg)
 {
-    bool ret;
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
-    if(mqtt[dvcProfile].client[clientId]->logCfg != NULL) {
-        mqtt[dvcProfile].client[clientId]->logCfg->logEnable = false;
-        ret = true;
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLRCELL_MQTT_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
     } else {
-        ret = false;
-        /* log module is not initialized thus do nothing*/
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
     }
-#else
-    ret = false;
-#endif
+
     return ret;
 }
 
-bool xplrCellMqttStartLogModule(int8_t dvcProfile, int8_t clientId)
+esp_err_t xplrCellMqttStopLogModule(void)
 {
-    bool ret;
+    esp_err_t ret;
+    xplrLog_error_t logErr;
 
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCELL_MQTT_LOG_ACTIVE)
-    xplrLog_error_t err;
-    if(mqtt[dvcProfile].client[clientId]->logCfg != NULL) {
-        mqtt[dvcProfile].client[clientId]->logCfg->logEnable = true;
-        ret = true;
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
     } else {
-        /* log module is not initialized thus initialize it*/
-        err = xplrLogInit(&cellMqttLog,
-                          XPLR_LOG_DEVICE_INFO,
-                          "/cellmqtt.log",
-                          200,
-                          XPLR_SIZE_MB);
-        if (err == XPLR_LOG_OK) {
-            cellMqttLog.logEnable = true;
-        } else {
-            cellMqttLog.logEnable = false;
-        }
-        mqtt[dvcProfile].client[clientId]->logCfg = &cellMqttLog;
-        ret = cellMqttLog.logEnable;
+        ret = ESP_OK;
     }
-#else 
-    ret = false;
-#endif
+
     return ret;
+}
+
+void xplrCellMqttFeedWatchdog(int8_t dvcProfile, int8_t clientId)
+{
+    (void) mqttClientFeedWatchdog(dvcProfile, clientId);
 }
 
 /* ----------------------------------------------------------------
@@ -881,7 +885,7 @@ xplrCell_mqtt_error_t mqttClientCheckRoot(int8_t dvcProfile, int8_t clientId)
     xplrCell_mqtt_nvs_t *storage = &mqtt[dvcProfile].client[clientId]->storage;
     char cellMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES * 2 + 1] = {0};
     char *nvsMd5 = storage->md5RootCa;
-    char appMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES] = {0};
+    char appMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES + 1] = {0};
     int32_t res;
     xplrCell_mqtt_error_t ret;
 
@@ -890,7 +894,6 @@ xplrCell_mqtt_error_t mqttClientCheckRoot(int8_t dvcProfile, int8_t clientId)
         res = xplrCommonMd5Get((const unsigned char *)client->credentials.rootCa,
                                strlen(client->credentials.rootCa),
                                (unsigned char *)appMd5);
-        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of rootCa (user) is <0x%x>", (unsigned int) appMd5);
 
         /* fetch md5 hash from modules' memory (will be different).
         * needed to see if there is a certificate stored in modules memory.
@@ -934,7 +937,7 @@ xplrCell_mqtt_error_t mqttClientCheckCert(int8_t dvcProfile, int8_t clientId)
     xplrCell_mqtt_nvs_t *storage = &mqtt[dvcProfile].client[clientId]->storage;
     char cellMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES * 2 + 1] = {0};
     char *nvsMd5 = storage->md5PpCert;
-    char appMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES] = {0};
+    char appMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES + 1] = {0};
     int32_t res;
     xplrCell_mqtt_error_t ret;
 
@@ -943,7 +946,6 @@ xplrCell_mqtt_error_t mqttClientCheckCert(int8_t dvcProfile, int8_t clientId)
         res = xplrCommonMd5Get((const unsigned char *)client->credentials.cert,
                                strlen(client->credentials.cert),
                                (unsigned char *)appMd5);
-        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of client cert (user) is <0x%x>", (unsigned int) appMd5);
 
         /* fetch md5 hash from modules' memory (will be different).
         * needed to see if there is a certificate stored in modules memory.
@@ -987,7 +989,7 @@ xplrCell_mqtt_error_t mqttClientCheckKey(int8_t dvcProfile, int8_t clientId)
     xplrCell_mqtt_nvs_t *storage = &mqtt[dvcProfile].client[clientId]->storage;
     char cellMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES * 2 + 1] = {0};
     char *nvsMd5 = storage->md5PpKey;
-    char appMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES] = {0};
+    char appMd5[U_SECURITY_CREDENTIAL_MD5_LENGTH_BYTES + 1] = {0};
     int32_t res;
     xplrCell_mqtt_error_t ret;
 
@@ -996,7 +998,6 @@ xplrCell_mqtt_error_t mqttClientCheckKey(int8_t dvcProfile, int8_t clientId)
         res = xplrCommonMd5Get((const unsigned char *)client->credentials.key,
                                strlen(client->credentials.key),
                                (unsigned char *)appMd5);
-        XPLRCELL_MQTT_CONSOLE(D, "MD5 hash of client key (user) is <0x%x>", (unsigned int)appMd5);
 
         /* fetch md5 hash from modules' memory (will be different).
         * needed to see if there is a certificate stored in modules memory.
@@ -1058,7 +1059,7 @@ xplrCell_mqtt_error_t mqttClientWriteRoot(int8_t dvcProfile, int8_t clientId)
                                        NULL, md5);
 
         if (res == 0) {
-            XPLRCELL_MQTT_CONSOLE(D, "Root certificate stored in memory, md5 is <0x%x> ", (unsigned int) md5);
+            XPLRCELL_MQTT_CONSOLE(D, "Root certificate stored in module memory ");
             ret = XPLR_CELL_MQTT_OK;
         } else {
             XPLRCELL_MQTT_CONSOLE(E, "Error while storing Root certificate in memory.");
@@ -1095,7 +1096,7 @@ xplrCell_mqtt_error_t mqttClientWriteCert(int8_t dvcProfile, int8_t clientId)
                                    NULL, md5);
 
     if (res == 0) {
-        XPLRCELL_MQTT_CONSOLE(D, "Client certificate stored in memory, md5 is <0x%x> ", (unsigned int) md5);
+        XPLRCELL_MQTT_CONSOLE(D, "Client certificate stored in module memory");
         ret = XPLR_CELL_MQTT_OK;
     } else {
         XPLRCELL_MQTT_CONSOLE(E, "Error while storing client certificate in memory.");
@@ -1126,7 +1127,7 @@ xplrCell_mqtt_error_t mqttClientWriteKey(int8_t dvcProfile, int8_t clientId)
                                    NULL, md5);
 
     if (res == 0) {
-        XPLRCELL_MQTT_CONSOLE(D, "Client key stored in memory, md5 is <0x%x> ", (unsigned int) md5);
+        XPLRCELL_MQTT_CONSOLE(D, "Client key stored in module memory.");
         ret = XPLR_CELL_MQTT_OK;
     } else {
         XPLRCELL_MQTT_CONSOLE(E, "Error while storing client key in memory.");
@@ -1241,7 +1242,8 @@ xplrCell_mqtt_error_t mqttClientConnectTLS(int8_t dvcProfile,
         XPLRCELL_MQTT_CONSOLE(D, "Client config OK.");
         ret = XPLR_CELL_MQTT_OK;
     } else {
-        XPLRCELL_MQTT_CONSOLE(E, "Client config Error.");
+        ubxErrorCode = uMqttClientOpenResetLastError();
+        XPLRCELL_MQTT_CONSOLE(E, "Client config Error. Error code <%d>", ubxErrorCode);
         ret = XPLR_CELL_MQTT_ERROR;
     }
 
@@ -1250,6 +1252,7 @@ xplrCell_mqtt_error_t mqttClientConnectTLS(int8_t dvcProfile,
         mqttClientConfigBroker(dvcProfile, clientId);
         ubxErrorCode = uMqttClientConnect(ubxClientPrv, ubxConnPrv);
         if (ubxErrorCode == 0) {
+            mqttClientFeedWatchdog(dvcProfile, clientId);
             XPLRCELL_MQTT_CONSOLE(D, "Client connection established.");
             ret = XPLR_CELL_MQTT_OK;
         } else {
@@ -1285,6 +1288,7 @@ xplrCell_mqtt_error_t mqttClientSubscribeToTopic(int8_t dvcProfile,
             XPLRCELL_MQTT_CONSOLE(D, "Client %d subscribed to %s.",
                                   clientId, topic->name);
             ret = XPLR_CELL_MQTT_OK;
+            mqttClientFeedWatchdog(dvcProfile, clientId);
         }
     }
 
@@ -1337,15 +1341,21 @@ xplrCell_mqtt_error_t mqttClientSubscribeToTopicList(int8_t dvcProfile, int8_t c
                                                         client->settings.qos);
                     if (ubxErrorCode < 0) {
                         if (retries > 0) {
-                            i--;
                             retries--;
                             vTaskDelay(pdMS_TO_TICKS(1000));
                             XPLRCELL_MQTT_CONSOLE(W,
                                                   "Client %d failed to subscribe to topic %s with code (%d). Retrying to subscribe (%d).",
-                                                  clientId, client->topicList[i].name, ubxErrorCode, retries + 1);
+                                                  clientId,
+                                                  client->topicList[i].name,
+                                                  ubxErrorCode,
+                                                  retries + 1);
+                            i--;
                         } else {
-                            XPLRCELL_MQTT_CONSOLE(E, "Client %d failed to subscribe to topic %s with code (%d).",
-                                                  clientId, client->topicList[i].name, ubxErrorCode);
+                            XPLRCELL_MQTT_CONSOLE(E,
+                                                  "Client %d failed to subscribe to topic %s with code (%d).",
+                                                  clientId,
+                                                  client->topicList[i].name,
+                                                  ubxErrorCode);
                             retries = XPLRCELL_MQTT_MAX_RETRIES_ON_ERROR;
                             ret = XPLR_CELL_MQTT_ERROR;
                             break;
@@ -1354,6 +1364,7 @@ xplrCell_mqtt_error_t mqttClientSubscribeToTopicList(int8_t dvcProfile, int8_t c
                         XPLRCELL_MQTT_CONSOLE(D, "Client %d subscribed to %s.",
                                               clientId, client->topicList[i].name);
                         retries = XPLRCELL_MQTT_MAX_RETRIES_ON_ERROR;
+                        mqttClientFeedWatchdog(dvcProfile, clientId);
                         ret = XPLR_CELL_MQTT_OK;
                     }
                 }
@@ -1413,21 +1424,59 @@ xplrCell_mqtt_error_t mqttClientUnsubscribeFromTopicList(int8_t dvcProfile, int8
                 ubxErrorCode = uMqttClientUnsubscribe(ubxClientPrv,
                                                       client->topicList[i].name);
                 if (ubxErrorCode < 0) {
-                    XPLRCELL_MQTT_CONSOLE(E, "Client %d failed to unsubscribe from %s with code (%d).",
-                                          clientId, client->topicList[i].name, ubxErrorCode);
+                    XPLRCELL_MQTT_CONSOLE(E,
+                                          "Client %d failed to unsubscribe from %s with code (%d).",
+                                          clientId,
+                                          client->topicList[i].name,
+                                          ubxErrorCode);
                     ret = XPLR_CELL_MQTT_ERROR;
                     break;
                 } else {
-                    XPLRCELL_MQTT_CONSOLE(D, "Client %d unsubscribed from %s.",
-                                          clientId, client->topicList[i].name);
+                    XPLRCELL_MQTT_CONSOLE(D,
+                                          "Client %d unsubscribed from %s.",
+                                          clientId,
+                                          client->topicList[i].name);
                     ret = XPLR_CELL_MQTT_OK;
                 }
             }
         } else {
-            XPLRCELL_MQTT_CONSOLE(W, "No topics found in client %d list to unsubscribe.",
+            XPLRCELL_MQTT_CONSOLE(W,
+                                  "No topics found in client %d list to unsubscribe.",
                                   clientId);
             ret = XPLR_CELL_MQTT_OK;
         }
+    }
+
+    return ret;
+}
+
+static void mqttClientFeedWatchdog(int8_t dvcProfile, int8_t clientId)
+{
+    xplrCell_mqtt_client_t *client = mqtt[dvcProfile].client[clientId];
+    if (client->enableWdg) {
+        client->lastActionTime = esp_timer_get_time();
+    } else {
+        //Do nothing
+    }
+}
+
+static bool mqttClientCheckWatchdog(int8_t dvcProfile, int8_t clientId)
+{
+    xplrCell_mqtt_client_t *client = mqtt[dvcProfile].client[clientId];
+    bool ret;
+
+    if (client->enableWdg) {
+        if (MICROTOSEC(esp_timer_get_time() - client->lastActionTime) >=
+            XPLRCELL_MQTT_WATCHDOG_TIMEOUT_SEC) {
+            ret = false;
+            XPLRCELL_MQTT_CONSOLE(E,
+                                  "Watchdog triggered! No MQTT messages for more than [%d] seconds",
+                                  XPLRCELL_MQTT_WATCHDOG_TIMEOUT_SEC);
+        } else {
+            ret = true;
+        }
+    } else {
+        ret = true;
     }
 
     return ret;

@@ -17,6 +17,7 @@ When running the code, depending on the debug settings configured and the operat
 
 ## Building instructions
 
+### Building using Visual Studio Code
 Building this example requires selecting the corresponding source files and the debugging options to use the UART communication as a debugger. To do this, follow the steps described below:
 
 1. Open the `XPLR-HPG-SW` folder in VS code.
@@ -67,6 +68,16 @@ Building this example requires selecting the corresponding source files and the 
 7. On `SDK tool configuration` tab, click the `Board Options` and select your XPLR-HPG kit. Then click `Save`.
 8. After that, `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
+
+### Building using ESP-IDF from a command line
+1. Navigate to the `XPLR-HPG-SW` root folder.
+2. In [CMakeLists](./../../../CMakeLists.txt) select the `hpg_wifi_mqtt_correction_captive_portal` project, making sure that all other projects are commented out.
+3. Open the [xplr_hpglib_cfg.h](./../../../components/hpglib/xplr_hpglib_cfg.h) file and select debug options you wish to be logged in the SD card or the debug UART.
+4. In case you have already compiled another project and the `sdKconfig` file is present under the `XPLR-HPG-SW` folder please delete it and run `idf.py menuconfig`.
+5. Navigate to the `Board Options` section and select the board you wish to build the example for. Press `q` and answer `Y` to save the configuration.
+6. Run `idf.py build` to compile the project.
+7. Run `idf.py -p COMX flash` to flash the binary to the board, where **COMX** is the `COM Port` that the XPLR-HPGx has enumerated on.
+8. Run `idf.py monitor -p COMX` to monitor the debug UART output.
 
 ## Adding Wi-Fi credentials using the captive portal
 

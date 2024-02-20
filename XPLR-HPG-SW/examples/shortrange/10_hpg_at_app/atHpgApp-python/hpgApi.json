@@ -1,0 +1,96 @@
+{
+    "wifi":[
+        {
+            "set": "AT+WIFI=",
+            "get": "AT+WIFI=?",
+            "delete": "AT+ERASE=WIFI"
+        }
+    ],
+    "apn":[
+        {
+            "set": "AT+APN=",
+            "get": "AT+APN=?",
+            "delete": "AT+ERASE=APN"
+        }
+    ],
+    "thingstream":[
+        {
+            "brokerSet": "AT+TSBROKER=",
+            "brokerGet": "AT+TSBROKER=?",
+            "brokerDelete": "AT+ERASE=TSBROKER",
+            "clientIdSet": "AT+TSID=",
+            "clientIdGet": "AT+TSID=?",
+            "clientIdDelete": "AT+ERASE=TSID",
+            "certSet": "AT+TSCERT=",
+            "certGet": "AT+TSCERT=?",
+            "certDelete": "AT+ERASE=TSCERT",
+            "keySet": "AT+TSKEY=",
+            "keyGet": "AT+TSKEY=?",
+            "keyDelete": "AT+ERASE=TSKEY",
+            "rootCaSet": "AT+ROOT=",
+            "rootCaGet": "AT+ROOT=?",
+            "rootCaDelete": "AT+ERASE=ROOT",
+            "regionSet": "AT+TSREGION=",
+            "regionGet": "AT+TSREGION=?",
+            "regionDelete": "AT+ERASE=TSREGION",
+            "planSet": "AT+TSPLAN=",
+            "planGet": "AT+TSPLAN=?",
+            "planDelete": "AT+ERASE=TSPLAN"
+        }
+    ],
+    "ntrip":[
+        {
+            "serverSet": "AT+NTRIPSRV=",
+            "serverGet": "AT+NTRIPSRV=?",
+            "serverDelete": "AT+ERASE=NTRIPSRV",
+            "portSet": "AT+NTRIPPORT=",
+            "portGet": "AT+NTRIPPORT=?",
+            "portDelete": "AT+ERASE=NTRIPPORT",
+            "userAgentSet": "AT+NTRIPUA=",
+            "userAgentGet": "AT+NTRIPUA=?",
+            "userAgentDelete": "AT+ERASE=NTRIPUA",
+            "mountPointSet": "AT+NTRIPMP=",
+            "mountPointGet": "AT+NTRIPMP=?",
+            "mountPointDelete": "AT+ERASE=NTRIPMP",
+            "credsSet": "AT+NTRIPCREDS=",
+            "credsGet": "AT+NTRIPCREDS=?",
+            "credsDelete": "AT+ERASE=NTRIPCREDS",
+            "ggaRelaySet": "AT+NTRIPGGA=",
+            "ggaRelayGet": "AT+NTRIPGGA=?"
+        }
+    ],
+    "status":[
+        {
+            "wifi": "AT+STATWIFI=?",
+            "cell": "AT+STATCELL=?",
+            "thingstream": "AT+STATTS=?",
+            "ntrip": "AT+STATNTRIP=?",
+            "gnss": "AT+STATGNSS=?"
+        }
+    ],
+    "misc":[
+        {
+            "gnssDrSet": "AT+GNSSDR=",
+            "gnssDrGet": "AT+GNSSDR=?",
+            "sdLogSet": "AT+SD=",
+            "sdLogGet": "AT+SD=?",
+            "interfaceSet": "AT+IF=",
+            "interfaceGet": "AT+IF=?",
+            "correctionSourceSet": "AT+CORSRC=",
+            "correctionSourceGet": "AT+CORSRC=?",
+            "correctionModuleSet": "AT+CORMOD=",
+            "correctionModuleGet": "AT+CORMOD=?",
+            "autoStartSet": "AT+STARTONBOOT=",
+            "autoStartGet": "AT+STARTONBOOT=?",
+            "baudrateSet": "AT+BAUD=",
+            "baudrateGet": "AT+BAUD=?",
+            "dvcModeSet": "AT+HPGMODE=",
+            "dvcModeGet": "AT+HPGMODE=?",
+            "boardInfo": "AT+BRDNFO=?",
+            "dvcRestart": "AT+BRD=RST",
+            "dvcCheck": "AT",
+            "location": "AT+LOC=?",
+            "factoryReset": "AT+ERASE=ALL"
+        }
+    ]
+}

@@ -53,7 +53,8 @@ typedef enum board_gpio_config_type {
     BOARD_GPIO_CONFIG_INVALID = -1,
     BOARD_GPIO_CONFIG_LTE,
     BOARD_GPIO_CONFIG_LEDS,
-    BOARD_GPIO_CONFIG_BTNS
+    BOARD_GPIO_CONFIG_BTNS,
+    BOARD_GPIO_CONFIG_SD_CD
 } board_gpio_config_t;
 
 typedef struct board_details_type {
@@ -96,12 +97,13 @@ static xplr_board_error_t board_deconfig_default_gpios(board_gpio_config_t gpio_
 
 xplr_board_error_t xplrBoardInit(void)
 {
-    esp_err_t err[2];
+    esp_err_t err[3];
     xplr_board_error_t ret;
 
     err[0] = board_config_default_gpios(BOARD_GPIO_CONFIG_LEDS);
     err[1] = board_config_default_gpios(BOARD_GPIO_CONFIG_LTE);
-    for (int i = 0; i < 2; i++) {
+    err[2] = board_config_default_gpios(BOARD_GPIO_CONFIG_SD_CD);
+    for (int i = 0; i < 3; i++) {
         if (err[i] != ESP_OK) {
             ret = XPLR_BOARD_ERROR;
             break;
@@ -184,7 +186,7 @@ xplr_board_error_t xplrBoardSetPower(xplr_board_peripheral_id_t id, bool on)
             if (!on) {
                 // send power off pulse (>3100ms)
                 err[0] = gpio_set_level(BOARD_IO_LTE_PWR_ON, 1);
-                vTaskDelay(3100 / portTICK_PERIOD_MS);
+                vTaskDelay(1600 / portTICK_PERIOD_MS);
                 err[1] = gpio_set_level(BOARD_IO_LTE_PWR_ON, 0);
                 for (int i = 0; i < 2; i++) {
                     if (err[i] != ESP_OK) {
@@ -209,14 +211,6 @@ xplr_board_error_t xplrBoardSetPower(xplr_board_peripheral_id_t id, bool on)
                     }
                 }
                 BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LTE power on seq failed", ret);
-                err[2] = gpio_set_level(BOARD_IO_LTE_nRST, 1);
-                if (err[2] != ESP_OK) {
-                    ret = XPLR_BOARD_ERROR;
-                    break;
-                } else {
-                    ret = XPLR_BOARD_ERROR_OK;
-                }
-                BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LTE reset failed", ret);
             }
             break;
 
@@ -236,14 +230,14 @@ xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode)
 
     switch (mode) {
         case XPLR_BOARD_LED_OFF:
-            err = gpio_set_level(BOARD_IO_LED, 1);
+            err = gpio_set_level(BOARD_IO_LED, 0);
             if (err != ESP_OK) {
                 ret = XPLR_BOARD_ERROR;
                 break;
             } else {
                 ret = XPLR_BOARD_ERROR_OK;
             }
-            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED On failed", ret);
+            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED Off failed", ret);
             break;
         case XPLR_BOARD_LED_ON:
             err = gpio_set_level(BOARD_IO_LED, 1);
@@ -264,7 +258,7 @@ xplr_board_error_t xplrBoardSetLed(xplr_board_led_mode_t mode)
             } else {
                 ret = XPLR_BOARD_ERROR_OK;
             }
-            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED On failed", ret);
+            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "LED Toggle failed", ret);
             break;
 
         default:
@@ -284,7 +278,24 @@ xplr_board_error_t xplrBoardDetectSd(void)
      * and also the GPIO restrictions of esp32s3 in:
      * https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/gpio.html
     */
-    return XPLR_BOARD_ERROR_OK;
+    xplr_board_error_t ret;
+    /*Check if Card Detect Pin is Low */
+    gpio_set_direction(BOARD_IO_SPI_SD_nCS, GPIO_MODE_INPUT_OUTPUT);
+    int lvl = gpio_get_level(BOARD_IO_SPI_SD_nCS);
+    if (lvl == 0) {
+        gpio_set_level(BOARD_IO_SPI_SD_nCS, 1);
+        lvl = gpio_get_level(BOARD_IO_SPI_SD_nCS);
+        if (lvl == 0) {
+            ret = XPLR_BOARD_ERROR;
+        } else {
+            ret = XPLR_BOARD_ERROR_OK;
+        }
+        gpio_set_level(BOARD_IO_SPI_SD_nCS, 0);
+    } else {
+        ret = XPLR_BOARD_ERROR_OK;
+    }
+
+    return ret;
 }
 
 /* ----------------------------------------------------------------
@@ -359,6 +370,21 @@ static xplr_board_error_t board_config_default_gpios(board_gpio_config_t gpio_id
             BOARD_CHECK(ret == ESP_OK, "LTE Not Set in mikroBus.", ret);
 #endif
             break;
+        case BOARD_GPIO_CONFIG_SD_CD:
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
+            io_conf.pin_bit_mask = (1ULL << BOARD_IO_SPI_SD_nCS);
+            io_conf.pull_up_en = 1;
+            io_conf.pull_down_en = 0;
+            err = gpio_config(&io_conf);
+            if (err != ESP_OK) {
+                ret = XPLR_BOARD_ERROR;
+                break;
+            } else {
+                ret = XPLR_BOARD_ERROR_OK;
+            }
+            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "SD Card detect pin config failed", ret);
+            break;
         default:
             ret = XPLR_BOARD_ERROR;
             BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "Config resource not found", ret);
@@ -371,7 +397,8 @@ static xplr_board_error_t board_config_default_gpios(board_gpio_config_t gpio_id
 static xplr_board_error_t board_deconfig_default_gpios(board_gpio_config_t gpio_id)
 {
     esp_err_t err[2];
-    esp_err_t ret;
+    xplr_board_error_t ret;
+    gpio_config_t io_conf = {};
 
     switch (gpio_id) {
         case BOARD_GPIO_CONFIG_LEDS:
@@ -398,7 +425,22 @@ static xplr_board_error_t board_deconfig_default_gpios(board_gpio_config_t gpio_
                 }
             }
             break;
-
+        case BOARD_GPIO_CONFIG_SD_CD:
+            gpio_reset_pin(BOARD_IO_SPI_SD_nCS);
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            io_conf.mode = GPIO_MODE_OUTPUT;
+            io_conf.pin_bit_mask = (1ULL << BOARD_IO_SPI_SD_nCS);
+            io_conf.pull_up_en = 0;
+            io_conf.pull_down_en = 0;
+            err[0] = gpio_config(&io_conf);
+            if (err[0] != ESP_OK) {
+                ret = XPLR_BOARD_ERROR;
+                break;
+            } else {
+                ret = XPLR_BOARD_ERROR_OK;
+            }
+            BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "SD Card detect pin deconfig failed", ret);
+            break;
         default:
             ret = XPLR_BOARD_ERROR;
             BOARD_CHECK(ret == XPLR_BOARD_ERROR_OK, "Config resource not found", ret);

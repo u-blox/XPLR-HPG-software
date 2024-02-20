@@ -43,16 +43,12 @@
 /**
  * Debugging print macro
  */
-#if (1 == XPLRHELPERS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRLOCATION_LOG_ACTIVE))
-#define XPLRHELPERS_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ##__VA_ARGS__)
-#elif (1 == XPLRHELPERS_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-#define XPLRHELPERS_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-    XPLRLOG(&locationLog,buff2Log);
-#elif ((0 == XPLRHELPERS_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-#define XPLRHELPERS_CONSOLE(tag, message, ...) \
-    snprintf(&buff2Log[0], ELEMENTCNT(buff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrCommonHelpers", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    XPLRLOG(&locationLog,buff2Log)
+#if (1 == XPLRCOM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRCOM_LOG_ACTIVE))
+#define XPLRHELPERS_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgLocHelpers", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif (1 == XPLRCOM_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+#define XPLRHELPERS_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgLocHelpers", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#elif ((0 == XPLRCOM_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRCOM_LOG_ACTIVE)
+#define XPLRHELPERS_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgLocHelpers", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRHELPERS_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -64,16 +60,9 @@
  * -------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------
- * EXTERN VARIABLES
- * -------------------------------------------------------------- */
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-xplrLog_t locationLog = {0};
-char buff2Log[XPLRLOG_BUFFER_SIZE_SMALL] = {0};
-#endif
-/* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
-
+static int8_t logIndex = -1;
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -90,18 +79,6 @@ esp_err_t xplrHelpersUbxlibInit(void)
 {
     esp_err_t ret;
     int32_t intRet;
-
-#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRLOCATION_LOG_ACTIVE)
-    if (!locationLog.logEnable) {
-        xplrLog_error_t err = xplrLogInit(&locationLog, XPLR_LOG_DEVICE_INFO, "/location.log", 100,
-                                          XPLR_SIZE_MB);
-        if (err == XPLR_LOG_OK) {
-            locationLog.logEnable = true;
-        } else {
-            locationLog.logEnable = false;
-        }
-    }
-#endif
 
     intRet = uPortInit();
     if (intRet != 0) {
@@ -221,7 +198,6 @@ esp_err_t xplrHlprLocSrvcDeviceOpenNonBlocking(xplrLocationDevConf_t *dvcConf,
 
     if (ret == ESP_OK) {
         intRet = uDeviceOpen(&dvcConf->dvcConfig, dvcHandler);
-
         if (intRet == 0) {
             XPLRHELPERS_CONSOLE(I, "ubxlib device opened!");
             intRet = uNetworkInterfaceUp(*dvcHandler, U_NETWORK_TYPE_GNSS, &dvcConf->dvcNetwork);
@@ -229,9 +205,16 @@ esp_err_t xplrHlprLocSrvcDeviceOpenNonBlocking(xplrLocationDevConf_t *dvcConf,
                 XPLRHELPERS_CONSOLE(I, "Network interface opened!");
                 ret = ESP_OK;
             } else {
+                XPLRHELPERS_CONSOLE(E, "uNetworkInterfaceUp failed with code <%d>", intRet);
                 ret = ESP_FAIL;
             }
         } else {
+            if (intRet == -8) {
+                //TODO: Create an issue for the deprecated message
+            } else {
+                XPLRHELPERS_CONSOLE(E, "uDeviceOpen failed with code <%d>", intRet);
+            }
+
             ret = ESP_FAIL;
         }
     }
@@ -512,6 +495,55 @@ bool xplrHlprLocSrvcCheckDvcProfileValidity(uint8_t dvcProfile, uint8_t maxDevLi
         ret = false;
     } else {
         ret = true;
+    }
+
+    return ret;
+}
+
+int8_t xplrHlprLocSrvcInitLogModule(xplr_cfg_logInstance_t *logCfg)
+{
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_LOC_HELPERS_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
+    } else {
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
+    }
+
+    return ret;
+}
+
+esp_err_t xplrHlprLocSrvcStopLogModule(void)
+{
+    esp_err_t ret;
+    xplrLog_error_t logErr;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
     }
 
     return ret;

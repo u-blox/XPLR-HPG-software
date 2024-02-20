@@ -33,16 +33,15 @@
 /* Data buffer for websocket transactions */
 #define WEBSOCKET_BUFSIZE           (CONFIG_WS_BUFFER_SIZE)
 
+/**
+ * Debugging print macro
+ */
 #if (1 == XPLRWIFIWEBSERVER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && ((0 == XPLR_HPGLIB_LOG_ENABLED) || (0 == XPLRWIFIWEBSERVER_LOG_ACTIVE))
-#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...)   esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_PRINT_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiWebserver", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif (1 == XPLRWIFIWEBSERVER_DEBUG_ACTIVE) && (1 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFIWEBSERVER_LOG_ACTIVE)
-#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...)  esp_rom_printf(XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ##__VA_ARGS__);\
-    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), #tag " [(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ## __VA_ARGS__);\
-    XPLRLOG(&wifiStarterLog,wifiBuff2Log);
+#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_AND_PRINT, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiWebserver", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #elif ((0 == XPLRWIFIWEBSERVER_DEBUG_ACTIVE) || (0 == XPLR_HPGLIB_SERIAL_DEBUG_ENABLED)) && (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRWIFIWEBSERVER_LOG_ACTIVE)
-#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...)\
-    snprintf(&wifiBuff2Log[0], ELEMENTCNT(wifiBuff2Log), "[(%u) %s|%s|%d|: " message "\n", esp_log_timestamp(), "xplrWifiWebserver", __FUNCTION__, __LINE__, ## __VA_ARGS__); \
-    XPLRLOG(&wifiStarterLog,wifiBuff2Log);
+#define XPLRWIFIWEBSERVER_CONSOLE(tag, message, ...) XPLRLOG(logIndex, XPLR_LOG_SD_ONLY, XPLR_HPGLIB_LOG_FORMAT(tag, message), esp_log_timestamp(), "hpgWifiWebserver", __FUNCTION__, __LINE__, ##__VA_ARGS__)
 #else
 #define XPLRWIFIWEBSERVER_CONSOLE(message, ...) do{} while(0)
 #endif
@@ -112,6 +111,7 @@ httpd_ws_frame_t        locationFrame;
 char                    locationFrameBuff[512];
 httpd_ws_frame_t        messageFrame;
 char                    messageFrameBuff[512];
+static int8_t           logIndex = -1;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -155,6 +155,7 @@ httpd_handle_t  xplrWifiWebserverStart(xplrWifiWebServerData_t *data)
         /* configure webserver */
         webserver.instance = NULL;
         httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+        config.stack_size += 1024;
         memcpy(&webserver.config, &config, sizeof(httpd_config_t));
         //server.config = HTTPD_DEFAULT_CONFIG();
         webserver.config.max_open_sockets = XPLR_WIFIWEBSERVER_SOCKETS_OPEN_MAX;
@@ -312,6 +313,54 @@ esp_err_t xplrWifiWebserverSendMessage(char *message)
     return ret;
 }
 
+int8_t xplrWifiWebserverInitLogModule(xplr_cfg_logInstance_t *logCfg)
+{
+    int8_t ret;
+    xplrLog_error_t logErr;
+
+    if (logIndex < 0) {
+        /* logIndex is negative so logging has not been initialized before */
+        if (logCfg == NULL) {
+            /* logCfg is NULL so we will use the default module settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   XPLR_WIFI_WEBSERVER_DEFAULT_FILENAME,
+                                   XPLRLOG_FILE_SIZE_INTERVAL,
+                                   XPLRLOG_NEW_FILE_ON_BOOT);
+        } else {
+            /* logCfg contains the instance settings */
+            logIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                   logCfg->filename,
+                                   logCfg->sizeInterval,
+                                   logCfg->erasePrev);
+        }
+        ret = logIndex;
+    } else {
+        /* logIndex is positive so logging has been initialized before */
+        logErr = xplrLogEnable(logIndex);
+        if (logErr != XPLR_LOG_OK) {
+            ret = -1;
+        } else {
+            ret = logIndex;
+        }
+    }
+
+    return ret;
+}
+
+esp_err_t xplrWifiWebserverStopLogModule(void)
+{
+    esp_err_t ret;
+    xplrLog_error_t logErr;
+
+    logErr = xplrLogDisable(logIndex);
+    if (logErr != XPLR_LOG_OK) {
+        ret = ESP_FAIL;
+    } else {
+        ret = ESP_OK;
+    }
+
+    return ret;
+}
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DESCRIPTORS
  * -------------------------------------------------------------- */
@@ -780,6 +829,7 @@ static esp_err_t wsGetHandler(httpd_req_t *req)
 
     if (ret != ESP_OK) {
         XPLRWIFIWEBSERVER_CONSOLE(W, "Websocket failed to parse received data");
+        XPLR_CI_CONSOLE(505, "ERROR");
     }
 
     return ret;
@@ -864,6 +914,7 @@ static esp_err_t wsParseData(httpd_req_t *req, uint8_t *data)
                 XPLRWIFIWEBSERVER_CONSOLE(I, "\nPointPerfect client ID parsed:\nID: %s\nCredentials set:%d",
                                           webserver.wsData->pointPerfect.clientId,
                                           webserver.wsData->pointPerfect.set);
+                XPLR_CI_CONSOLE(505, "OK");
                 if (xplrWifiStarterWebserverisConfigured()) {
                     xplrWifiStarterDeviceForceSaveThingstream(2);
                 }
@@ -932,6 +983,7 @@ static esp_err_t wsParseData(httpd_req_t *req, uint8_t *data)
                 XPLRWIFIWEBSERVER_CONSOLE(I, "\nPointPerfect region parsed:\nID: %s\nCredentials set:%d",
                                           webserver.wsData->pointPerfect.region,
                                           webserver.wsData->pointPerfect.set);
+                XPLR_CI_CONSOLE(507, "OK");
                 reqType = XPLR_WEBSERVER_WSREQ_PPREGION_SET;
                 if (xplrWifiStarterWebserverisConfigured()) {
                     xplrWifiStarterDeviceForceSaveThingstream(5);
@@ -949,6 +1001,7 @@ static esp_err_t wsParseData(httpd_req_t *req, uint8_t *data)
                 XPLRWIFIWEBSERVER_CONSOLE(I, "\nPointPerfect plan parsed:\nID: %s\nCredentials set:%d",
                                           webserver.wsData->pointPerfect.plan,
                                           webserver.wsData->pointPerfect.set);
+                XPLR_CI_CONSOLE(506, "OK");
                 reqType = XPLR_WEBSERVER_WSREQ_PPPLAN_SET;
                 if (xplrWifiStarterWebserverisConfigured()) {
                     xplrWifiStarterDeviceForceSaveThingstream(6);
@@ -1121,7 +1174,9 @@ static esp_err_t wsServeReq(httpd_req_t *req, xplrWifiWebserverWsReqType_t type)
                 }
 
                 if (webserver.wsData->diagnostics.gnssDrCalibration != NULL) {
-                    cJSON_AddStringToObject(wsOut, "drCalibrationInfo", webserver.wsData->diagnostics.gnssDrCalibration);
+                    cJSON_AddStringToObject(wsOut,
+                                            "drCalibrationInfo",
+                                            webserver.wsData->diagnostics.gnssDrCalibration);
                     memset(webserver.wsData->diagnostics.gnssDrCalibration, 0x00, 32);
                 }
                 cJSON_AddStringToObject(wsOut, "fwVersion", webserver.wsData->diagnostics.version);

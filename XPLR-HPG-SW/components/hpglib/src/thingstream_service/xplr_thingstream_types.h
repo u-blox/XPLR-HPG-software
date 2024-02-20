@@ -72,7 +72,8 @@ typedef enum {
     XPLR_THINGSTREAM_PP_REGION_EU,              /**< Europe region. */
     XPLR_THINGSTREAM_PP_REGION_US,              /**< USA region. */
     XPLR_THINGSTREAM_PP_REGION_KR,              /**< Korea region. */
-    XPLR_THINGSTREAM_PP_REGION_ALL              /**< IP and LBAND topics of any region available. */
+    XPLR_THINGSTREAM_PP_REGION_AU,              /**< Australia region. */
+    XPLR_THINGSTREAM_PP_REGION_JP               /**< Japan region. */
 } xplr_thingstream_pp_region_t;
 
 /** Thingstream Subscription Plan types */
@@ -106,7 +107,9 @@ typedef enum {
     XPLR_THINGSTREAM_PP_TOPIC_FREQ,            /**< frequencies topic. */
     XPLR_THINGSTREAM_PP_TOPIC_ALL_EU,          /**< all eu related topics. */
     XPLR_THINGSTREAM_PP_TOPIC_ALL_US,          /**< all us related topics. */
-    XPLR_THINGSTREAM_PP_TOPIC_ALL              /**< all us related topics. */
+    XPLR_THINGSTREAM_PP_TOPIC_ALL_KR,          /**< all kr related topics. */
+    XPLR_THINGSTREAM_PP_TOPIC_ALL_JP,          /**< all jp related topics. */
+    XPLR_THINGSTREAM_PP_TOPIC_ALL              /**< all topics. */
 } xplr_thingstream_pp_topic_type_t;
 
 /** Thingstream Communication Thing Credential Types*/
@@ -199,14 +202,12 @@ typedef struct __attribute__((packed)) xplr_thingstream_comm_thing_type {
     char clientCert[XPLR_THINGSTREAM_CERT_SIZE_MAX];    /**< client certificate used in broker. */
     xplr_thingstream_pp_topic_t topicList[XPLR_THINGSTREAM_PP_NUMOF_TOPICS_MAX];
     size_t numOfTopics;
-    xplrLog_t *logCfg;                                  /**< Pointer to the log struct of the module. */
 } xplr_thingstream_comm_thing_t;
 
 typedef struct __attribute__((packed)) xplr_thingstream_type {
     xplr_thingstream_server_settings_t server;
     xplr_thingstream_pp_settings_t pointPerfect;
     xplr_thingstream_pp_conn_type_t connType;
-    xplrLog_t *logCfg;
 } xplr_thingstream_t;
 
 #ifdef __cplusplus

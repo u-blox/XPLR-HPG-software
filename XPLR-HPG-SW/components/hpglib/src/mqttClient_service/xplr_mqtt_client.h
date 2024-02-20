@@ -186,22 +186,29 @@ xplrCell_mqtt_error_t xplrCellFactoryReset(int8_t dvcProfile, int8_t clientId);
 xplrCell_mqtt_error_t xplrCellMqttFsmRun(int8_t dvcProfile, int8_t clientId);
 
 /**
- * @brief Function that halts the logging of the cell mqtt module
- * 
- * @param dvcProfile   device profile id. Stored in xplrCom_cell_config_t
- * @param clientId     MQTT client index
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrCellMqttHaltLogModule(int8_t dvcProfile, int8_t clientId);
+int8_t xplrCellMqttInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the cell mqtt module
- * 
- * @param dvcProfile   device profile id. Stored in xplrCom_cell_config_t
- * @param clientId     MQTT client index 
- * @return true if succeeded to start the module or false otherwise
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
 */
-bool xplrCellMqttStartLogModule(int8_t dvcProfile, int8_t clientId);
+esp_err_t xplrCellMqttStopLogModule(void);
+
+/**
+ * @brief Function that allows the user to feed the MQTT watchdog externally
+ *
+ * @param dvcProfile   device profile id. Stored in xplrCom_cell_config_t
+ * @param clientId     MQTT client index
+*/
+void xplrCellMqttFeedWatchdog(int8_t dvcProfile, int8_t clientId);
 
 #ifdef __cplusplus
 }

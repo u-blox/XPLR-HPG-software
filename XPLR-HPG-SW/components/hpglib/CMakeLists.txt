@@ -6,6 +6,8 @@ if(IDF_VERSION_MAJOR GREATER_EQUAL 4)
                             "src/common"
                             "src/nvs_service"
                             "src/com_service"
+                            "src/at_server_service"
+                            "src/at_parser_service"
                             "src/mqttClient_service"
                             "src/ntripCellClient_service"
                             "src/ntripWiFiClient_service"
@@ -17,12 +19,16 @@ if(IDF_VERSION_MAJOR GREATER_EQUAL 4)
                             "src/ztp_service"
                             "src/sd_service"
                             "src/log_service"
-                    REQUIRES ubxlib json nvs_flash fatfs vfs sdmmc esp_http_client heap
+                            "src/bluetooth_service"
+                    REQUIRES ubxlib json nvs_flash fatfs vfs sdmmc esp_http_client heap ubx_otp bt
                     INCLUDE_DIRS
                     "src/common"
                     "src/nvs_service"
                     "src/com_service"
+                    "src/at_server_service"
+                    "src/at_parser_service"
                     "src/mqttClient_service"
+                    "src/ntripClientCommon"
                     "src/ntripCellClient_service"
                     "src/ntripWiFiClient_service"
                     "src/httpClient_service"
@@ -33,6 +39,7 @@ if(IDF_VERSION_MAJOR GREATER_EQUAL 4)
                     "src/ztp_service"
                     "src/sd_service"
                     "src/log_service"
+                    "src/bluetooth_service"
                     )
 else()
     set(COMPONENT_SRCDIRS src/common)
@@ -45,10 +52,14 @@ else()
     set(COMPONENT_ADD_INCLUDEDIRS src/mqttClient_service)
     set(COMPONENT_SRCDIRS src/httpClient_service)
     set(COMPONENT_ADD_INCLUDEDIRS src/httpClient_service)
+    set(COMPONENT_SRCDIRS src/ntripClientCommon)
+    set(COMPONENT_ADD_INCLUDEDIRS src/ntripClientCommon)
     set(COMPONENT_SRCDIRS src/ntripCellClient_service)
     set(COMPONENT_ADD_INCLUDEDIRS src/ntripCellClient_service)
     set(COMPONENT_SRCDIRS src/ntripWifiClient_service)
     set(COMPONENT_ADD_INCLUDEDIRS src/ntripWifiClient_service)
+    set(COMPONENT_SRCDIRS src/bluetooth_service)
+    set(COMPONENT_ADD_INCLUDEDIRS src/bluetooth_service)
     set(COMPONENT_ADD_INCLUDEDIRS src/thingstream_service)
     set(COMPONENT_SRCDIRS src/location_service/gnss_service)
     set(COMPONENT_ADD_INCLUDEDIRS src/location_service/gnss_service)

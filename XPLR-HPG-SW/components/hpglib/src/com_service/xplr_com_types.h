@@ -71,6 +71,8 @@ typedef enum {
     XPLR_COM_CELL_CONNECTED
 } xplrCom_cell_connect_t;
 
+/*INDENT-OFF*/
+
 /** Cellular configuration struct for setting up deviceSettings.
  * Struct to be provided by the user via xplrComCellInit().
 */
@@ -89,14 +91,13 @@ typedef struct xplrCom_cell_config_type {
                                                                     Bandmask is only configured when the
                                                                     corresponding RAT is set to CAT-M1 or
                                                                     NB1. */
-    xplrLog_t           *logCfg;                                /**< pointer to the log struct of the module. */
 } xplrCom_cell_config_t;
 
 /** Cellular network information struct.
  * To retrieve it xplrComCellNetworkInfo() needs to called.
 */
 typedef struct xplrCom_cell_netInfo_type {
-    char                operator[32];                   /**< Network operator name. */
+    char                networkOperator[32];            /**< Network operator name. */
     char                ip[U_CELL_NET_IP_ADDRESS_SIZE]; /**< IP acquired from network carrier. */
     char                apn[64];                        /**< APN of network carrier. */
     char                rat[32];                        /**< RAT used to register. */
@@ -107,6 +108,7 @@ typedef struct xplrCom_cell_netInfo_type {
                                                              Can be any status as described in uCellNetStatus_t */
 } xplrCom_cell_netInfo_t;
 
+/*INDENT-ON*/
 
 #ifdef __cplusplus
 }

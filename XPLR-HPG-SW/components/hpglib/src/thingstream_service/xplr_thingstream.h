@@ -24,6 +24,8 @@
 
 #include "./../../xplr_hpglib_cfg.h"
 #include "xplr_thingstream_types.h"
+#include "esp_err.h"
+#include "./../common/xplr_common.h"
 
 /** @file
  * @brief This header file defines the thingstream service API,
@@ -301,36 +303,21 @@ xplr_thingstream_error_t xplrThingstreamCommConfigFromFile(char *data,
                                                            xplr_thingstream_comm_thing_t *instance);
 
 /**
- * @brief Function that halts the logging of the thingstream module
- * 
- * @param  instance     thingstream instance to be configured.
- * @return true if succeeded to halt the module or false otherwise.
+ * @brief Function that initializes logging of the module with user-selected configuration
+ *
+ * @param logCfg    Pointer to a xplr_cfg_logInstance_t configuration struct.
+ *                  If NULL, the instance will be initialized using the default settings
+ *                  (located in xplr_hpglib_cfg.h file)
+ * @return          index of the logging instance in success, -1 in failure.
 */
-bool xplrThingstreamPpHaltLogModule(xplr_thingstream_t *instance);
+int8_t xplrThingstreamInitLogModule(xplr_cfg_logInstance_t *logCfg);
 
 /**
- * @brief Function that starts the logging of the thingstream module
- * 
- * @param  instance     thingstream instance to be configured.
- * @return true if succeeded to start the module or false otherwise
+ * @brief   Function that stops the logging of the http cell module
+ *
+ * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
 */
-bool xplrThingstreamPpStartLogModule(xplr_thingstream_t *instance);
-
-/**
- * @brief Function that halts the logging of the thingstream module
- * 
- * @param  instance     thingstream communication thing instance to be configured.
- * @return true if succeeded to halt the module or false otherwise.
-*/
-bool xplrThingstreamCommHaltLogModule(xplr_thingstream_comm_thing_t *instance);
-
-/**
- * @brief Function that starts the logging of the thingstream module
- * 
- * @param  instance     thingstream communication thing instance to be configured.
- * @return true if succeeded to start the module or false otherwise
-*/
-bool xplrThingstreamCommStartLogModule(xplr_thingstream_comm_thing_t *instance);
+esp_err_t xplrThingstreamStopLogModule(void);
 
 #ifdef __cplusplus
 }

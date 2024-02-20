@@ -15,4 +15,22 @@ menu "Board Options"
 
     endchoice
 
+    choice GNSS_MODULE
+        prompt "Choose GNSS Module"
+            default GNSS_MODULE_ZED_F9R
+            config GNSS_MODULE_ZED_F9R
+                bool "ZED-F9R"
+            config GNSS_MODULE_ZED_F9P
+                bool "ZED-F9P"
+            config GNSS_MODULE_NONE
+                bool "NONE"
+
+    endchoice
+
+    config GNSS_MODULE
+        int
+        default 0 if GNSS_MODULE_ZED_F9R
+        default 1 if GNSS_MODULE_ZED_F9P
+        default -1 if GNSS_MODULE_NONE
+
 endmenu
