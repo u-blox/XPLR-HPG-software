@@ -38,7 +38,7 @@ This is possible with the [HPG library](./XPLR-HPG-SW/components/) , a library d
 
 In addition to the [HPG library](./XPLR-HPG-SW/components/), the HPG software includes [examples](./XPLR-HPG-SW/examples/) that showcase the usage of the software in realistic scenarios and use cases such as:
 
-* Correction data over L-band satellite ([cell](./XPLR-HPG-SW/examples/positioning/02_hpg_gnss_lband_correction/) and [wi-fi](./XPLR-HPG-SW/examples/shortrange/03_hpg_wifi_mqtt_correction_certs/)) (case 1)
+* Correction data over L-band satellite ([cell](./XPLR-HPG-SW/examples/cellular/02_hpg_cell_mqtt_correction_certs/) and [wi-fi](./XPLR-HPG-SW/examples/shortrange/03_hpg_wifi_mqtt_correction_certs/)) (case 1)
 
 * [Correction data over Cellular](./XPLR-HPG-SW/examples/cellular/02_hpg_cell_mqtt_correction_certs/) (case 2)
 
