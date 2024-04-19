@@ -509,6 +509,16 @@ class at(threading.Thread):
     
                             elif (choiceNum == 67): #get gnss status
                                 self.status_gnss_get()
+    
+                            elif (choiceNum == 68): #set nvs config
+                                choice_fields = choice.split(', ')
+                                if len(choice_fields) > 1 and len(choice_fields) == 2:
+                                    mode = choice_fields[1]
+                                    self.misc_nvs_config_set(mode)
+                                else:
+                                    print('Command should be of format: <option>, <mode>')
+                            elif (choiceNum == 69): #get nvs config
+                                self.misc_nvs_config_get()
 
                             choice = None
                             
@@ -650,6 +660,8 @@ class at(threading.Thread):
                 print("[65] Get Thingstream Status.")
                 print("[66] Get NTRIP Status.")
                 print("[67] Get GNSS Status.")
+                print("[68] Set NVS config.")
+                print("[69] Get NVS config.")
                 print("\n[b] Back.")
                 print("[q] Quit.")
 
@@ -1491,6 +1503,21 @@ class at(threading.Thread):
         Get auto start functionality.
         """
         cmd = self.api.api_cmd_misc_get_auto_start()
+        self.interface.transmitdata(cmd)
+    
+    def misc_nvs_config_set(self, nvs_config: str):
+        """
+        Set nvs config mode. 
+        nvs_config param: "MANUAL" or "AUTO" or "SAVE".
+        """
+        cmd = self.api.api_cmd_misc_set_nvs_config(nvs_config)
+        self.interface.transmitdata(cmd)
+
+    def misc_nvs_config_get(self):
+        """
+        Get nvs config mode.
+        """
+        cmd = self.api.api_cmd_misc_get_nvs_config()
         self.interface.transmitdata(cmd)
 
     def misc_baudrate_set(self, baudrate: str):

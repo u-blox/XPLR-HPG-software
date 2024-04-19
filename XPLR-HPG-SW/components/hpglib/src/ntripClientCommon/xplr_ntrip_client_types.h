@@ -34,6 +34,11 @@ extern "C" {
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
+#define XPLR_NTRIP_HOST_LENGTH (128U)
+#define XPLR_NTRIP_USERAGENT_LENGTH (64U)
+#define XPLR_NTRIP_MOUNTPOINT_LENGTH (128U)
+#define XPLR_NTRIP_CREDENTIALS_LENGTH (64U)
+
 /* ----------------------------------------------------------------
  * PUBLIC TYPES
  * -------------------------------------------------------------- */
@@ -67,22 +72,22 @@ typedef enum {
 } xplr_ntrip_detailed_error_t;              /*< enum indicating specific error encountered by the NTRIP client */
 
 typedef struct xplr_ntrip_server_config_type {
-    char                    host[64];           /*< NTRIP Caster address (domain or IP address)*/
-    uint16_t                port;               /*< Caster's port (usually 2101)*/
-    char                    mountpoint[128];    /*< Mountpoint on the caster from which to request data*/
-    bool                    ggaNecessary;       /*< set to true if caster requires client to send a periodic GGA message*/
+    char                    host[XPLR_NTRIP_HOST_LENGTH];                   /*< NTRIP Caster address (domain or IP address)*/
+    uint16_t                port;                                           /*< Caster's port (usually 2101)*/
+    char                    mountpoint[XPLR_NTRIP_MOUNTPOINT_LENGTH];       /*< Mountpoint on the caster from which to request data*/
+    bool                    ggaNecessary;                                   /*< set to true if caster requires client to send a periodic GGA message*/
 } xplr_ntrip_server_config_t;
 
 typedef struct xplr_ntrip_transfer_type {
-    char                    corrData[XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE];     /*< buffer containing correction data*/
+    char                    corrData[XPLRNTRIP_RECEIVE_DATA_SIZE];     /*< buffer containing correction data*/
     uint32_t                corrDataSize;                                   /*< size of correction data in corrData buffer*/
 } xplr_ntrip_transfer_t;
 
 typedef struct xplr_ntrip_credentials_type {
-    bool                    useAuth;            /*< check for correct configuration in ntrip init function*/
-    char                    username[32];       /*< your username to connect to the NTRIP Caster*/
-    char                    password[32];       /*< your password to connect to the NTRIP Caster*/
-    char                    userAgent[64];      /*< your device's User-Agent on the NTRIP Caster*/
+    bool                    useAuth;                                        /*< check for correct configuration in ntrip init function*/
+    char                    username[XPLR_NTRIP_CREDENTIALS_LENGTH];        /*< your username to connect to the NTRIP Caster*/
+    char                    password[XPLR_NTRIP_CREDENTIALS_LENGTH];        /*< your password to connect to the NTRIP Caster*/
+    char                    userAgent[XPLR_NTRIP_USERAGENT_LENGTH];         /*< your device's User-Agent on the NTRIP Caster*/
 } xplr_ntrip_credentials_t;
 
 typedef struct xplr_ntrip_config_type {

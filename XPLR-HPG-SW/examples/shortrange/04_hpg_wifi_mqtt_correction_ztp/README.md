@@ -296,7 +296,7 @@ Name | Description
 **`APP_GNSS_I2C_ADDR `** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
 **`APP_LBAND_I2C_ADDR`** | I2C address for **[NEO-D9S](https://www.u-blox.com/en/product/neo-d9s-series)**  module.
 **`APP_ENABLE_CORR_MSG_WDG`** | Option to enable the correction message watchdog mechanism.
-**`APP_REGION`** | Thingstream service region.
+**`APP_THINGSTREAM_REGION`** | Thingstream service region.
 **`APP_INACTIVITY_TIMEOUT`** | Time in seconds to trigger an inactivity timeout and cause a restart.
 **`APP_RESTART_ON_ERROR`** | Trigger soft reset if device in error state.
 **`APP_SD_HOT_PLUG_FUNCTIONALITY`** | Option to enable the hot plug functionality of the SD card driver (being able to insert and remove the card in runtime).

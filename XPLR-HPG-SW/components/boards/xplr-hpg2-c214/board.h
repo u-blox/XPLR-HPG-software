@@ -77,6 +77,9 @@
 #define BOARD_UART_LTE_SPEED CONFIG_BOARD_UART_LTE_SPEED
 #define BOARD_UART_FLOW_CONTROL CONFIG_BOARD_UART_FLOW_CONTROL
 
+/*Number of retries to recover potentially stuck I2C bus*/
+#define BOARD_I2C_BUS_RECOVERY_RETRIES  5U
+
 /** Error codes specific to xplrBoard module. */
 typedef enum {
     XPLR_BOARD_ERROR = -1,          /**< process returned with errors. */

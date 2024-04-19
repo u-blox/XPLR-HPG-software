@@ -170,8 +170,8 @@ Name | Description
 **`APP_DEAD_RECKONING_PRINT_PERIOD `** | Period in seconds on how often we want our print dead reckoning data function \[**`appPrintDeadReckoning(uint8_t periodSecs)`**\] to execute. Can be changed as desired.
 **`APP_GNSS_I2C_ADDR `** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
 **`APP_LBAND_I2C_ADDR`** | I2C address for **[NEO-D9S](https://www.u-blox.com/en/product/neo-d9s-series)**  module.
-**`APP_ORIGIN_COUNTRY`** | Correction data region.
-**`APP_CORRECTION_TYPE`** | Thingstream subscription plan.
+**`APP_THINGSTREAM_REGION`** | Correction data region.
+**`APP_THINGSTREAM_PLAN`** | Thingstream subscription plan.
 **`APP_MAX_TOPICLEN`** | Maximum topic buffer size.
 **`DEVICES_PRINT_INTERVAL`** | Interval, in seconds, of how often we want the connected device diagnostics to be printed.
 **`APP_BT_BUFFER_SIZE`** | The size of the allocated Bluetooth buffer in bytes.

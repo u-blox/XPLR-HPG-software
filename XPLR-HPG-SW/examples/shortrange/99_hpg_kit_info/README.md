@@ -80,15 +80,15 @@ A set of binaries files are provided to ease the programming of the kits without
 - Run the following command, depending on your xplr-hpg-kit variant:
    - For C213:<br>
       ```
-      misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 bin/releases/C213/hw_info/bootloader/bootloader.bin 0x10000 bin/releases/C213/hw_info/hpg_kit_info.bin 0x8000 bin/releases/C213/hw_info/partition_table/partition-table.bin
+      misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 bin\releases\C213-hpg_kit_info.bin
       ```
    - For C214:<br>
       ```
-      misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_freq 40m --flash_size 8MB 0x1000 bin/releases/C214/hw_info/bootloader/bootloader.bin 0x10000 bin/releases/C214/hw_info/hpg_kit_info.bin 0x8000 bin/releases/C214/hw_info/partition_table/partition-table.bin
+      misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_freq 40m --flash_size 8MB 0x0 bin\releases\C214-hpg_kit_info.bin
       ```
    - For MAZGCH:<br>
       ```
-      misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_freq 40m --flash_size 8MB 0x1000 bin/releases/MAZGCH/hw_info/bootloader/bootloader.bin 0x10000 bin/releases/MAZGCH/hw_info/hpg_kit_info.bin 0x8000 bin/releases/MAZGCH/hw_info/partition_table/partition-table.bin
+      misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_freq 40m --flash_size 8MB 0x0 bin\releases\MAZGCH-hpg_kit_info.bin
       ```
 ### Notes
 - To avoid any configuration conflicts, it is **highly recommended** to erase the chip's memory before flashing a new binary using the following command:<br>

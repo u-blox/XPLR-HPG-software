@@ -65,6 +65,30 @@
  * STATIC TYPES
  * -------------------------------------------------------------- */
 
+typedef enum {
+    XPLR_ATPARSER_NVSOP_WIFICREDS,
+    XPLR_ATPARSER_NVSOP_APN,
+    XPLR_ATPARSER_NVSOP_MQTTBROKER,
+    XPLR_ATPARSER_NVSOP_ROOTCRT,
+    XPLR_ATPARSER_NVSOP_CLIENTID,
+    XPLR_ATPARSER_NVSOP_CLIENTCRT,
+    XPLR_ATPARSER_NVSOP_CLIENTKEY,
+    XPLR_ATPARSER_NVSOP_TSREGION,
+    XPLR_ATPARSER_NVSOP_TSPLAN,
+    XPLR_ATPARSER_NVSOP_NTRIPSRV,
+    XPLR_ATPARSER_NVSOP_NTRIPGGA,
+    XPLR_ATPARSER_NVSOP_NTRIPUA,
+    XPLR_ATPARSER_NVSOP_NTRIPMP,
+    XPLR_ATPARSER_NVSOP_NTRIPCREDS,
+    XPLR_ATPARSER_NVSOP_DR,
+    XPLR_ATPARSER_NVSOP_SD,
+    XPLR_ATPARSER_NVSOP_IF,
+    XPLR_ATPARSER_NVSOP_CORSRC,
+    XPLR_ATPARSER_NVSOP_CORMOD,
+    XPLR_ATPARSER_NVSOP_STARTONBOOT,
+    XPLR_ATPARSER_NVSOP_AUTOSAVENVS
+} xplr_at_parser_nvs_op_type_t;
+
 /* ----------------------------------------------------------------
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
@@ -123,6 +147,8 @@ const char atBoardinfo[] = "AT+BRDNFO=?";
 const char atBoardRestart[] = "AT+BRD=RST";
 const char atStartOnBootSet[] = "AT+STARTONBOOT=";
 const char atStartOnBootGet[] = "AT+STARTONBOOT=?";
+const char atNvsConfigSet[] = "AT+NVSCONFIG=";
+const char atNvsConfigGet[] = "AT+NVSCONFIG=?";
 
 const char atWifiResponse[] = "+WIFI=";
 const char atApnResponse[] = "+APN=";
@@ -153,6 +179,7 @@ const char atStatgnssResponse[] = "+STATGNSS:";
 const char atLocResponse[] = "+LOC:";
 const char atBoardInfoResponse[] = "+BRDNFO:";
 const char atStartOnBootResponse[] = "+STARTONBOOT:";
+const char atNvsConfigResponse[] = "+NVSCONFIG:";
 
 const char nvsKeySsid[] = "ssid";
 const char nvsKeyPwd[] = "pwd";
@@ -178,6 +205,7 @@ const char nvsKeyInterface[] = "interface";
 const char nvsKeyCorsource[] = "corSource";
 const char nvsKeyCormod[] = "corMod";
 const char nvsKeyStartOnBoot[] = "startOnBoot";
+const char nvsKeyAutoSaveNvs[] = "autoSaveNvs";
 
 const char atPartCommandWifi[] = "WIFI";
 const char atPartCommandMqttBroker[] = "TSBROKER";
@@ -193,6 +221,9 @@ const char atPartCommandNtripua[] = "NTRIPUA";
 const char atPartCommandNtripmp[] = "NTRIPMP";
 const char atPartCommandNtripcreds[] = "NTRIPCREDS";
 const char atPartCommandAll[] = "ALL";
+const char atPartCommandAuto[] = "AUTO";
+const char atPartCommandManual[] = "MANUAL";
+const char atPartCommandSave[] = "SAVE";
 
 const char atPartWifi[] = "WIFI=?";
 const char atPartCell[] = "CELL=?";
@@ -258,6 +289,7 @@ xplr_at_parser_t parser = {.data.mode = XPLR_ATPARSER_MODE_NOT_SET,
                            .data.correctionData.correctionMod = XPLR_ATPARSER_CORRECTION_MOD_IP,
                            .data.restartSignal = false,
                            .data.startOnBoot = false,
+                           .data.autoSaveNvs = true,
                            .faults.value = 0,
                            .internalFaults.value = 0,
                            .data.misc.dr.enable = false,
@@ -274,9 +306,12 @@ static inline void atParserCallbackWrapper(xplr_at_parser_t *parser,
                                            void (*callback)(void *, void *),
                                            void *callbackArg);
 
-static inline void xplrAtServerWriteStrWrapper(xplr_at_parser_t *parser,
+static inline void xplrAtParserWriteStrWrapper(xplr_at_parser_t *parser,
                                                const char *buffer,
                                                xplr_at_server_response_type_t responseType);
+
+static inline xplrNvs_error_t xplrAtParserNvsWriteWrapper(xplr_at_parser_nvs_op_type_t type);
+static inline xplrNvs_error_t xplrAtParserNvsReadWrapper(xplr_at_parser_nvs_op_type_t type);
 
 static inline void atParserReturnError(xplr_at_parser_subsystem_type_t errorType);
 static inline void atParserReturnErrorBusy(xplr_at_parser_subsystem_type_t errorType);
@@ -432,6 +467,12 @@ static void atParserCallbackStartOnBootSet(uAtClientHandle_t client, void *arg);
 static void atParserHandlerStartOnBootGet(uAtClientHandle_t client, void *arg);
 static void atParserCallbackStartOnBootGet(uAtClientHandle_t client, void *arg);
 
+static void atParserHandlerNvsConfigSet(uAtClientHandle_t client, void *arg);
+static void atParserCallbackNvsConfigSet(uAtClientHandle_t client, void *arg);
+
+static void atParserHandlerNvsConfigGet(uAtClientHandle_t client, void *arg);
+static void atParserCallbackNvsConfigGet(uAtClientHandle_t client, void *arg);
+
 static esp_err_t atParserInitNvs(void);
 static esp_err_t atParserDeInitNvs(void);
 
@@ -460,6 +501,8 @@ xplr_at_parser_t *xplrAtParserInit(xplr_at_server_uartCfg_t *uartCfg)
     xplr_at_server_error_t atServerError;
     xplr_at_parser_error_t parserError;
     xplr_at_parser_t *returnValue;
+    xplrNvs_error_t nvsError;
+    xplr_at_parser_data_t *data = &parser.data;
 
     parser.data.id = atParserNvsNamespace;
     atParserInstanceArrayInit();
@@ -486,7 +529,20 @@ xplr_at_parser_t *xplrAtParserInit(xplr_at_server_uartCfg_t *uartCfg)
                 XPLRATPARSER_CONSOLE(E, "Error initializing NVS");
                 parserError = XPLR_AT_PARSER_ERROR;
             } else {
-                parserError = XPLR_AT_PARSER_OK;
+                nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_AUTOSAVENVS);
+                if (nvsError != XPLR_NVS_OK) {
+                    XPLRATPARSER_CONSOLE(D, "nvsKeyAutoSaveNvs not set, defaulting to enabled.");
+                    data->autoSaveNvs = true;
+                    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_AUTOSAVENVS);
+                    if (nvsError != XPLR_NVS_OK) {
+                        XPLRATPARSER_CONSOLE(E, "Error initializing NVS");
+                        parserError = XPLR_AT_PARSER_ERROR;
+                    } else {
+                        parserError = XPLR_AT_PARSER_OK;
+                    }
+                } else {
+                    parserError = XPLR_AT_PARSER_OK;
+                }
             }
         }
     }
@@ -784,6 +840,14 @@ static xplr_at_parser_error_t xplrAtParserAddMisc(void)
                                           atStartOnBootGet,
                                           atParserHandlerStartOnBootGet,
                                           NULL);
+    error |= xplrAtServerSetCommandFilter(server,
+                                          atNvsConfigSet,
+                                          atParserHandlerNvsConfigSet,
+                                          NULL);
+    error |= xplrAtServerSetCommandFilter(server,
+                                          atNvsConfigGet,
+                                          atParserHandlerNvsConfigGet,
+                                          NULL);
 
     if (error != XPLR_AT_SERVER_OK) {
         XPLRATPARSER_CONSOLE(E, "Error adding AT Misc parser");
@@ -906,6 +970,8 @@ static void xplrAtParserRemoveMisc(void)
     xplrAtServerRemoveCommandFilter(server, atBoardRestart);
     xplrAtServerRemoveCommandFilter(server, atStartOnBootGet);
     xplrAtServerRemoveCommandFilter(server, atStartOnBootSet);
+    xplrAtServerRemoveCommandFilter(server, atNvsConfigGet);
+    xplrAtServerRemoveCommandFilter(server, atNvsConfigSet);
 }
 
 void xplrAtParserRemove(xplr_at_parser_type_t parserType)
@@ -1012,7 +1078,7 @@ static inline void atParserReturnOk(void)
     }
 }
 
-static inline void xplrAtServerWriteStrWrapper(xplr_at_parser_t *parser,
+static inline void xplrAtParserWriteStrWrapper(xplr_at_parser_t *parser,
                                                const char *buffer,
                                                xplr_at_server_response_type_t responseType)
 {
@@ -1188,17 +1254,18 @@ xplr_at_parser_error_t xplrAtParserLoadNvsTsCerts(void)
     xplr_thingstream_pp_settings_t *ppSettings = &thingstreamCfg->thingstream.pointPerfect;
     size_t size;
 
+    //not using wrapper function as at app required reloading from nvs
+    size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
+    nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientkey, ppSettings->clientKey, &size);
+    size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
+    nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientcrt, ppSettings->clientCert, &size);
+    size = XPLR_THINGSTREAM_CLIENTID_MAX;
+    nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientid, ppSettings->deviceId, &size);
     size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
     nvsError = xplrNvsReadString(&data->nvs,
                                  nvsKeyRootcrt,
                                  thingstreamCfg->thingstream.server.rootCa,
                                  &size);
-    size = XPLR_THINGSTREAM_CLIENTID_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyClientid, ppSettings->deviceId, &size);
-    size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyClientcrt, ppSettings->clientCert, &size);
-    size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyClientkey, ppSettings->clientKey, &size);
 
     if (nvsError != XPLR_NVS_OK) {
         XPLRATPARSER_CONSOLE(D, "Some configuration either failed to load or is not set");
@@ -1215,6 +1282,7 @@ xplr_at_parser_error_t xplrAtParserLoadNvsConfig(void)
     xplrNvs_error_t nvsError;
     xplr_at_parser_error_t parserError;
     xplr_at_parser_data_t *data = &parser.data;
+    xplrNvs_t *nvs = &data->nvs;
     xplr_at_parser_thingstream_config_t *thingstreamCfg = &data->correctionData.thingstreamCfg;
     xplr_thingstream_pp_settings_t *ppSettings = &thingstreamCfg->thingstream.pointPerfect;
     xplr_ntrip_config_t *ntrip = &data->correctionData.ntripConfig;
@@ -1222,47 +1290,48 @@ xplr_at_parser_error_t xplrAtParserLoadNvsConfig(void)
     uint8_t uintValue;
 
     size = XPLR_AT_PARSER_SSID_LENGTH;
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeySsid, data->net.ssid, &size);
+    nvsError = xplrNvsReadString(nvs, nvsKeySsid, data->net.ssid, &size);
     size = XPLR_AT_PARSER_PASSWORD_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyPwd, data->net.password, &size);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyPwd, data->net.password, &size);
     size = XPLR_AT_PARSER_APN_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyApn, data->net.apn, &size);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyApn, data->net.apn, &size);
     size = XPLR_THINGSTREAM_URL_SIZE_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyMqttBroker, ppSettings->brokerAddress, &size);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyMqttBroker, ppSettings->brokerAddress, &size);
     size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs,
-                                  nvsKeyRootcrt,
-                                  thingstreamCfg->thingstream.server.rootCa,
-                                  &size);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyRootcrt, thingstreamCfg->thingstream.server.rootCa, &size);
     size = XPLR_THINGSTREAM_CLIENTID_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyClientid, ppSettings->deviceId, &size);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyClientid, ppSettings->deviceId, &size);
     size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyClientcrt, ppSettings->clientCert, &size);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyClientcrt, ppSettings->clientCert, &size);
     size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyClientkey, ppSettings->clientKey, &size);
-    size = XPLR_AT_PARSER_NTRIP_HOST_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyNtriphost, ntrip->server.host, &size);
-    size = XPLR_AT_PARSER_NTRIP_USERAGENT_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyNtripua, ntrip->credentials.userAgent, &size);
-    size = XPLR_AT_PARSER_NTRIP_MOUNTPOINT_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyNtripmp, ntrip->server.mountpoint, &size);
-    size = XPLR_AT_PARSER_NTRIP_CREDENTIALS_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyNtripusername, ntrip->credentials.username, &size);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyClientkey, ppSettings->clientKey, &size);
+    size = XPLR_NTRIP_HOST_LENGTH;
+    nvsError |= xplrNvsReadString(nvs, nvsKeyNtriphost, ntrip->server.host, &size);
+    size = XPLR_NTRIP_USERAGENT_LENGTH;
+    nvsError |= xplrNvsReadString(nvs, nvsKeyNtripua, ntrip->credentials.userAgent, &size);
+    size = XPLR_NTRIP_MOUNTPOINT_LENGTH;
+    nvsError |= xplrNvsReadString(nvs, nvsKeyNtripmp, ntrip->server.mountpoint, &size);
+    size = XPLR_NTRIP_CREDENTIALS_LENGTH;
+    nvsError |= xplrNvsReadString(nvs, nvsKeyNtripusername, ntrip->credentials.username, &size);
     size = XPLR_AT_PARSER_PASSWORD_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyNtrippassword, ntrip->credentials.password, &size);
-    nvsError |= xplrNvsReadU16(&data->nvs, nvsKeyMqttBrokerPort, (uint16_t *) &ppSettings->brokerPort);
-    nvsError |= xplrNvsReadI32(&data->nvs, nvsKeyTsregion, &thingstreamCfg->tsRegion);
-    nvsError |= xplrNvsReadI32(&data->nvs, nvsKeyTsplan, &thingstreamCfg->tsPlan);
-    nvsError |= xplrNvsReadU16(&data->nvs, nvsKeyNtripport, (uint16_t *) &ntrip->server.port);
-    nvsError |= xplrNvsReadU8(&data->nvs, nvsKeyDeadreckoning, &uintValue);
+    nvsError |= xplrNvsReadString(nvs, nvsKeyNtrippassword, ntrip->credentials.password, &size);
+    nvsError |= xplrNvsReadU16(nvs, nvsKeyMqttBrokerPort, (uint16_t *) &ppSettings->brokerPort);
+    nvsError |= xplrNvsReadI32(nvs, nvsKeyTsregion, &thingstreamCfg->tsRegion);
+    nvsError |= xplrNvsReadI32(nvs, nvsKeyTsplan, &thingstreamCfg->tsPlan);
+    nvsError |= xplrNvsReadU16(nvs, nvsKeyNtripport, (uint16_t *) &ntrip->server.port);
+    nvsError |= xplrNvsReadU8(nvs, nvsKeyNtripGgaMessage, &uintValue);
+    ntrip->server.ggaNecessary = (bool) uintValue;
+    nvsError |= xplrNvsReadU8(nvs, nvsKeyDeadreckoning, &uintValue);
     data->misc.dr.enable = (bool) uintValue;
-    nvsError |= xplrNvsReadU8(&data->nvs, nvsKeyStartOnBoot, &uintValue);
+    nvsError |= xplrNvsReadU8(nvs, nvsKeyStartOnBoot, &uintValue);
     data->startOnBoot = (bool) uintValue;
-    nvsError |= xplrNvsReadU8(&data->nvs, nvsKeySdlog, &uintValue);
+    nvsError |= xplrNvsReadU8(nvs, nvsKeyAutoSaveNvs, &uintValue);
+    data->autoSaveNvs = (bool) uintValue;
+    nvsError |= xplrNvsReadU8(nvs, nvsKeySdlog, &uintValue);
     data->misc.sdLogEnable = (bool) uintValue;
-    nvsError |= xplrNvsReadI32(&data->nvs, nvsKeyInterface, &data->net.interface);
-    nvsError |= xplrNvsReadI32(&data->nvs, nvsKeyCorsource, &data->correctionData.correctionSource);
-    nvsError |= xplrNvsReadI32(&data->nvs, nvsKeyCormod, &data->correctionData.correctionMod);
+    nvsError |= xplrNvsReadI32(nvs, nvsKeyInterface, &data->net.interface);
+    nvsError |= xplrNvsReadI32(nvs, nvsKeyCorsource, &data->correctionData.correctionSource);
+    nvsError |= xplrNvsReadI32(nvs, nvsKeyCormod, &data->correctionData.correctionMod);
 
     if (nvsError != XPLR_NVS_OK) {
         XPLRATPARSER_CONSOLE(D, "Some configuration either failed to load or is not set");
@@ -1277,6 +1346,357 @@ xplr_at_parser_error_t xplrAtParserLoadNvsConfig(void)
     }
 
     return parserError;
+}
+
+xplr_at_parser_error_t xplrAtParserSaveNvsConfig(void)
+{
+    xplrNvs_error_t nvsError;
+    xplr_at_parser_error_t parserError;
+    xplr_at_parser_data_t *data = &parser.data;
+    xplrNvs_t *nvs = &data->nvs;
+    xplr_at_parser_thingstream_config_t *thingstreamCfg = &data->correctionData.thingstreamCfg;
+    xplr_thingstream_pp_settings_t *ppSettings = &thingstreamCfg->thingstream.pointPerfect;
+    xplr_ntrip_config_t *ntrip = &data->correctionData.ntripConfig;
+
+    nvsError = xplrNvsWriteString(nvs, nvsKeySsid, data->net.ssid);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyPwd, data->net.password);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyApn, data->net.apn);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyMqttBroker, ppSettings->brokerAddress);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyRootcrt, thingstreamCfg->thingstream.server.rootCa);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyClientid, ppSettings->deviceId);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyClientcrt, ppSettings->clientCert);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyClientkey, ppSettings->clientKey);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyNtriphost, ntrip->server.host);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyNtripua, ntrip->credentials.userAgent);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyNtripmp, ntrip->server.mountpoint);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyNtripusername, ntrip->credentials.username);
+    nvsError |= xplrNvsWriteString(nvs, nvsKeyNtrippassword, ntrip->credentials.password);
+    nvsError |= xplrNvsWriteU16(nvs, nvsKeyMqttBrokerPort, ppSettings->brokerPort);
+    nvsError |= xplrNvsWriteI32(nvs, nvsKeyTsregion, thingstreamCfg->tsRegion);
+    nvsError |= xplrNvsWriteI32(nvs, nvsKeyTsplan, thingstreamCfg->tsPlan);
+    nvsError |= xplrNvsWriteU16(nvs, nvsKeyNtripport, (uint16_t) ntrip->server.port);
+    nvsError |= xplrNvsWriteU8(nvs, nvsKeyNtripGgaMessage, ntrip->server.ggaNecessary);
+    nvsError |= xplrNvsWriteU8(nvs, nvsKeyDeadreckoning, (uint8_t) data->misc.dr.enable);
+    nvsError |= xplrNvsWriteU8(nvs, nvsKeyStartOnBoot, (uint8_t) data->startOnBoot);
+    nvsError |= xplrNvsWriteU8(nvs, nvsKeyAutoSaveNvs, (uint8_t) data->autoSaveNvs);
+    nvsError |= xplrNvsWriteU8(nvs, nvsKeySdlog, (uint8_t) data->misc.sdLogEnable);
+    nvsError |= xplrNvsWriteI32(nvs, nvsKeyInterface, data->net.interface);
+    nvsError |= xplrNvsWriteI32(nvs, nvsKeyCorsource, data->correctionData.correctionSource);
+    nvsError |= xplrNvsWriteI32(nvs, nvsKeyCormod, data->correctionData.correctionMod);
+
+    if (nvsError != XPLR_NVS_OK) {
+        XPLRATPARSER_CONSOLE(E, "Error writing configuration to NVS");
+        parserError = XPLR_AT_PARSER_ERROR;
+    } else {
+        parserError = XPLR_AT_PARSER_OK;
+    }
+
+    return parserError;
+}
+
+static inline xplrNvs_error_t xplrAtParserNvsReadWrapper(xplr_at_parser_nvs_op_type_t type)
+{
+    xplrNvs_error_t nvsError;
+    xplr_at_parser_data_t *data = &parser.data;
+    xplr_at_parser_thingstream_config_t *thingstreamCfg = &data->correctionData.thingstreamCfg;
+    xplr_thingstream_pp_settings_t *ppSettings = &thingstreamCfg->thingstream.pointPerfect;
+    xplr_ntrip_config_t *ntrip = &data->correctionData.ntripConfig;
+    size_t size;
+
+    if (data->autoSaveNvs) {
+        switch (type) {
+            case XPLR_ATPARSER_NVSOP_WIFICREDS:
+                size = XPLR_AT_PARSER_SSID_LENGTH;
+                nvsError = xplrNvsReadString(&data->nvs, nvsKeySsid, data->net.ssid, &size);
+                size = XPLR_AT_PARSER_PASSWORD_LENGTH;
+                nvsError |= xplrNvsReadString(&data->nvs, nvsKeyPwd, data->net.password, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_APN:
+                size = XPLR_AT_PARSER_APN_LENGTH;
+                nvsError = xplrNvsReadString(&data->nvs, nvsKeyApn, data->net.apn, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_MQTTBROKER:
+                size = XPLR_THINGSTREAM_URL_SIZE_MAX;
+                nvsError = xplrNvsReadString(&data->nvs, nvsKeyMqttBroker, ppSettings->brokerAddress, &size);
+                nvsError = xplrNvsReadU16(&data->nvs, nvsKeyMqttBrokerPort, (uint16_t *) &ppSettings->brokerPort);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_ROOTCRT:
+                size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
+                nvsError = xplrNvsReadString(&data->nvs,
+                                             nvsKeyRootcrt,
+                                             thingstreamCfg->thingstream.server.rootCa,
+                                             &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CLIENTID:
+                size = XPLR_THINGSTREAM_CLIENTID_MAX;
+                nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientid, ppSettings->deviceId, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CLIENTCRT:
+                size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
+
+                nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientcrt, ppSettings->clientCert, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CLIENTKEY:
+                size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
+
+                nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientkey, ppSettings->clientKey, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_TSREGION:
+                nvsError = xplrNvsReadI32(&data->nvs,
+                                          nvsKeyTsregion,
+                                          &data->correctionData.thingstreamCfg.tsRegion);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_TSPLAN:
+                nvsError = xplrNvsReadI32(&data->nvs,
+                                          nvsKeyTsplan,
+                                          &data->correctionData.thingstreamCfg.tsPlan);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPSRV:
+                size = XPLR_NTRIP_HOST_LENGTH;
+                nvsError = xplrNvsReadString(&data->nvs, nvsKeyNtriphost, ntrip->server.host, &size);
+                nvsError |= xplrNvsReadU16(&data->nvs,
+                                           nvsKeyNtripport,
+                                           (uint16_t *) &ntrip->server.port);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPGGA:
+                nvsError = xplrNvsReadU8(&data->nvs,
+                                         nvsKeyNtripGgaMessage,
+                                         (uint8_t *) &ntrip->server.ggaNecessary);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPUA:
+                size = XPLR_NTRIP_USERAGENT_LENGTH;
+                nvsError = xplrNvsReadString(&data->nvs,
+                                             nvsKeyNtripua,
+                                             ntrip->credentials.userAgent, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPMP:
+                size = XPLR_NTRIP_MOUNTPOINT_LENGTH;
+                nvsError = xplrNvsReadString(&data->nvs,
+                                             nvsKeyNtripmp,
+                                             ntrip->server.mountpoint, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPCREDS:
+                size = XPLR_NTRIP_CREDENTIALS_LENGTH;
+                nvsError = xplrNvsReadString(&data->nvs,
+                                             nvsKeyNtripusername,
+                                             ntrip->credentials.username, &size);
+                size = XPLR_AT_PARSER_PASSWORD_LENGTH;
+                nvsError |= xplrNvsReadString(&data->nvs,
+                                              nvsKeyNtrippassword,
+                                              ntrip->credentials.password, &size);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_DR:
+                nvsError = xplrNvsReadU8(&data->nvs, nvsKeyDeadreckoning, (uint8_t *) &data->misc.dr.enable);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_SD:
+                nvsError = xplrNvsReadU8(&data->nvs, nvsKeySdlog, (uint8_t *) &data->misc.sdLogEnable);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_IF:
+                nvsError = xplrNvsReadI32(&data->nvs, nvsKeyInterface, &data->net.interface);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CORSRC:
+                nvsError = xplrNvsReadI32(&data->nvs, nvsKeyCorsource, &data->correctionData.correctionSource);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CORMOD:
+                nvsError = xplrNvsReadI32(&data->nvs, nvsKeyCormod, &data->correctionData.correctionMod);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_STARTONBOOT:
+                nvsError = xplrNvsReadU8(&data->nvs, nvsKeyStartOnBoot, (uint8_t *) &data->startOnBoot);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_AUTOSAVENVS:
+                nvsError = xplrNvsReadU8(&data->nvs, nvsKeyAutoSaveNvs, (uint8_t *) &data->autoSaveNvs);
+                break;
+
+            default:
+                break;
+        }
+    } else {
+        nvsError = XPLR_NVS_OK;
+    }
+
+    return nvsError;
+}
+
+static inline xplrNvs_error_t xplrAtParserNvsWriteWrapper(xplr_at_parser_nvs_op_type_t type)
+{
+    xplrNvs_error_t nvsError;
+    xplr_at_parser_data_t *data = &parser.data;
+
+    if (data->autoSaveNvs) {
+        switch (type) {
+            case XPLR_ATPARSER_NVSOP_WIFICREDS:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeySsid);
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyPwd);
+                nvsError = xplrNvsWriteString(&data->nvs, nvsKeySsid, data->net.ssid);
+                nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyPwd, data->net.password);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_APN:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyApn);
+                nvsError = xplrNvsWriteString(&data->nvs, nvsKeyApn, data->net.apn);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_MQTTBROKER:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyMqttBroker);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyMqttBroker,
+                                              data->correctionData.thingstreamCfg.thingstream.pointPerfect.brokerAddress);
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyMqttBrokerPort);
+                nvsError |= xplrNvsWriteU16(&data->nvs,
+                                            nvsKeyMqttBrokerPort,
+                                            data->correctionData.thingstreamCfg.thingstream.pointPerfect.brokerPort);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_ROOTCRT:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyRootcrt);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyRootcrt,
+                                              data->correctionData.thingstreamCfg.thingstream.server.rootCa);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CLIENTID:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientid);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyClientid,
+                                              data->correctionData.thingstreamCfg.thingstream.pointPerfect.deviceId);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CLIENTCRT:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientcrt);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyClientcrt,
+                                              data->correctionData.thingstreamCfg.thingstream.pointPerfect.clientCert);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CLIENTKEY:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientkey);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyClientkey,
+                                              data->correctionData.thingstreamCfg.thingstream.pointPerfect.clientKey);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_TSREGION:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyTsregion);
+                nvsError = xplrNvsWriteI32(&data->nvs,
+                                           nvsKeyTsregion,
+                                           data->correctionData.thingstreamCfg.tsRegion);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_TSPLAN:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyTsplan);
+                nvsError = xplrNvsWriteI32(&data->nvs, nvsKeyTsplan, data->correctionData.thingstreamCfg.tsPlan);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPSRV:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtriphost);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyNtriphost,
+                                              data->correctionData.ntripConfig.server.host);
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripport);
+                nvsError |= xplrNvsWriteU16(&data->nvs,
+                                            nvsKeyNtripport,
+                                            (uint16_t) data->correctionData.ntripConfig.server.port);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPGGA:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripGgaMessage);
+                nvsError = xplrNvsWriteU8(&data->nvs,
+                                          nvsKeyNtripGgaMessage,
+                                          (uint8_t) data->correctionData.ntripConfig.server.ggaNecessary);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPUA:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripua);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyNtripua,
+                                              data->correctionData.ntripConfig.credentials.userAgent);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPMP:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripmp);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyNtripmp,
+                                              data->correctionData.ntripConfig.server.mountpoint);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_NTRIPCREDS:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripusername);
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtrippassword);
+                nvsError = xplrNvsWriteString(&data->nvs,
+                                              nvsKeyNtripusername,
+                                              data->correctionData.ntripConfig.credentials.username);
+                nvsError |= xplrNvsWriteString(&data->nvs,
+                                               nvsKeyNtrippassword,
+                                               data->correctionData.ntripConfig.credentials.password);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_DR:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyDeadreckoning);
+                nvsError = xplrNvsWriteU8(&data->nvs, nvsKeyDeadreckoning, (uint8_t) data->misc.dr.enable);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_SD:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeySdlog);
+                nvsError = xplrNvsWriteU8(&data->nvs, nvsKeySdlog, (uint8_t) data->misc.sdLogEnable);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_IF:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyInterface);
+                nvsError = xplrNvsWriteI32(&data->nvs, nvsKeyInterface, data->net.interface);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CORSRC:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyCorsource);
+                nvsError = xplrNvsWriteI32(&data->nvs,
+                                           nvsKeyCorsource,
+                                           data->correctionData.correctionSource);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_CORMOD:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyCormod);
+                nvsError = xplrNvsWriteI32(&data->nvs,
+                                           nvsKeyCormod,
+                                           data->correctionData.correctionMod);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_STARTONBOOT:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyStartOnBoot);
+                nvsError = xplrNvsWriteU8(&data->nvs, nvsKeyStartOnBoot, (uint8_t) data->startOnBoot);
+                break;
+
+            case XPLR_ATPARSER_NVSOP_AUTOSAVENVS:
+                (void)xplrNvsEraseKey(&data->nvs, nvsKeyAutoSaveNvs);
+                nvsError = xplrNvsWriteU8(&data->nvs, nvsKeyAutoSaveNvs, (uint8_t) data->autoSaveNvs);
+                break;
+
+            default:
+                break;
+        }
+    } else {
+        nvsError = XPLR_NVS_OK;
+    }
+
+    return nvsError;
 }
 
 bool xplrAtParserWifiIsReady(void)
@@ -1375,26 +1795,17 @@ xplr_at_parser_error_t  xplrAtParserSetNtripConfig(xplr_ntrip_config_t *ntripCon
 {
     xplr_at_parser_error_t error;
     xplr_at_parser_data_t *data = &parser.data;
-    xplr_ntrip_config_t *ntrip = &data->correctionData.ntripConfig;
     xplrNvs_error_t nvsError;
 
     if (ntripConfig == NULL) {
         error = XPLR_AT_PARSER_ERROR;
     } else {
-        memcpy(ntrip, ntripConfig, sizeof(xplr_ntrip_config_t));
+        memcpy(&data->correctionData.ntripConfig, ntripConfig, sizeof(xplr_ntrip_config_t));
 
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtriphost);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripua);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripmp);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripport);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripusername);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtrippassword);
-        nvsError = xplrNvsWriteString(&data->nvs, nvsKeyNtriphost, ntrip->server.host);
-        nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyNtripua, ntrip->credentials.userAgent);
-        nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyNtripmp, ntrip->server.mountpoint);
-        nvsError |= xplrNvsWriteU16(&data->nvs, nvsKeyNtripport, (uint16_t) ntrip->server.port);
-        nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyNtripusername, ntrip->credentials.username);
-        nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyNtrippassword, ntrip->credentials.password);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPSRV);
+        nvsError |= xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPUA);
+        nvsError |= xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPMP);
+        nvsError |= xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPCREDS);
 
         if (nvsError != XPLR_NVS_OK) {
             error = XPLR_AT_PARSER_ERROR;
@@ -1419,12 +1830,8 @@ xplr_at_parser_error_t  xplrAtSetNetInterfaceConfig(xplr_at_parser_net_interface
     } else {
         memcpy(&data->net, netInterfaceConfig, sizeof(xplr_at_parser_net_interface_config_t));
 
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeySsid);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyPwd);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyApn);
-        nvsError = xplrNvsWriteString(&data->nvs, nvsKeySsid, data->net.ssid);
-        nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyPwd, data->net.password);
-        nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyApn, data->net.apn);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_WIFICREDS);
+        nvsError |= xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_APN);
 
         if (nvsError != XPLR_NVS_OK) {
             error = XPLR_AT_PARSER_ERROR;
@@ -1443,42 +1850,22 @@ xplr_at_parser_error_t  xplrAtSetThingstreamConfig(xplr_at_parser_thingstream_co
 {
     xplr_at_parser_error_t error;
     xplr_at_parser_data_t *data = &parser.data;
-    xplr_at_parser_thingstream_config_t *thingstreamCfg = &data->correctionData.thingstreamCfg;
     xplrNvs_error_t nvsError;
 
     if (thingstreamConfig == NULL) {
         error = XPLR_AT_PARSER_ERROR;
     } else {
-        memcpy(thingstreamCfg,
+        memcpy(&data->correctionData.thingstreamCfg,
                thingstreamConfig,
                sizeof(xplr_at_parser_thingstream_config_t));
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyMqttBroker);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyMqttBrokerPort);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyTsregion);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyTsplan);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientid);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientkey);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyRootcrt);
-        (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientcrt);
-        nvsError = xplrNvsWriteI32(&data->nvs, nvsKeyTsregion, thingstreamCfg->tsRegion);
-        nvsError |= xplrNvsWriteI32(&data->nvs, nvsKeyTsplan, thingstreamCfg->tsPlan);
-        nvsError |= xplrNvsWriteString(&data->nvs,
-                                       nvsKeyMqttBroker,
-                                       thingstreamCfg->thingstream.pointPerfect.brokerAddress);
-        nvsError |= xplrNvsWriteU16(&data->nvs,
-                                    nvsKeyMqttBrokerPort,
-                                    thingstreamCfg->thingstream.pointPerfect.brokerPort);
-        nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyClientid,
-                                       thingstreamCfg->thingstream.pointPerfect.deviceId);
-        nvsError |= xplrNvsWriteString(&data->nvs,
-                                       nvsKeyClientkey,
-                                       thingstreamCfg->thingstream.pointPerfect.clientKey);
-        nvsError |= xplrNvsWriteString(&data->nvs,
-                                       nvsKeyRootcrt,
-                                       thingstreamCfg->thingstream.server.rootCa);
-        nvsError |= xplrNvsWriteString(&data->nvs,
-                                       nvsKeyClientcrt,
-                                       thingstreamCfg->thingstream.pointPerfect.clientCert);
+
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_TSREGION);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_TSPLAN);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_MQTTBROKER);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CLIENTID);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CLIENTCRT);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CLIENTKEY);
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_ROOTCRT);
 
         if (nvsError != XPLR_NVS_OK) {
             error = XPLR_AT_PARSER_ERROR;
@@ -1705,14 +2092,9 @@ static void atParserHandlerWifiSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackWifiSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeySsid);
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyPwd);
-    nvsError = xplrNvsWriteString(&data->nvs, nvsKeySsid, data->net.ssid);
-    nvsError |= xplrNvsWriteString(&data->nvs, nvsKeyPwd, data->net.password);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_WIFICREDS);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_WIFI);
     } else {
@@ -1735,21 +2117,18 @@ static void atParserCallbackWifiGet(uAtClientHandle_t client, void *arg)
 {
     xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_AT_PARSER_SSID_LENGTH;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeySsid, data->net.ssid, &size);
-    size = XPLR_AT_PARSER_PASSWORD_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyPwd, data->net.password, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_WIFICREDS);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_WIFI);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atWifiResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     data->net.ssid,
                                     XPLR_AT_SERVER_RESPONSE_MID);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     data->net.password,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -1897,12 +2276,9 @@ static void atParserHandlerApnSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackApnSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyApn);
-    nvsError = xplrNvsWriteString(&data->nvs, nvsKeyApn, data->net.apn);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_APN);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_CELL);
     } else {
@@ -1925,16 +2301,15 @@ static void atParserCallbackApnGet(uAtClientHandle_t client, void *arg)
 {
     xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_AT_PARSER_APN_LENGTH;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyApn, data->net.apn, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_APN);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_CELL);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atApnResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     data->net.apn,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -1973,17 +2348,9 @@ static void atParserHandlerMqttBrokerSet(uAtClientHandle_t client, void *arg)
 }
 static void atParserCallbackMqttBrokerSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyMqttBroker);
-    nvsError = xplrNvsWriteString(&data->nvs,
-                                  nvsKeyMqttBroker,
-                                  data->correctionData.thingstreamCfg.thingstream.pointPerfect.brokerAddress);
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyMqttBrokerPort);
-    nvsError |= xplrNvsWriteU16(&data->nvs,
-                                nvsKeyMqttBrokerPort,
-                                data->correctionData.thingstreamCfg.thingstream.pointPerfect.brokerPort);
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_MQTTBROKER);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2008,17 +2375,15 @@ static void atParserCallbackMqttBrokerGet(uAtClientHandle_t client, void *arg)
         &data->correctionData.thingstreamCfg.thingstream.pointPerfect;
     xplrNvs_error_t nvsError;
     xplr_at_server_error_t atServerError;
-    size_t size = XPLR_THINGSTREAM_URL_SIZE_MAX;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyMqttBroker, ppSettings->brokerAddress, &size);
-    nvsError = xplrNvsReadU16(&data->nvs, nvsKeyMqttBrokerPort, (uint16_t *) &ppSettings->brokerPort);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_MQTTBROKER);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atmqttBrokerResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     ppSettings->brokerAddress,
                                     XPLR_AT_SERVER_RESPONSE_MID);
         xplrAtServerWriteUint(&parser.server,
@@ -2061,14 +2426,9 @@ static void atParserHandlerRootCrtSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackRootCrtSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyRootcrt);
-    nvsError = xplrNvsWriteString(&data->nvs,
-                                  nvsKeyRootcrt,
-                                  data->correctionData.thingstreamCfg.thingstream.server.rootCa);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_ROOTCRT);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2092,16 +2452,15 @@ static void atParserCallbackRootCrtGet(uAtClientHandle_t client, void *arg)
     xplr_at_parser_data_t *data = &parser.data;
     char *rootCa = data->correctionData.thingstreamCfg.thingstream.server.rootCa;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyRootcrt, rootCa, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_ROOTCRT);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atRootResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     rootCa,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2133,14 +2492,9 @@ static void atParserHandlerClientIdSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackClientIdSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientid);
-    nvsError = xplrNvsWriteString(&data->nvs,
-                                  nvsKeyClientid,
-                                  data->correctionData.thingstreamCfg.thingstream.pointPerfect.deviceId);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CLIENTID);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2164,16 +2518,15 @@ static void atParserCallbackClientIdGet(uAtClientHandle_t client, void *arg)
     xplr_at_parser_data_t *data = &parser.data;
     char *clientId = data->correctionData.thingstreamCfg.thingstream.pointPerfect.deviceId;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_THINGSTREAM_CLIENTID_MAX;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientid, clientId, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_CLIENTID);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atTsidResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     clientId,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2205,14 +2558,9 @@ static void atParserHandlerClientCrtSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackClientCrtSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientcrt);
-    nvsError = xplrNvsWriteString(&data->nvs,
-                                  nvsKeyClientcrt,
-                                  data->correctionData.thingstreamCfg.thingstream.pointPerfect.clientCert);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CLIENTCRT);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2236,16 +2584,15 @@ static void atParserCallbackClientCrtGet(uAtClientHandle_t client, void *arg)
     xplr_at_parser_data_t *data = &parser.data;
     char *clientCert = data->correctionData.thingstreamCfg.thingstream.pointPerfect.clientCert;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientcrt, clientCert, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_CLIENTCRT);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atTscertResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     clientCert,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2277,14 +2624,9 @@ static void atParserHandlerClientKeySet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackClientKeySet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyClientkey);
-    nvsError = xplrNvsWriteString(&data->nvs,
-                                  nvsKeyClientkey,
-                                  data->correctionData.thingstreamCfg.thingstream.pointPerfect.clientKey);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CLIENTKEY);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2308,16 +2650,15 @@ static void atParserCallbackClientKeyGet(uAtClientHandle_t client, void *arg)
     xplr_at_parser_data_t *data = &parser.data;
     char *clientKey = data->correctionData.thingstreamCfg.thingstream.pointPerfect.clientKey;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_THINGSTREAM_CERT_SIZE_MAX;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyClientkey, clientKey, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_CLIENTKEY);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atTskeyResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     clientKey,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2362,14 +2703,9 @@ static void atParserHandlerRegionSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackRegionSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyTsregion);
-    nvsError = xplrNvsWriteI32(&data->nvs,
-                               nvsKeyTsregion,
-                               data->correctionData.thingstreamCfg.tsRegion);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_TSREGION);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2396,9 +2732,7 @@ static void atParserCallbackRegionGet(uAtClientHandle_t client, void *arg)
     char regionString[XPLR_AT_PARSER_TSREGION_LENGTH];
     memset(regionString, 0, sizeof(regionString));
 
-    nvsError = xplrNvsReadI32(&data->nvs,
-                              nvsKeyTsregion,
-                              tsRegion);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_TSREGION);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2430,10 +2764,10 @@ static void atParserCallbackRegionGet(uAtClientHandle_t client, void *arg)
                 strcpy(regionString, "-1");
         }
 
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atTsregionResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     regionString,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2474,12 +2808,9 @@ static void atParserHandlerPlanSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackPlanSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyTsplan);
-    nvsError = xplrNvsWriteI32(&data->nvs, nvsKeyTsplan, data->correctionData.thingstreamCfg.tsPlan);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_TSPLAN);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2506,8 +2837,7 @@ static void atParserCallbackPlanGet(uAtClientHandle_t client, void *arg)
     char planString[XPLR_AT_PARSER_TSPLAN_LENGTH];
     memset(planString, 0, sizeof(planString));
 
-    nvsError = xplrNvsReadI32(&data->nvs, nvsKeyTsplan,
-                              tsPlan);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_TSPLAN);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_TS);
     } else {
@@ -2531,10 +2861,10 @@ static void atParserCallbackPlanGet(uAtClientHandle_t client, void *arg)
                 strcpy(planString, invalidStr);
         }
 
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atTsplanResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     planString,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2551,7 +2881,7 @@ static void atParserHandlerNtripServerSet(uAtClientHandle_t client, void *arg)
     if (xplrAtParserTryLock(true)) {
         error = xplrAtServerReadString(&parser.server,
                                        data->correctionData.ntripConfig.server.host,
-                                       XPLR_AT_PARSER_NTRIP_HOST_LENGTH,
+                                       XPLR_NTRIP_HOST_LENGTH,
                                        false);
         error |= xplrAtServerReadString(&parser.server, strPort, XPLR_AT_PARSER_PORT_LENGTH, false);
         if (error < 0) {
@@ -2570,18 +2900,10 @@ static void atParserHandlerNtripServerSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackNtripServerSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtriphost);
-    nvsError = xplrNvsWriteString(&data->nvs,
-                                  nvsKeyNtriphost,
-                                  data->correctionData.ntripConfig.server.host);
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripport);
-    nvsError |= xplrNvsWriteU16(&data->nvs,
-                                nvsKeyNtripport,
-                                (uint16_t) data->correctionData.ntripConfig.server.port);
 
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPSRV);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
@@ -2605,19 +2927,15 @@ static void atParserCallbackNtripServerGet(uAtClientHandle_t client, void *arg)
     xplr_at_parser_data_t *data = &parser.data;
     char *host = data->correctionData.ntripConfig.server.host;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_AT_PARSER_NTRIP_HOST_LENGTH;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyNtriphost, host, &size);
-    nvsError |= xplrNvsReadU16(&data->nvs,
-                               nvsKeyNtripport,
-                               (uint16_t *) &data->correctionData.ntripConfig.server.port);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_NTRIPSRV);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atNtripsrvResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     host,
                                     XPLR_AT_SERVER_RESPONSE_MID);
         xplrAtServerWriteUint(&parser.server,
@@ -2663,14 +2981,9 @@ static void atParserHandlerNtripGgaSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackNtripGgaSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
-    uint8_t gga;
 
-    gga = data->correctionData.ntripConfig.server.ggaNecessary;
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripGgaMessage);
-    nvsError = xplrNvsWriteU8(&data->nvs, nvsKeyNtripGgaMessage, gga);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPGGA);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -2695,12 +3008,12 @@ static void atParserCallbackNtripGgaGet(uAtClientHandle_t client, void *arg)
     xplr_at_server_error_t atServerError;
     uint8_t gga;
 
-    nvsError = xplrNvsReadU8(&data->nvs, nvsKeyNtripGgaMessage, &gga);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_NTRIPGGA);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
-        data->correctionData.ntripConfig.server.ggaNecessary = !!gga;
-        xplrAtServerWriteStrWrapper(&parser,
+        gga = !! data->correctionData.ntripConfig.server.ggaNecessary;
+        xplrAtParserWriteStrWrapper(&parser,
                                     atNtripGgaResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
         (void)xplrAtServerWriteUint(&parser.server,
@@ -2726,7 +3039,7 @@ static void atParserHandlerNtripUserAgentSet(uAtClientHandle_t client, void *arg
     if (xplrAtParserTryLock(true)) {
         error = xplrAtServerReadString(&parser.server,
                                        data->correctionData.ntripConfig.credentials.userAgent,
-                                       XPLR_AT_PARSER_NTRIP_USERAGENT_LENGTH,
+                                       XPLR_NTRIP_USERAGENT_LENGTH,
                                        false);
         if (error < 0) {
             atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
@@ -2743,13 +3056,9 @@ static void atParserHandlerNtripUserAgentSet(uAtClientHandle_t client, void *arg
 
 static void atParserCallbackNtripUserAgentSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripua);
-    nvsError = xplrNvsWriteString(&data->nvs, nvsKeyNtripua,
-                                  data->correctionData.ntripConfig.credentials.userAgent);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPUA);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
@@ -2773,16 +3082,15 @@ static void atParserCallbackNtripUserAgentGet(uAtClientHandle_t client, void *ar
     xplr_at_parser_data_t *data = &parser.data;
     char *userAgent = data->correctionData.ntripConfig.credentials.userAgent;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_AT_PARSER_NTRIP_USERAGENT_LENGTH;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyNtripua, userAgent, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_NTRIPUA);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atNtripuaResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     userAgent,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2797,7 +3105,7 @@ static void atParserHandlerNtripMountPointSet(uAtClientHandle_t client, void *ar
     if (xplrAtParserTryLock(true)) {
         error = xplrAtServerReadString(&parser.server,
                                        data->correctionData.ntripConfig.server.mountpoint,
-                                       XPLR_AT_PARSER_NTRIP_MOUNTPOINT_LENGTH,
+                                       XPLR_NTRIP_MOUNTPOINT_LENGTH,
                                        false);
         if (error < 0) {
             atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
@@ -2814,13 +3122,9 @@ static void atParserHandlerNtripMountPointSet(uAtClientHandle_t client, void *ar
 
 static void atParserCallbackNtripMountPointSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripmp);
-    nvsError = xplrNvsWriteString(&data->nvs, nvsKeyNtripmp,
-                                  data->correctionData.ntripConfig.server.mountpoint);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPMP);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
@@ -2844,16 +3148,15 @@ static void atParserCallbackNtripMountPointGet(uAtClientHandle_t client, void *a
     xplr_at_parser_data_t *data = &parser.data;
     char *mountpoint = data->correctionData.ntripConfig.server.mountpoint;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_AT_PARSER_NTRIP_MOUNTPOINT_LENGTH;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyNtripmp, mountpoint, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_NTRIPMP);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atNtripmpResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     mountpoint,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2868,11 +3171,11 @@ static void atParserHandlerNtripCredsSet(uAtClientHandle_t client, void *arg)
     if (xplrAtParserTryLock(true)) {
         error = xplrAtServerReadString(&parser.server,
                                        data->correctionData.ntripConfig.credentials.username,
-                                       XPLR_AT_PARSER_NTRIP_CREDENTIALS_LENGTH,
+                                       XPLR_NTRIP_CREDENTIALS_LENGTH,
                                        false);
         error |= xplrAtServerReadString(&parser.server,
                                         data->correctionData.ntripConfig.credentials.password,
-                                        XPLR_AT_PARSER_NTRIP_CREDENTIALS_LENGTH,
+                                        XPLR_NTRIP_CREDENTIALS_LENGTH,
                                         false);
         if (error < 0) {
             atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
@@ -2889,18 +3192,9 @@ static void atParserHandlerNtripCredsSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackNtripCredsSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtripusername);
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyNtrippassword);
-    nvsError = xplrNvsWriteString(&data->nvs,
-                                  nvsKeyNtripusername,
-                                  data->correctionData.ntripConfig.credentials.username);
-    nvsError |= xplrNvsWriteString(&data->nvs,
-                                   nvsKeyNtrippassword,
-                                   data->correctionData.ntripConfig.credentials.password);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_NTRIPCREDS);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
@@ -2924,21 +3218,18 @@ static void atParserCallbackNtripCredsGet(uAtClientHandle_t client, void *arg)
     xplr_at_parser_data_t *data = &parser.data;
     xplr_ntrip_config_t *ntrip = &data->correctionData.ntripConfig;
     xplrNvs_error_t nvsError;
-    size_t size = XPLR_AT_PARSER_NTRIP_CREDENTIALS_LENGTH;
 
-    nvsError = xplrNvsReadString(&data->nvs, nvsKeyNtripusername, ntrip->credentials.username, &size);
-    size = XPLR_AT_PARSER_PASSWORD_LENGTH;
-    nvsError |= xplrNvsReadString(&data->nvs, nvsKeyNtrippassword, ntrip->credentials.password, &size);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_NTRIPCREDS);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_NTRIP);
     } else {
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atNtripcredsResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     ntrip->credentials.username,
                                     XPLR_AT_SERVER_RESPONSE_MID);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     ntrip->credentials.password,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -2982,14 +3273,9 @@ static void atParserHandlerDRSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackDRSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
-    uint8_t dr;
 
-    dr = data->misc.dr.enable;
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyDeadreckoning);
-    nvsError = xplrNvsWriteU8(&data->nvs, nvsKeyDeadreckoning, dr);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_DR);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_GNSS);
     } else {
@@ -3014,12 +3300,12 @@ static void atParserCallbackDRGet(uAtClientHandle_t client, void *arg)
     xplr_at_server_error_t atServerError;
     uint8_t dr;
 
-    nvsError = xplrNvsReadU8(&data->nvs, nvsKeyDeadreckoning, &dr);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_DR);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_GNSS);
     } else {
-        data->misc.dr.enable = !!dr;
-        xplrAtServerWriteStrWrapper(&parser,
+        dr = !!data->misc.dr.enable;
+        xplrAtParserWriteStrWrapper(&parser,
                                     atGnssdrResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
         (void)xplrAtServerWriteUint(&parser.server,
@@ -3073,14 +3359,9 @@ static void atParserHandlerSDSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackSDSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
-    uint8_t sd;
 
-    sd = data->misc.sdLogEnable;
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeySdlog);
-    nvsError = xplrNvsWriteU8(&data->nvs, nvsKeySdlog, sd);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_SD);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3105,12 +3386,12 @@ static void atParserCallbackSDGet(uAtClientHandle_t client, void *arg)
     xplr_at_server_error_t atServerError;
     uint8_t sd;
 
-    nvsError = xplrNvsReadU8(&data->nvs, nvsKeySdlog, &sd);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_SD);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
-        data->misc.sdLogEnable = !!sd;
-        xplrAtServerWriteStrWrapper(&parser,
+        sd = !!data->misc.sdLogEnable;
+        xplrAtParserWriteStrWrapper(&parser,
                                     atSdResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
         (void)xplrAtServerWriteUint(&parser.server,
@@ -3177,7 +3458,7 @@ static void atParserCallbackBaudrateGet(uAtClientHandle_t client, void *arg)
 {
     xplr_at_server_error_t atServerError;
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 atBaudResponse,
                                 XPLR_AT_SERVER_RESPONSE_START);
     (void)xplrAtServerWriteUint(&parser.server,
@@ -3239,12 +3520,9 @@ static void atParserHandlerInterfaceSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackInterfaceSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyInterface);
-    nvsError = xplrNvsWriteI32(&data->nvs, nvsKeyInterface, data->net.interface);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_IF);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3272,7 +3550,7 @@ static void atParserCallbackInterfaceGet(uAtClientHandle_t client, void *arg)
     char strInterface[XPLR_AT_PARSER_USER_OPTION_LENGTH];
     memset(strInterface, 0, sizeof(strInterface));
 
-    nvsError = xplrNvsReadI32(&data->nvs, nvsKeyInterface, interface);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_IF);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3292,10 +3570,10 @@ static void atParserCallbackInterfaceGet(uAtClientHandle_t client, void *arg)
                 strcpy(strInterface, invalidStr);
         }
 
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atInterfaceResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     strInterface,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -3347,13 +3625,9 @@ static void atParserHandlerCorrectionSourceSet(uAtClientHandle_t client, void *a
 
 static void atParserCallbackCorrectionSourceSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyCorsource);
-    nvsError = xplrNvsWriteI32(&data->nvs,
-                               nvsKeyCorsource,
-                               data->correctionData.correctionSource);
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CORSRC);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3382,8 +3656,7 @@ static void atParserCallbackCorrectionSourceGet(uAtClientHandle_t client, void *
     char correctionSource[XPLR_AT_PARSER_USER_OPTION_LENGTH];
     memset(correctionSource, 0, sizeof(correctionSource));
 
-    nvsError = xplrNvsReadI32(&data->nvs, nvsKeyCorsource,
-                              correctionSourceLocal);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_CORSRC);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3403,10 +3676,10 @@ static void atParserCallbackCorrectionSourceGet(uAtClientHandle_t client, void *
                 strcpy(correctionSource, invalidStr);
         }
 
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atCorsrcResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     correctionSource,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -3458,13 +3731,9 @@ static void atParserHandlerCorrectionModSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackCorrectionModSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
 
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyCormod);
-    nvsError = xplrNvsWriteI32(&data->nvs,
-                               nvsKeyCormod,
-                               data->correctionData.correctionMod);
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_CORMOD);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3490,8 +3759,7 @@ static void atParserCallbackCorrectionModGet(uAtClientHandle_t client, void *arg
     char correctionMod[XPLR_AT_PARSER_USER_OPTION_LENGTH];
     memset(correctionMod, 0, sizeof(correctionMod));
 
-    nvsError = xplrNvsReadI32(&data->nvs, nvsKeyCormod,
-                              correctionModLocal);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_CORMOD);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3511,10 +3779,10 @@ static void atParserCallbackCorrectionModGet(uAtClientHandle_t client, void *arg
                 strcpy(correctionMod, invalidStr);
         }
 
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atCormodResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     correctionMod,
                                     XPLR_AT_SERVER_RESPONSE_END);
     }
@@ -3623,10 +3891,10 @@ static void atParserCallbackDeviceModeGet(uAtClientHandle_t client, void *arg)
             strcpy(deviceMode, invalidStr);
     }
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 atHpgmodeResponse,
                                 XPLR_AT_SERVER_RESPONSE_START);
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 deviceMode,
                                 XPLR_AT_SERVER_RESPONSE_END);
     xplrAtParserUnlock();
@@ -3671,14 +3939,9 @@ static void atParserHandlerStartOnBootSet(uAtClientHandle_t client, void *arg)
 
 static void atParserCallbackStartOnBootSet(uAtClientHandle_t client, void *arg)
 {
-    xplr_at_parser_data_t *data = &parser.data;
     xplrNvs_error_t nvsError;
-    uint8_t startOnBoot;
 
-    startOnBoot = data->startOnBoot;
-    (void)xplrNvsEraseKey(&data->nvs, nvsKeyStartOnBoot);
-    nvsError = xplrNvsWriteU8(&data->nvs, nvsKeyStartOnBoot, startOnBoot);
-
+    nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_STARTONBOOT);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
     } else {
@@ -3703,16 +3966,123 @@ static void atParserCallbackStartOnBootGet(uAtClientHandle_t client, void *arg)
     xplr_at_server_error_t atServerError;
     uint8_t startOnBoot;
 
-    nvsError = xplrNvsReadU8(&data->nvs, nvsKeyStartOnBoot, &startOnBoot);
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_STARTONBOOT);
     if (nvsError != XPLR_NVS_OK) {
         atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_GNSS);
     } else {
-        data->startOnBoot = !!startOnBoot;
-        xplrAtServerWriteStrWrapper(&parser,
+        startOnBoot = !!data->startOnBoot;
+        xplrAtParserWriteStrWrapper(&parser,
                                     atStartOnBootResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
         (void)xplrAtServerWriteUint(&parser.server,
                                     startOnBoot,
+                                    XPLR_AT_SERVER_RESPONSE_END);
+        atServerError = xplrAtServerGetError(&parser.server);
+        if (atServerError != XPLR_AT_SERVER_OK) {
+            //! BUG: results to spinlock if enabled
+            //XPLRATPARSER_CONSOLE(E, "Error writing AT response");
+            xplrAtParserFaultSet(XPLR_ATPARSER_SUBSYSTEM_ALL);
+        } else {
+            // do nothing
+        }
+    }
+    xplrAtParserUnlock();
+}
+
+static void atParserHandlerNvsConfigSet(uAtClientHandle_t client, void *arg)
+{
+    int32_t error;
+
+    /* Variable used to pass part of the AT command to the callback funtion.
+    * Since the callback function is asynchronous, a static keyword is
+    * required so that the data of the variable remain in memory after the
+    * finished execution of this handler.
+    */
+    static char nvsConfigCommand[7];
+
+    if (xplrAtParserTryLock(true)) {
+        memset(nvsConfigCommand, 0, sizeof(nvsConfigCommand));
+        error = xplrAtServerReadString(&parser.server, nvsConfigCommand, sizeof(nvsConfigCommand), false);
+        if (error < 0) {
+            atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
+            xplrAtParserUnlock();
+            //! BUG: results to spinlock if enabled
+            //XPLRATPARSER_CONSOLE(E, "Error reading command");
+        } else {
+            atParserCallbackWrapper(&parser,
+                                    atParserCallbackNvsConfigSet,
+                                    (void *) &nvsConfigCommand);
+        }
+    } else {
+        atParserReturnErrorBusy(XPLR_ATPARSER_SUBSYSTEM_ALL);
+    }
+}
+
+static void atParserCallbackNvsConfigSet(uAtClientHandle_t client, void *arg)
+{
+    xplr_at_parser_data_t *data = &parser.data;
+    xplr_at_parser_error_t parserError;
+    xplrNvs_error_t nvsError;
+    char *nvsConfigCommand = (char *) arg;
+
+    if (strncmp(nvsConfigCommand, atPartCommandManual, strlen(atPartCommandManual)) == 0) {
+        data->autoSaveNvs = false;
+        // don't call xplrAtParserNvsWriteWrapper as autoSaveNvs is false, and no write will happen
+        (void)xplrNvsEraseKey(&data->nvs, nvsKeyAutoSaveNvs);
+        nvsError = xplrNvsWriteU8(&data->nvs, nvsKeyAutoSaveNvs, (uint8_t) data->autoSaveNvs);
+    } else if (strncmp(nvsConfigCommand, atPartCommandAuto, strlen(atPartCommandAuto)) == 0) {
+        data->autoSaveNvs = true;
+        nvsError = xplrAtParserNvsWriteWrapper(XPLR_ATPARSER_NVSOP_AUTOSAVENVS);
+    } else if (strncmp(nvsConfigCommand, atPartCommandSave, strlen(atPartCommandSave)) == 0) {
+        // manually save current NVS configuration
+        parserError = xplrAtParserSaveNvsConfig();
+        if (parserError != XPLR_AT_PARSER_OK) {
+            nvsError = XPLR_NVS_ERROR;
+        } else {
+            nvsError = XPLR_NVS_OK;
+        }
+    } else {
+        nvsError = XPLR_NVS_ERROR;
+    }
+
+    if (nvsError != XPLR_NVS_OK) {
+        atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_ALL);
+    } else {
+        atParserReturnOk();
+    }
+    xplrAtParserUnlock();
+}
+
+static void atParserHandlerNvsConfigGet(uAtClientHandle_t client, void *arg)
+{
+    if (xplrAtParserTryLock(false)) {
+        atParserCallbackWrapper(&parser, atParserCallbackNvsConfigGet, NULL);
+    } else {
+        atParserReturnErrorBusy(XPLR_ATPARSER_SUBSYSTEM_ALL);
+    }
+}
+
+static void atParserCallbackNvsConfigGet(uAtClientHandle_t client, void *arg)
+{
+    xplr_at_parser_data_t *data = &parser.data;
+    xplrNvs_error_t nvsError;
+    xplr_at_server_error_t atServerError;
+    char nvsConfigCommand[7];
+
+    nvsError = xplrAtParserNvsReadWrapper(XPLR_ATPARSER_NVSOP_AUTOSAVENVS);
+    if (nvsError != XPLR_NVS_OK) {
+        atParserReturnError(XPLR_ATPARSER_SUBSYSTEM_GNSS);
+    } else {
+        if (data->autoSaveNvs == false) {
+            strcpy(nvsConfigCommand, atPartCommandManual);
+        } else {
+            strcpy(nvsConfigCommand, atPartCommandAuto);
+        }
+        xplrAtParserWriteStrWrapper(&parser,
+                                    atNvsConfigResponse,
+                                    XPLR_AT_SERVER_RESPONSE_START);
+        xplrAtParserWriteStrWrapper(&parser,
+                                    nvsConfigCommand,
                                     XPLR_AT_SERVER_RESPONSE_END);
         atServerError = xplrAtServerGetError(&parser.server);
         if (atServerError != XPLR_AT_SERVER_OK) {
@@ -3742,24 +4112,24 @@ static void atParserCallbackBoardInfoGet(uAtClientHandle_t client, void *arg)
 
     memset(buff_to_print, 0, sizeof(buff_to_print));
     memset(mac, 0, sizeof(mac));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 atBoardInfoResponse,
                                 XPLR_AT_SERVER_RESPONSE_START);
 
     xplrBoardGetInfo(XPLR_BOARD_INFO_NAME, buff_to_print);
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buff_to_print,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     memset(buff_to_print, 0x00, strlen(buff_to_print));
 
     xplrBoardGetInfo(XPLR_BOARD_INFO_VERSION, buff_to_print);
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buff_to_print,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     memset(buff_to_print, 0x00, strlen(buff_to_print));
 
     xplrBoardGetInfo(XPLR_BOARD_INFO_MCU, buff_to_print);
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buff_to_print,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     memset(buff_to_print, 0x00, strlen(buff_to_print));
@@ -3774,47 +4144,47 @@ static void atParserCallbackBoardInfoGet(uAtClientHandle_t client, void *arg)
              mac[3],
              mac[4],
              mac[5]);
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buff_to_print,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     memset(buff_to_print, 0x00, strlen(buff_to_print));
 
     xplrBoardGetInfo(XPLR_BOARD_INFO_FLASH_SIZE, buff_to_print);
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buff_to_print,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     memset(buff_to_print, 0x00, strlen(buff_to_print));
     xplrBoardGetInfo(XPLR_BOARD_INFO_RAM_SIZE, buff_to_print);
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buff_to_print,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     memset(buff_to_print, 0x00, strlen(buff_to_print));
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 data->dvcInfoGnss.ver.mod,
                                 XPLR_AT_SERVER_RESPONSE_MID);
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 data->dvcInfoGnss.ver.ver,
                                 XPLR_AT_SERVER_RESPONSE_MID);
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 data->dvcInfoLband.ver.mod,
                                 XPLR_AT_SERVER_RESPONSE_MID);
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 data->dvcInfoLband.ver.ver,
                                 XPLR_AT_SERVER_RESPONSE_MID);
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 data->cellInfo.cellModel,
                                 XPLR_AT_SERVER_RESPONSE_MID);
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 data->cellInfo.cellFw,
                                 XPLR_AT_SERVER_RESPONSE_MID);
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 data->cellInfo.cellImei,
                                 XPLR_AT_SERVER_RESPONSE_END);
     xplrAtParserUnlock();
@@ -3858,31 +4228,31 @@ static void atParserCallbackStatusGet(uAtClientHandle_t client, void *arg)
     if (strncmp(statusCommand, atPartWifi, strlen(atPartWifi)) == 0) {
         (void)xplrAtParserWifiIsReady();
         subsystemStatus = data->status.wifi;
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atStatwifiResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
     } else if (strncmp(statusCommand, atPartCell, strlen(atPartCell)) == 0) {
         (void)xplrAtParserCellIsReady();
         subsystemStatus = data->status.cell;
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atStatcellResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
     } else if (strncmp(statusCommand, atPartTs, strlen(atPartTs)) == 0) {
         (void)xplrAtParserTsIsReady();
         subsystemStatus = data->status.ts;
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atStattsResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
     } else if (strncmp(statusCommand, atPartNtrip, strlen(atPartNtrip)) == 0) {
         (void)xplrAtParserNtripIsReady();
         subsystemStatus = data->status.ntrip;
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atStatntripResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
     } else if (strncmp(statusCommand, atPartGnss, strlen(atPartGnss)) == 0) {
         (void)xplrAtParserNtripIsReady();
         subsystemStatus = data->status.gnss;
-        xplrAtServerWriteStrWrapper(&parser,
+        xplrAtParserWriteStrWrapper(&parser,
                                     atStatgnssResponse,
                                     XPLR_AT_SERVER_RESPONSE_START);
     } else {
@@ -3961,66 +4331,66 @@ static void atParserCallbackLocationGet(uAtClientHandle_t client, void *arg)
     xplrGnssLocation_t *locData = &parser.data.location;
     memset(buffer, 0, sizeof(buffer));
 
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 atLocResponse,
                                 XPLR_AT_SERVER_RESPONSE_START);
     ret = xplrTimestampToDateTime(locData->location.timeUtc,
                                   buffer,
                                   ELEMENTCNT(buffer));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     ret |= xplrGnssFixTypeToString(locData, buffer, ELEMENTCNT(buffer));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     snprintf(buffer,
              sizeof(buffer),
              "%f",
              locData->location.latitudeX1e7  * (1e-7));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     snprintf(buffer,
              sizeof(buffer),
              "%f",
              locData->location.longitudeX1e7  * (1e-7));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     snprintf(buffer,
              sizeof(buffer),
              "%f",
              locData->location.altitudeMillimetres  * (1e-3));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     snprintf(buffer,
              sizeof(buffer),
              "%f",
              locData->location.speedMillimetresPerSecond  * (1e-3));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     snprintf(buffer,
              sizeof(buffer),
              "%f",
              locData->location.radiusMillimetres  * (1e-3));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     snprintf(buffer,
              sizeof(buffer),
              "%f",
              locData->accuracy.horizontal  * (1e-4));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     snprintf(buffer,
              sizeof(buffer),
              "%f",
              locData->accuracy.vertical  * (1e-4));
-    xplrAtServerWriteStrWrapper(&parser,
+    xplrAtParserWriteStrWrapper(&parser,
                                 buffer,
                                 XPLR_AT_SERVER_RESPONSE_MID);
     (void)xplrAtServerWriteInt(&parser.server,

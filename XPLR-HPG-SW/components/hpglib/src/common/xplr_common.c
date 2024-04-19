@@ -41,6 +41,7 @@ static esp_err_t parseAppConfig(char *payload, xplr_cfg_app_t *appCfg);
 static esp_err_t parseCellConfig(char *payload, xplr_cfg_cell_t *cellCfg);
 static esp_err_t parseWifiConfig(char *payload, xplr_cfg_wifi_t *wifiCfg);
 static esp_err_t parseTsConfig(char *payload, xplr_cfg_thingstream_t *tsCfg);
+static esp_err_t parseNtripConfig(char *payload, xplr_cfg_ntrip_t *ntripCfg);
 static esp_err_t parseLogConfig(char *payload, xplr_cfg_log_t *logCfg);
 static esp_err_t parseDrConfig(char *payload, xplr_cfg_dr_t *drCfg);
 static esp_err_t parseGnssConfig(char *payload, xplr_cfg_gnss_t *gnssCfg);
@@ -295,7 +296,7 @@ void xplrMemUsagePrint(uint8_t periodSecs)
 esp_err_t xplrParseConfigSettings(char *payload, xplr_cfg_t *settings)
 {
     esp_err_t ret;
-    esp_err_t err[7];
+    esp_err_t err[8];
 
     if (payload == NULL || settings == NULL) {
         printf("Invalid Parameters. Cannot Parse Configuration\n");
@@ -305,10 +306,11 @@ esp_err_t xplrParseConfigSettings(char *payload, xplr_cfg_t *settings)
         err[1] = parseCellConfig(payload, &settings->cellCfg);
         err[2] = parseWifiConfig(payload, &settings->wifiCfg);
         err[3] = parseTsConfig(payload, &settings->tsCfg);
-        err[4] = parseLogConfig(payload, &settings->logCfg);
-        err[5] = parseDrConfig(payload, &settings->drCfg);
-        err[6] = parseGnssConfig(payload, &settings->gnssCfg);
-        for (int i = 0; i < 7; i++) {
+        err[4] = parseNtripConfig(payload, &settings->ntripCfg);
+        err[5] = parseLogConfig(payload, &settings->logCfg);
+        err[6] = parseDrConfig(payload, &settings->drCfg);
+        err[7] = parseGnssConfig(payload, &settings->gnssCfg);
+        for (int i = 0; i < 8; i++) {
             if (err[i] != ESP_OK) {
                 ret = ESP_FAIL;
                 break;
@@ -603,6 +605,7 @@ static esp_err_t parseTsConfig(char *payload, xplr_cfg_thingstream_t *tsCfg)
             tsSettings = cJSON_GetObjectItem(root, "ThingstreamSettings");
             settingsFound = cJSON_HasObjectItem(tsSettings, "Region");
             settingsFound &= cJSON_HasObjectItem(tsSettings, "ConfigFilename");
+            settingsFound &= cJSON_HasObjectItem(tsSettings, "ZTPToken");
             if (settingsFound) {
                 /* Parse individual settings */
                 abort = false;
@@ -620,6 +623,15 @@ static esp_err_t parseTsConfig(char *payload, xplr_cfg_thingstream_t *tsCfg)
                     element = cJSON_GetObjectItem(tsSettings, "ConfigFilename");
                     if (cJSON_IsString(element)) {
                         strncpy(tsCfg->uCenterConfigFilename, element->valuestring, 63);
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort) {
+                    element = cJSON_GetObjectItem(tsSettings, "ZTPToken");
+                    if (cJSON_IsString(element)) {
+                        strncpy(tsCfg->ztpToken, element->valuestring, 63);
                     } else {
                         abort = true;
                     }
@@ -645,6 +657,125 @@ static esp_err_t parseTsConfig(char *payload, xplr_cfg_thingstream_t *tsCfg)
 
     return ret;
 }
+
+static esp_err_t parseNtripConfig(char *payload, xplr_cfg_ntrip_t *ntripCfg)
+{
+    esp_err_t ret;
+    cJSON *root, *element, *ntripSettings;
+    bool settingsFound, abort;
+
+    if (payload == NULL || ntripCfg == NULL) {
+        printf("Invalid Parameters. Cannot parse NTRIP Client configuration.\n");
+        ret = ESP_FAIL;
+    } else {
+        root = cJSON_Parse(payload);
+        if (cJSON_HasObjectItem(root, "NTRIPSettings")) {
+            ntripSettings = cJSON_GetObjectItem(root, "NTRIPSettings");
+            settingsFound = cJSON_HasObjectItem(ntripSettings, "Host");
+            settingsFound &= cJSON_HasObjectItem(ntripSettings, "Port");
+            settingsFound &= cJSON_HasObjectItem(ntripSettings, "MountPoint");
+            settingsFound &= cJSON_HasObjectItem(ntripSettings, "UserAgent");
+            settingsFound &= cJSON_HasObjectItem(ntripSettings, "SendGGA");
+            settingsFound &= cJSON_HasObjectItem(ntripSettings, "UseAuthentication");
+            settingsFound &= cJSON_HasObjectItem(ntripSettings, "Username");
+            settingsFound &= cJSON_HasObjectItem(ntripSettings, "Password");
+            if (settingsFound) {
+                /* Parse individual settings */
+                abort = false;
+
+                if (!abort) {
+                    element = cJSON_GetObjectItem(ntripSettings, "Host");
+                    if (cJSON_IsString(element)) {
+                        strncpy(ntripCfg->host, element->valuestring, 63);
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort) {
+                    element = cJSON_GetObjectItem(ntripSettings, "Port");
+                    if (cJSON_IsNumber(element)) {
+                        ntripCfg->port = (uint16_t)element->valueint;
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort) {
+                    element = cJSON_GetObjectItem(ntripSettings, "MountPoint");
+                    if (cJSON_IsString(element)) {
+                        strncpy(ntripCfg->mountpoint, element->valuestring, 63);
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort) {
+                    element = cJSON_GetObjectItem(ntripSettings, "UserAgent");
+                    if (cJSON_IsString(element)) {
+                        strncpy(ntripCfg->userAgent, element->valuestring, 63);
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort) {
+                    element = cJSON_GetObjectItem(ntripSettings, "SendGGA");
+                    if (cJSON_IsBool(element)) {
+                        ntripCfg->sendGGA = (bool)element->valueint;
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort) {
+                    element = cJSON_GetObjectItem(ntripSettings, "UseAuthentication");
+                    if (cJSON_IsBool(element)) {
+                        ntripCfg->useAuth = (bool)element->valueint;
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort && ntripCfg->useAuth) {
+                    element = cJSON_GetObjectItem(ntripSettings, "Username");
+                    if (cJSON_IsString(element)) {
+                        strncpy(ntripCfg->username, element->valuestring, 63);
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (!abort && ntripCfg->useAuth) {
+                    element = cJSON_GetObjectItem(ntripSettings, "Password");
+                    if (cJSON_IsString(element)) {
+                        strncpy(ntripCfg->password, element->valuestring, 63);
+                    } else {
+                        abort = true;
+                    }
+                }
+
+                if (abort) {
+                    printf("NTRIP Client configuration contains invalid value types\n");
+                    ret = ESP_FAIL;
+                } else {
+                    ret = ESP_OK;
+                }
+            } else {
+                printf("Incomplete NTRIP client settings in configuration file\n");
+                ret = ESP_FAIL;
+            }
+        } else {
+            printf("Cannot find NTRIPSettings\n");
+            ret = ESP_FAIL;
+        }
+        /* Free the memory */
+        cJSON_Delete(root);
+    }
+
+    return ret;
+}
+
 static esp_err_t parseLogConfig(char *payload, xplr_cfg_log_t *logCfg)
 {
     esp_err_t ret;

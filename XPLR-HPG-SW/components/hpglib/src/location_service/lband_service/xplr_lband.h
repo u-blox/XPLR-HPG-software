@@ -94,6 +94,15 @@ esp_err_t xplrLbandStartDevice(uint8_t dvcProfile,
                                xplrLbandDeviceCfg_t *dvcCfg);
 
 /**
+ * @brief Power Off an LBAND device.
+ *
+ * @param dvcProfile  an integer number denoting the device profile/index.
+ * @return            ESP_OK on success, ESP_INVALID_ARG on invalid parameters,
+ *                    ESP_FAIL on failure
+ */
+esp_err_t xplrLbandPowerOffDevice(uint8_t dvcProfile);
+
+/**
  * @brief Stops an LBAND device.
  *
  * @param dvcProfile  an integer number denoting the device profile/index.

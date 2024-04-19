@@ -210,13 +210,30 @@ esp_err_t xplrHlprLocSrvcDeviceOpenNonBlocking(xplrLocationDevConf_t *dvcConf,
             }
         } else {
             if (intRet == -8) {
-                //TODO: Create an issue for the deprecated message
+                //Known issue with clock
             } else {
                 XPLRHELPERS_CONSOLE(E, "uDeviceOpen failed with code <%d>", intRet);
             }
 
             ret = ESP_FAIL;
         }
+    }
+
+    return ret;
+}
+
+esp_err_t xplrHlprLocSrvcDevicePowerOff(uDeviceHandle_t *dvcHandler)
+{
+    esp_err_t ret;
+    int32_t intRet;
+
+    intRet = uDeviceClose(*dvcHandler, true);
+    if (intRet == 0) {
+        XPLRHELPERS_CONSOLE(D, "ubxlib device powered off!");
+        ret = ESP_OK;
+    } else {
+        XPLRHELPERS_CONSOLE(E, "ubxlib device close failed with error code [%d]", intRet);
+        ret = ESP_FAIL;
     }
 
     return ret;
@@ -552,7 +569,6 @@ esp_err_t xplrHlprLocSrvcStopLogModule(void)
 /* ----------------------------------------------------------------
  * STATIC FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */
-
 /* ----------------------------------------------------------------
  * STATIC CALLBACK FUNCTION DEFINITIONS
  * -------------------------------------------------------------- */

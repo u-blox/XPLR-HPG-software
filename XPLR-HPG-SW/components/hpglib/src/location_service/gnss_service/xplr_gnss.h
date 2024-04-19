@@ -93,6 +93,17 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile);
 esp_err_t xplrGnssStopDevice(uint8_t dvcProfile);
 
 /**
+ * @brief Stop and power off GNSS device.
+ * Device will terminate in an unconfigured state.
+ * You can start the device again with xplrGnssStartDevice
+ *
+ * @param dvcProfile  an integer number denoting the device profile/index.
+ * @return            ESP_OK on success, ESP_INVALID_ARG on invalid parameters,
+ *                    ESP_FAIL on failure
+ */
+esp_err_t xplrGnssPowerOffDevice(uint8_t dvcProfile);
+
+/**
  * @brief Stops a GNSS device and saves configuration on shutdown.
  * The save-on-shutdown feature (SOS) enables the u-blox receiver to store the contents of the
  * battery-backed RAM to an external flash memory and restore it upon startup.

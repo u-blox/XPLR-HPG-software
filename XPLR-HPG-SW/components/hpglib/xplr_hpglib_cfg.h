@@ -135,10 +135,8 @@ extern "C" {
 #if (XPLRCELL_MQTT_NUMOF_CLIENTS > 1)
 #error "Only one (1) MQTT client is currently supported from ubxlib."
 #endif
-#define XPLRCELL_NTRIP_RECEIVE_DATA_SIZE               (2U * 1024U)
-#define XPLRCELL_NTRIP_GGA_INTERVAL_S                  (20)
-#define XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE               (2U * 1024U)
-#define XPLRWIFI_NTRIP_GGA_INTERVAL_S                  (20)
+#define XPLRNTRIP_RECEIVE_DATA_SIZE                    (2U * 1024U)
+#define XPLRNTRIP_GGA_INTERVAL_S                       (20)
 #define XPLRBLUETOOTH_RX_BUFFER_SIZE                   (4U * 1024U)
 #define XPLRBLUETOOTH_NUMOF_DEVICES                    (3)
 #define XPLRBLUETOOTH_MAX_MSG_SIZE                     (256U)

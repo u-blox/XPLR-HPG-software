@@ -74,6 +74,7 @@
  */
 #define KIB                         (1024U)
 #define APP_ZTP_PAYLOAD_BUF_SIZE    ((10U) * (KIB))
+#define APP_JSON_PAYLOAD_BUF_SIZE   ((6U) * (KIB))
 #define APP_KEYCERT_PARSE_BUF_SIZE  ((2U) * (KIB))
 
 /*
@@ -132,10 +133,10 @@ static xplr_thingstream_pp_region_t ppRegion = XPLR_THINGSTREAM_PP_REGION_EU;
  * The data are taken from KConfig or you can overwrite the
  * values as needed here.
  */
-xplr_thingstream_t thingstreamSettings;
+static xplr_thingstream_t thingstreamSettings;
 
 static const char *urlAwsRootCa = CONFIG_XPLR_AWS_ROOTCA_URL;
-static const char *ztpToken = CONFIG_XPLR_TS_PP_ZTP_TOKEN;
+static char *ztpToken = CONFIG_XPLR_TS_PP_ZTP_TOKEN;
 
 /**
  * ZTP data we got from post
@@ -180,6 +181,14 @@ static appLog_t appLogCfg = {
 TaskHandle_t cardDetectTaskHandler;
 #endif
 
+static char configData[APP_JSON_PAYLOAD_BUF_SIZE];
+/* The name of the configuration file */
+static char configFilename[] = "xplr_config.json";
+/* Application configuration options */
+xplr_cfg_t appOptions;
+/* Flag indicating the board is setup by the SD config file */
+static bool isConfiguredFromFile = false;
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -187,13 +196,16 @@ TaskHandle_t cardDetectTaskHandler;
 static esp_err_t appInitLogging(void);
 static void appDeInitLogging(void);
 #endif
+static esp_err_t appFetchConfigFromFile(void);
+static void appApplyConfigFromFile(void);
+static esp_err_t appInitSd(void);
 static esp_err_t appInitBoard(void);
 static void appInitWiFi(void);
 static esp_err_t appGetRootCa(void);
 static void appApplyThingstreamCreds(void);
 static void appHaltExecution(void);
-static void appDeviceOffTask(void *arg);
 #if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appInitHotPlugTask(void);
 static void appCardDetectTask(void *arg);
 #endif
 /* ---------------------------------------------------------------
@@ -207,6 +219,15 @@ void app_main(void)
     xplrWifiStarterError_t wifistarterErr;
     esp_err_t ret;
     xplr_thingstream_error_t tsErr;
+
+    appInitBoard();
+    ret = appFetchConfigFromFile();
+    if (ret == ESP_OK) {
+        appApplyConfigFromFile();
+    } else {
+        APP_CONSOLE(D, "No configuration file found, running on Kconfig configuration");
+    }
+
 #if (APP_SD_LOGGING_ENABLED == 1)
     ret = appInitLogging();
     if (ret != ESP_OK) {
@@ -215,7 +236,9 @@ void app_main(void)
         APP_CONSOLE(I, "Logging initialized!");
     }
 #endif
-    appInitBoard();
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+    appInitHotPlugTask();
+#endif
     appInitWiFi();
 
     while (1) {
@@ -293,65 +316,84 @@ void app_main(void)
 static esp_err_t appInitLogging(void)
 {
     esp_err_t ret;
-    xplrSd_error_t sdErr;
+    xplr_cfg_logInstance_t *instance = NULL;
 
-    /* Configure the SD card */
-    sdErr = xplrSdConfigDefaults();
-    if (sdErr != XPLR_SD_OK) {
-        APP_CONSOLE(E, "Failed to configure the SD card");
-        ret = ESP_FAIL;
+    /* Initialize the SD card */
+    if (!xplrSdIsCardInit()) {
+        ret = appInitSd();
     } else {
-        /* Create the card detect task */
-        sdErr = xplrSdStartCardDetectTask();
-        /* A time window so that the card gets detected*/
-        vTaskDelay(pdMS_TO_TICKS(50));
-        if (sdErr != XPLR_SD_OK) {
-            APP_CONSOLE(E, "Failed to start the card detect task");
-            ret = ESP_FAIL;
-        } else {
-            /* Initialize the SD card */
-            sdErr = xplrSdInit();
-            if (sdErr != XPLR_SD_OK) {
-                APP_CONSOLE(E, "Failed to initialize the SD card");
-                ret = ESP_FAIL;
-            } else {
-                APP_CONSOLE(D, "SD card initialized");
-                ret = ESP_OK;
-            }
-        }
+        ret = ESP_OK;
     }
 
     if (ret == ESP_OK) {
         /* Start logging for each module (if selected in configuration) */
         if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
-            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
-                                                "main_app.log",
-                                                XPLRLOG_FILE_SIZE_INTERVAL,
-                                                XPLRLOG_NEW_FILE_ON_BOOT);
-            if (appLogCfg.appLogIndex > 0) {
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.appLogIndex];
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    instance->filename,
+                                                    instance->sizeInterval,
+                                                    instance->erasePrev);
+                instance = NULL;
+            } else {
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    "main_app.log",
+                                                    XPLRLOG_FILE_SIZE_INTERVAL,
+                                                    XPLRLOG_NEW_FILE_ON_BOOT);
+            }
+
+            if (appLogCfg.appLogIndex >= 0) {
                 APP_CONSOLE(D, "Application logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.nvsLog == 1) {
-            appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.nvsLogIndex];
+                appLogCfg.nvsLogIndex = xplrNvsInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
+            }
+
             if (appLogCfg.nvsLogIndex > 0) {
                 APP_CONSOLE(D, "NVS logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.ztpLog == 1) {
-            appLogCfg.ztpLogIndex = xplrZtpInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.ztpLogIndex];
+                appLogCfg.nvsLogIndex = xplrZtpInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.ztpLogIndex = xplrZtpInitLogModule(NULL);
+            }
+
             if (appLogCfg.ztpLogIndex > 0) {
                 APP_CONSOLE(D, "ZTP logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.thingstreamLog == 1) {
-            appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.thingstreamLogIndex];
+                appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(NULL);
+            }
+
             if (appLogCfg.thingstreamLogIndex > 0) {
                 APP_CONSOLE(D, "Thingstream logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.wifistarterLog == 1) {
-            appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.wifiStarterLogIndex];
+                appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(NULL);
+            }
+
             if (appLogCfg.wifiStarterLogIndex > 0) {
                 APP_CONSOLE(D, "WiFi Starter logging instance initialized");
             }
@@ -402,12 +444,108 @@ static void appDeInitLogging(void)
     }
 }
 #endif
+
+/**
+ * Fetch configuration options from SD card (if existent),
+ * otherwise, keep Kconfig values
+*/
+static esp_err_t appFetchConfigFromFile(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+    xplr_board_error_t boardErr = xplrBoardDetectSd();
+
+    if (boardErr == XPLR_BOARD_ERROR_OK) {
+        ret = appInitSd();
+        if (ret == ESP_OK) {
+            memset(configData, 0, APP_JSON_PAYLOAD_BUF_SIZE);
+            sdErr = xplrSdReadFileString(configFilename, configData, APP_JSON_PAYLOAD_BUF_SIZE);
+            if (sdErr == XPLR_SD_OK) {
+                ret = xplrParseConfigSettings(configData, &appOptions);
+                if (ret == ESP_OK) {
+                    APP_CONSOLE(I, "Successfully parsed application and module configuration");
+                } else {
+                    APP_CONSOLE(E, "Failed to parse application and module configuration from <%s>", configFilename);
+                }
+            } else {
+                APP_CONSOLE(E, "Unable to get configuration from the SD card");
+                ret = ESP_FAIL;
+            }
+        } else {
+            // Do nothing
+        }
+    } else {
+        APP_CONSOLE(D, "SD is not mounted. Keeping Kconfig configuration");
+        ret = ESP_FAIL;
+    }
+
+    return ret;
+}
+
+/**
+ * Apply configuration from file
+*/
+static void appApplyConfigFromFile(void)
+{
+    xplr_cfg_logInstance_t *instance = NULL;
+    /* Applying the options that are relevant to the example */
+    /* Wi-Fi Settings */
+    wifiOptions.ssid = appOptions.wifiCfg.ssid;
+    wifiOptions.password = appOptions.wifiCfg.pwd;
+    /* Thingstream Settings */
+    ztpToken = appOptions.tsCfg.ztpToken;
+    /* Logging Settings */
+    appLogCfg.logOptions.allLogOpts = 0;
+    for (uint8_t i = 0; i < appOptions.logCfg.numOfInstances; i++) {
+        instance = &appOptions.logCfg.instance[i];
+        if (strstr(instance->description, "Application") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.appLog = 1;
+                appLogCfg.appLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "NVS") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.nvsLog = 1;
+                appLogCfg.nvsLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "ZTP") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.ztpLog = 1;
+                appLogCfg.ztpLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "Thingstream") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.thingstreamLog = 1;
+                appLogCfg.thingstreamLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "Wifi Starter") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.wifistarterLog = 1;
+                appLogCfg.wifiStarterLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else {
+            // Do nothing module not used in example
+        }
+    }
+    /* Options from SD config file applied */
+    isConfiguredFromFile = true;
+}
+
 /*
  * Initialize XPLR-HPG kit using its board file
  */
 static esp_err_t appInitBoard(void)
 {
-    gpio_config_t io_conf = {0};
     esp_err_t ret;
 
     APP_CONSOLE(I, "Initializing board.");
@@ -416,38 +554,45 @@ static esp_err_t appInitBoard(void)
         APP_CONSOLE(E, "Board initialization failed!");
         appHaltExecution();
     } else {
-        /* config boot0 pin as input */
-        io_conf.pin_bit_mask = 1ULL << APP_DEVICE_OFF_MODE_BTN;
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pull_up_en = 1;
-        ret = gpio_config(&io_conf);
+        APP_CONSOLE(D, "Board Initialized");
     }
 
-    if (ret != ESP_OK) {
-        APP_CONSOLE(E, "Failed to set boot0 pin in input mode");
+    return ret;
+}
+
+/**
+ * Initialize SD card
+*/
+static esp_err_t appInitSd(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = ESP_FAIL;
     } else {
-        if (xTaskCreate(appDeviceOffTask, "deviceOffTask", 2 * 2048, NULL, 10, NULL) == pdPASS) {
-            APP_CONSOLE(D, "Boot0 pin configured as button OK");
-            APP_CONSOLE(D, "Board Initialized");
-        } else {
-            APP_CONSOLE(D, "Failed to start deviceOffTask task");
-            APP_CONSOLE(E, "Board initialization failed!");
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        /* A time window so that the card gets detected*/
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
             ret = ESP_FAIL;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = ESP_FAIL;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = ESP_OK;
+            }
         }
     }
 
-#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
-    if (xTaskCreate(appCardDetectTask,
-                    "hotPlugTask",
-                    4 * 1024,
-                    NULL,
-                    20,
-                    &cardDetectTaskHandler) == pdPASS) {
-        APP_CONSOLE(D, "Hot plug for SD card OK");
-    } else {
-        APP_CONSOLE(W, "Hot plug for SD card failed");
-    }
-#endif
     return ret;
 }
 
@@ -532,7 +677,7 @@ static void appApplyThingstreamCreds(void)
 {
     xplr_thingstream_error_t tsErr;
 
-    tsErr = xplrThingstreamPpConfig(ztpData.payload, ppRegion, &thingstreamSettings);
+    tsErr = xplrThingstreamPpConfig(ztpData.payload, ppRegion, false, &thingstreamSettings);
     if (tsErr != XPLR_THINGSTREAM_OK) {
         APP_CONSOLE(E, "Error in ZTP payload parsing");
         XPLR_CI_CONSOLE(205, "ERROR");
@@ -610,40 +755,25 @@ static void appHaltExecution(void)
     }
 }
 
-static void appDeviceOffTask(void *arg)
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appInitHotPlugTask(void)
 {
-    uint32_t btnStatus;
-    uint32_t currTime, prevTime;
-    uint32_t btnPressDuration = 0;
-
-    for (;;) {
-        btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
-        currTime = MICROTOSEC(esp_timer_get_time());
-
-        if (btnStatus != 1) { //check if pressed
-            prevTime = MICROTOSEC(esp_timer_get_time());
-            while (btnStatus != 1) { //wait for btn release.
-                btnStatus = gpio_get_level(APP_DEVICE_OFF_MODE_BTN);
-                vTaskDelay(pdMS_TO_TICKS(10));
-                currTime = MICROTOSEC(esp_timer_get_time());
-            }
-
-            btnPressDuration = currTime - prevTime;
-
-            if (btnPressDuration >= APP_DEVICE_OFF_MODE_TRIGGER) {
-                APP_CONSOLE(W, "Device OFF triggered");
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                xplrBoardSetPower(XPLR_PERIPHERAL_LTE_ID, false);
-                btnPressDuration = 0;
-                appHaltExecution();
-            }
+    if (!isConfiguredFromFile || appOptions.logCfg.hotPlugEnable) {
+        if (xTaskCreate(appCardDetectTask,
+                        "hotPlugTask",
+                        4 * 1024,
+                        NULL,
+                        20,
+                        &cardDetectTaskHandler) == pdPASS) {
+            APP_CONSOLE(D, "Hot plug for SD card OK");
+        } else {
+            APP_CONSOLE(W, "Hot plug for SD card failed");
         }
-
-        vTaskDelay(pdMS_TO_TICKS(100)); //wait for btn release.
+    } else {
+        // Do nothing Hot plug task disabled
     }
 }
 
-#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
 static void appCardDetectTask(void *arg)
 {
     bool prvState = xplrSdIsCardOn();

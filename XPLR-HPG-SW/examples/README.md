@@ -26,7 +26,8 @@ Name | Description | Features
 **[Correction data via Cellular MQTT with SW Maps via Bluetooth](./cellular/05_hpg_cell_mqtt_correction_certs_sw_maps/)** | Example of how to access Thingstream's Location Service data, providing required certificates manually, over cellular and forward them to a GNSS module while integrating bluetooth connectivity with SW Maps application. | [board manager](./../components/boards) <br> [hpglib/common](./../components/hpglib/src/common) <br> [hpglib/communication service](./../components/hpglib/src/com_service) <br> [hpglib/mqttClient_service](./../components/hpglib/src/mqttClient_service/) <br> [hpglib/bluetooth_service](./../components/hpglib/src/bluetooth_service/) <br> [hpglib/thingstream_service](./../components/hpglib/src/thingstream_service/) <br> [hpglib/location_services/xplr_gnss_service](./../components/hpglib/src/location_service/gnss_service/) <br> [hpglib/location_services/location_service_helpers](./../components/hpglib/src/location_service/location_service_helpers/) <br> [hpglib/log_service](./../components/hpglib/src/log_service/) <br> [hpglib/sd_service](./../components/hpglib/src/sd_service/)
 **[GNSS/LBAND Module Configuration](./positioning/01_hpg_gnss_config/)** | Example of how to configure your GNSS or LBAND module. | [board manager](./../components/boards) <br> [hpglib/common](./../components/hpglib/src/common) <br> [hpglib/location_services/xplr_gnss_service](./../components/hpglib/src/location_service/gnss_service/) <br> [hpglib/location_services/xplr_lband_service](./../components/hpglib/src/location_service/lband_service/) <br> [hpglib/location_services/location_service_helpers](./../components/hpglib/src/location_service/location_service_helpers/) <br> [hpglib/log_service](./../components/hpglib/src/log_service/) <br> [hpglib/sd_service](./../components/hpglib/src/sd_service/)
 **[GNSS Save on Shutdown](./positioning/02_hpg_gnss_save_on_shutdown/)** | Example of how to use the functionality of ZED module to store its current configuration to the backup flash and fetch it in the next boot. |  [board manager](./../components/boards/) <br> [hpglib/common](./../components/hpglib/src/common) <br> [xplr_wifi_starter](./../components/xplr_wifi_starter) <br> [xplr_mqtt](./../components/xplr_mqtt) <br> [hpglib/location_services/xplr_gnss_service](./../components/hpglib/src/location_service/gnss_service/) <br> [hpglib/location_services/location_service_helpers](./../components/hpglib/src/location_service/location_service_helpers/) <br> [hpglib/log_service](./../components/hpglib/src/log_service/) <br> [hpglib/sd_service](./../components/hpglib/src/sd_service/)
-<br>
+**[Thingstream Correction Data over cellular interface using Configuration file in SD card](./cellular/06_hpg_cell_mqtt_correction_certs_sd_autonomous/)** | Demonstration of Thingstream's PointPerfect data correction via MQTT using cellular. Application settings provided by configuration files in SD card. |  [board manager](./../components/boards/) <br> [hpglib/common](./../components/hpglib/src/common) <br> [hpglib/communication service](./../components/hpglib/src/com_service) <br> [hpglib/mqttClient_service](./../components/hpglib/src/mqttClient_service/) <br> [hpglib/thingstream_service](./../components/hpglib/src/thingstream_service/) <br> [hpglib/location_services/xplr_gnss_service](./../components/hpglib/src/location_service/gnss_service/) <br> [hpglib/location_services/location_service_helpers](./../components/hpglib/src/location_service/location_service_helpers/) <br> [hpglib/log_service](./../components/hpglib/src/log_service/) <br> [hpglib/sd_service](./../components/hpglib/src/sd_service/)
+<br> **[HPG as an AT peripheral](./shortrange/10_hpg_at_app/)** | Example of how to use your HPG kit as a peripheral using AT commands or the included python API application. | [board manager](./../components/boards/) <br> [hpglib/at_parser_service](./../components/hpglib/src/at_parser_service/) <br> [hpglib/at_server_service](./../components/hpglib/src/at_server_service/) <br> [hpglib/com_service](./../components/hpglib/src/com_service/) <br> [hpglib/common](./../components/hpglib/src/common/) <br> [hpglib/location_service](./../components/hpglib/src/location_service/) <br> [hpglib/log_service](./../components/hpglib/src/log_service/) <br> [hpglib/mqttCell_service](./../components/hpglib/src/mqttCell_service/) <br> [hpglib/ntripCellClient_service](./../components/hpglib/src/ntripCellClient_service/) <br> [hpglib/log_service](./../components/hpglib/src/log_service/) <br> [hpglib/ntripWiFiClient_service](./../components/hpglib/src/ntripWiFiClient_service/) <br> [hpglib/nvs_service](./../components/hpglib/src/nvs_service/) <br> [hpglib/thingstream_service](./../components/hpglib/src/thingstream_service/) <br> [hpglib/sd_service](./../components/hpglib/src/sd_service/) <br> [xplr_mqtt](./../components/xplr_mqtt/) <br> [xplr_wifi_starter](./../components/xplr_wifi_starter/) <br>
 
 ## Building Instructions
 Working with any of the examples provided requires editing a single line in [CMakeLists.txt](./../CMakeLists.txt) to select a project to build.
@@ -45,3 +46,31 @@ In general, building any of the provided projects, involves the following steps:
 <br>
 
 **NOTE:** Remember, **only one** ```project(<example_name>)``` and its corresponding include path ```"$ENV{XPLR_HPG_SW_PATH}/examples/<module>/<example>"``` can be active at a time!
+
+## Configuring application via the SD card
+
+Several examples offer the option to be configured via a json file in the SD card.<br><br>
+When the board boots and the main application starts a check is performed for the presence of the **xplr_config.json** file in the SD card.<br> If the check fails for any reason (SD not present, file not found, etc) the board keeps the values of the Kconfig configuration.<br> Otherwise, the configuration options are parsed and applied, overriding the Kconfig values.<br>
+
+**NOTES:** 
+1. If the **xplr_config.json** exists in the SD card and a fail occurs during the parsing of the configuration options then the application reaches an error state (does not fall back to Kconfig values). So it advised to have the **xplr_config.json** file in the SD card only if the configuration via the SD is the preferred method of configuration (and not the Kconfig via the menuconfig).
+2. The configuration options are applied in the beginning of the application and there is no update during the runtime (if for example an SD is inserted containing a **xplr_config.json** file with different configuration). So if an update to configuration options is needed a system reboot is necessary.
+3. No configuration options are saved between different boots of the board. If the board is set up via the SD, the SD is then removed and a reboot event occurs, all configuration options are lost and the board must be reconfigured (either via Kconfig or via the SD card).
+
+The examples/applications that support this functionality are:
+- Short Range : 
+    - [hpg_wifi_http_ztp](./shortrange/02_hpg_wifi_http_ztp/)
+    - [hpg_wifi_mqtt_correction_certs](./shortrange/03_hpg_wifi_mqtt_correction_certs/)
+    - [hpg_wifi_mqtt_correction_ztp](./shortrange/04_hpg_wifi_mqtt_correction_ztp/)
+    - [hpg_wifi_ntrip_correction](./shortrange/06_hpg_wifi_ntrip_correction/)
+    - [hpg_wifi_correction_sd_config_file](./shortrange/07_hpg_wifi_mqtt_correction_sd_config_file/)
+- Positioning :
+    - [hpg_gnss_save_on_shutdown](./positioning/02_hpg_gnss_save_on_shutdown/)
+- Cellular :
+    - [hpg_cell_register](./cellular/01_hpg_cell_register/)
+    - [hpg_cell_mqtt_correction_certs](./cellular/02_hpg_cell_mqtt_correction_certs/)
+    - [hpg_cell_mqtt_correction_ztp](./cellular/03_hpg_cell_mqtt_correction_ztp/)
+    - [hpg_cell_ntrip_correction](./cellular/04_hpg_cell_ntrip_correction/)
+    - [hpg_cell_mqtt_correction_certs_sd_autonomous](./cellular/06_hpg_cell_mqtt_correction_certs_sd_autonomous/)
+<br>
+<br>

@@ -78,6 +78,7 @@ typedef enum {
     XPLR_GNSS_STATE_DEVICE_RESTART,         /**< restarting device. */
     XPLR_GNSS_STATE_WAIT,                   /**< wait non blocking state. */
     XPLR_GNSS_STATE_DEVICE_STOP,            /**< stops device - unconfigured state. */
+    XPLR_GNSS_STATE_DEVICE_POWEROFF,        /**< stop and power off device - unconfigured, powered off state.*/
     XPLR_GNSS_STATE_NVS_UPDATE,             /**< update/save data to NVS. */
     XPLR_GNSS_STATE_SAVE_ON_SHUTDOWN,       /**< perform save on shutdown routine. */
     XPLR_GNSS_STATE_CLEAR_BACKUP_MEMORY,    /**< clears previously save backup configuration from memory. */

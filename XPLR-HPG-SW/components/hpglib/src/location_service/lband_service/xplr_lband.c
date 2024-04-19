@@ -114,6 +114,7 @@ static int8_t logIndex = -1;
  * -------------------------------------------------------------- */
 
 static esp_err_t lbandDeviceOpen(uint8_t dvcProfile);
+static esp_err_t lbandDevicePowerOff(uint8_t dvcProfile);
 static esp_err_t lbandDeviceClose(uint8_t dvcProfile);
 static int32_t   lbandAsyncStopper(uint8_t dvcProfile, int32_t handler);
 static esp_err_t lbandSetFreqFromPrm(uint8_t dvcProfile, uint32_t freq);
@@ -202,6 +203,30 @@ esp_err_t xplrLbandStartDevice(uint8_t dvcProfile,
         } else {
             XPLRLBAND_CONSOLE(E, "Failed to open LBAND module!");
         }
+    }
+
+    return ret;
+}
+
+esp_err_t xplrLbandPowerOffDevice(uint8_t dvcProfile)
+{
+    esp_err_t ret;
+    bool boolRet = lbandIsDvcProfileValid(dvcProfile);
+
+    if (boolRet) {
+        ret = xplrLbandSendCorrectionDataAsyncStop(dvcProfile);
+        if (ret == ESP_OK) {
+            ret = lbandDevicePowerOff(dvcProfile);
+            if (ret == ESP_OK) {
+                XPLRLBAND_CONSOLE(D, "Successfully powered off LBAND module!");
+            } else {
+                XPLRLBAND_CONSOLE(E, "Failed to power off LBAND module!");
+            }
+        } else {
+            XPLRLBAND_CONSOLE(E, "Failed to stop async data sender!");
+        }
+    } else {
+        ret = ESP_ERR_INVALID_ARG;
     }
 
     return ret;
@@ -680,6 +705,13 @@ static esp_err_t lbandDeviceOpen(uint8_t dvcProfile)
     esp_err_t ret;
     ret = xplrHlprLocSrvcDeviceOpen(&lbandDvcs[dvcProfile].dvcCfg->hwConf,
                                     &lbandDvcs[dvcProfile].options.dvcHandler);
+    return ret;
+}
+
+static esp_err_t lbandDevicePowerOff(uint8_t dvcProfile)
+{
+    esp_err_t ret;
+    ret = xplrHlprLocSrvcDevicePowerOff(&lbandDvcs[dvcProfile].options.dvcHandler);
     return ret;
 }
 

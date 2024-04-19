@@ -84,7 +84,8 @@
  * Simple macros used to set buffer size in bytes
  */
 #define KIB (1024U)
-#define APP_MQTT_PAYLOAD_BUF_SIZE ((10U) * (KIB))
+#define APP_MQTT_BUFFER_SIZE ((10U) * (KIB))
+#define APP_JSON_PAYLOAD_BUF_SIZE   ((6U) * (KIB))
 
 /**
  * Interval to print location (in seconds)
@@ -119,23 +120,13 @@
  */
 #define APP_DEVICE_OFF_MODE_TRIGGER    (2U)
 
-/**
- * Valid values
- * EU
- * US
- * KR (no LBAND)
- * AU (no LBAND)
- * JP (no LBAND)
- */
-#define APP_ORIGIN_COUNTRY "EU"
-
-/**
- * Valid values
- * IP
- * IPLBAND
- * LBAND
- */
-#define APP_CORRECTION_TYPE "IP"
+#define APP_THINGSTREAM_REGION   XPLR_THINGSTREAM_PP_REGION_EU                  /** Thingstream service location.
+                                                                                  * Possible values: EU/US/KR/AU/JP */
+#define APP_THINGSTREAM_PLAN     XPLR_THINGSTREAM_PP_PLAN_IP                    /** Thingstream subscription plan. 
+                                                                                  * Possible values: IP/IPLBAND/LBAND
+                                                                                  * Check your subscription plan in the Location Thing Details tab in the 
+                                                                                  * Thingstream platform. PointPerfect Developer Plan is an IP plan, as is 
+                                                                                  * the included promo card */
 
 #define APP_MAX_TOPICLEN 64
 
@@ -169,6 +160,7 @@ typedef union appLog_Opt_type {
         uint8_t lbandLog        : 1;
         uint8_t locHelperLog    : 1;
         uint8_t wifistarterLog  : 1;
+        uint8_t thingstreamLog  : 1;
     } singleLogOpts;
     uint16_t allLogOpts;
 } appLog_Opt_t;
@@ -183,6 +175,7 @@ typedef struct appLog_type {
     int8_t          lbandLogIndex;
     int8_t          locHelperLogIndex;
     int8_t          wifiStarterLogIndex;
+    int8_t          thingstreamLogIndex;
 } appLog_t;
 
 /* ----------------------------------------------------------------
@@ -209,21 +202,27 @@ extern const uint8_t server_root_crt_end[] asm("_binary_root_crt_end");
  * STATIC VARIABLES
  * -------------------------------------------------------------- */
 
+/* Application settings */
+static uint64_t appRunTime = ~0;
+static uint32_t locPrintInterval = APP_LOCATION_PRINT_PERIOD;
+#if (APP_PRINT_IMU_DATA == 1)
+static uint32_t imuPrintInterval = APP_DEAD_RECKONING_PRINT_PERIOD;
+#endif
+
 /**
  * Location modules configs
  */
 static xplrGnssDeviceCfg_t dvcGnssConfig;
 static xplrLbandDeviceCfg_t dvcLbandConfig;
+static xplrLocDeviceType_t gnssDvcType = (xplrLocDeviceType_t)CONFIG_GNSS_MODULE;
+static xplrGnssCorrDataSrc_t gnssCorrSrc = (xplrGnssCorrDataSrc_t)
+                                           CONFIG_XPLR_CORRECTION_DATA_SOURCE;
+static bool gnssDrEnable = CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE;
 
 /**
  * Frequency read from LBAND module
  */
 static uint32_t frequency;
-
-/**
- * Gnss FSM state
- */
-xplrGnssStates_t gnssState;
 
 /**
  * Gnss and lband device profiles id
@@ -286,15 +285,11 @@ static xplrWifiStarterOpts_t wifiOptions = {
  */
 static esp_mqtt_client_config_t mqttClientConfig;
 static xplrMqttWifiClient_t mqttClient;
-static char appKeysTopic[APP_MAX_TOPICLEN];
-static char appCorrectionDataTopic[APP_MAX_TOPICLEN];
-static char appFrequencyTopic[APP_MAX_TOPICLEN];
-static char *topicArray[] = {appKeysTopic, appCorrectionDataTopic, appFrequencyTopic};
 
 /**
  * A struct where we can store our received MQTT message
  */
-static char data[APP_MQTT_PAYLOAD_BUF_SIZE];
+static char data[APP_MQTT_BUFFER_SIZE];
 static char topic[XPLR_MQTTWIFI_PAYLOAD_TOPIC_LEN];
 static xplrMqttWifiPayload_t mqttMessage = {
     .data = data,
@@ -303,12 +298,17 @@ static xplrMqttWifiPayload_t mqttMessage = {
     .maxDataLength = ELEMENTCNT(data)
 };
 
+/* thingstream platform vars */
+static xplr_thingstream_t thingstreamSettings;
+static xplr_thingstream_pp_region_t ppRegion = APP_THINGSTREAM_REGION;
+static xplr_thingstream_pp_plan_t ppPlan = APP_THINGSTREAM_PLAN;
+
 /**
  * Boolean flags for different functions
  */
 static bool requestDc;
 static bool deviceOffRequested = false;
-static bool isPlanLband = false;
+static bool enableLband = false;
 
 /**
  * Error return types
@@ -330,12 +330,21 @@ static appLog_t appLogCfg = {
     .gnssAsyncLogIndex = -1,
     .lbandLogIndex = -1,
     .locHelperLogIndex = -1,
-    .wifiStarterLogIndex = -1
+    .wifiStarterLogIndex = -1,
+    .thingstreamLogIndex = -1
 };
 
 #if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
 TaskHandle_t cardDetectTaskHandler;
 #endif
+
+static char configData[APP_JSON_PAYLOAD_BUF_SIZE];
+/* The name of the configuration file */
+static char configFilename[] = "xplr_config.json";
+/* Application configuration options */
+xplr_cfg_t appOptions;
+/* Flag indicating the board is setup by the SD config file */
+static bool isConfiguredFromFile = false;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
@@ -345,6 +354,11 @@ TaskHandle_t cardDetectTaskHandler;
 static esp_err_t appInitLogging(void);
 static void appDeInitLogging(void);
 #endif
+/* initialize the thingstream component */
+static esp_err_t thingstreamInit(const char *token, xplr_thingstream_t *instance);
+static esp_err_t appFetchConfigFromFile(void);
+static void appApplyConfigFromFile(void);
+static esp_err_t appInitSd(void);
 static esp_err_t appInitBoard(void);
 static void appInitWiFi(void);
 static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg);
@@ -357,36 +371,47 @@ static void appPrintLocation(uint8_t periodSecs);
 static void appPrintDeadReckoning(uint8_t periodSecs);
 #endif
 static void appHaltExecution(void);
-static esp_err_t appConfigTopics(char **subTopics,
-                                 const char *region,
-                                 const char *corrType);
 static esp_err_t appGnssSaveConfig(void);
 static void appTerminate(void);
 static void appDeviceOffTask(void *arg);
 #if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appInitHotPlugTask(void);
 static void appCardDetectTask(void *arg);
 #endif
 
 void app_main(void)
 {
     gnssLastAction = esp_timer_get_time();
+    bool topicFound[3];
+    xplrGnssStates_t gnssState;
+    esp_err_t espErr;
+    bool wifiConnectedInitial = true;
+    bool mqttWifiReceivedInitial = true;
+    bool sentCorrectionDataInitial = true;
+    bool mqttErrorInitial = true;
+
+    appInitBoard();
+    espErr = appFetchConfigFromFile();
+    if (espErr == ESP_OK) {
+        appApplyConfigFromFile();
+    } else {
+        APP_CONSOLE(D, "No configuration file found, running on Kconfig configuration");
+    }
+
 #if (APP_SD_LOGGING_ENABLED == 1)
-    espRet = appInitLogging();
-    if (espRet != ESP_OK) {
+    espErr = appInitLogging();
+    if (espErr != ESP_OK) {
         APP_CONSOLE(E, "Logging failed to initialize");
     } else {
         APP_CONSOLE(I, "Logging initialized!");
     }
 #endif
-    appInitBoard();
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+    appInitHotPlugTask();
+#endif
     appInitWiFi();
     appInitGnssDevice();
     xplrMqttWifiInitState(&mqttClient);
-
-    static bool wifiConnectedInitial = true;
-    static bool mqttWifiReceivedInitial = true;
-    static bool sentCorrectionDataInitial = true;
-    static bool mqttErrorInitial = true;
     timePrevLoc = MICROTOSEC(esp_timer_get_time());
 #if 1 == APP_PRINT_IMU_DATA
     timePrevDr = MICROTOSEC(esp_timer_get_time());
@@ -399,7 +424,7 @@ void app_main(void)
         switch (gnssState) {
             case XPLR_GNSS_STATE_DEVICE_READY:
                 gnssLastAction = esp_timer_get_time();
-                if ((dvcLbandConfig.destHandler == NULL) && isPlanLband) {
+                if ((dvcLbandConfig.destHandler == NULL) && enableLband) {
                     dvcLbandConfig.destHandler = xplrGnssGetHandler(gnssDvcPrfId);
                     if (dvcLbandConfig.destHandler != NULL) {
                         espRet = xplrLbandSetDestGnssHandler(lbandDvcPrfId, dvcLbandConfig.destHandler);
@@ -417,13 +442,15 @@ void app_main(void)
                         appHaltExecution();
                     }
                 }
-                appPrintLocation(APP_LOCATION_PRINT_PERIOD);
+                appPrintLocation(locPrintInterval);
 #if 1 == APP_PRINT_IMU_DATA
-                appPrintDeadReckoning(APP_DEAD_RECKONING_PRINT_PERIOD);
+                if (appOptions.drCfg.printImuData) {
+                    appPrintDeadReckoning(imuPrintInterval);
+                }
 #endif
                 break;
             case XPLR_GNSS_STATE_DEVICE_RESTART:
-                if ((dvcLbandConfig.destHandler != NULL) && isPlanLband) {
+                if ((dvcLbandConfig.destHandler != NULL) && enableLband) {
                     espRet = xplrLbandSendCorrectionDataAsyncStop(lbandDvcPrfId);
                     if (espRet != ESP_OK) {
                         APP_CONSOLE(E, "Failed to get stop Lband Async sender!");
@@ -436,7 +463,7 @@ void app_main(void)
                 break;
             case XPLR_GNSS_STATE_ERROR:
                 APP_CONSOLE(E, "GNSS in error state");
-                if (isPlanLband) {
+                if (enableLband) {
                     xplrLbandSendCorrectionDataAsyncStop(lbandDvcPrfId);
                     dvcLbandConfig.destHandler = NULL;
                 }
@@ -455,8 +482,14 @@ void app_main(void)
         if (xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_CONNECT_OK) {
             if (xplrMqttWifiGetCurrentState(&mqttClient) == XPLR_MQTTWIFI_STATE_UNINIT ||
                 xplrMqttWifiGetCurrentState(&mqttClient) == XPLR_MQTTWIFI_STATE_DISCONNECTED_OK) {
-                if (appConfigTopics(topicArray, APP_ORIGIN_COUNTRY, APP_CORRECTION_TYPE) != ESP_OK) {
-                    APP_CONSOLE(E, "appConfigTopics failed!");
+                espRet = thingstreamInit(NULL, &thingstreamSettings);
+                if (espRet == ESP_OK) {
+                    /* Check if LBAND module needs to be initialized */
+                    if (dvcLbandConfig.destHandler == NULL && enableLband) {
+                        appInitLbandDevice();
+                    }
+                } else {
+                    APP_CONSOLE(E, "Thingstream module initialization failed!");
                     appHaltExecution();
                 }
                 appMqttInit();
@@ -484,12 +517,10 @@ void app_main(void)
                 }
                 if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
                     gnssLastAction = esp_timer_get_time();
-                    espRet = xplrMqttWifiSubscribeToTopicArray(&mqttClient,
-                                                               topicArray,
-                                                               ELEMENTCNT(topicArray),
-                                                               XPLR_MQTTWIFI_QOS_LVL_0);
+                    espRet = xplrMqttWifiSubscribeToTopicArrayZtp(&mqttClient,
+                                                                  &thingstreamSettings.pointPerfect);
                     if (espRet != ESP_OK) {
-                        APP_CONSOLE(E, "Subscribing to %s failed!", appCorrectionDataTopic);
+                        APP_CONSOLE(E, "Subscribing to topics failed!");
                         XPLR_CI_CONSOLE(1306, "ERROR");
                         appHaltExecution();
                     } else {
@@ -517,6 +548,9 @@ void app_main(void)
                         XPLR_CI_CONSOLE(1307, "OK");
                         mqttWifiReceivedInitial = false;
                     }
+                    topicFound[0] = xplrThingstreamPpMsgIsKeyDist(mqttMessage.topic, &thingstreamSettings);
+                    topicFound[1] = xplrThingstreamPpMsgIsCorrectionData(mqttMessage.topic, &thingstreamSettings);
+                    topicFound[2] = xplrThingstreamPpMsgIsFrequency(mqttMessage.topic, &thingstreamSettings);
                     /**
                      * Do not send data if GNSS is not in ready state.
                      * The device might not be initialized and the device handler
@@ -524,7 +558,7 @@ void app_main(void)
                      */
                     if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
                         gnssLastAction = esp_timer_get_time();
-                        if (strcmp(mqttMessage.topic, topicArray[0]) == 0) {
+                        if (topicFound[0]) {
                             espRet = xplrGnssSendDecryptionKeys(gnssDvcPrfId, mqttMessage.data, mqttMessage.dataLength);
                             if (espRet != ESP_OK) {
                                 APP_CONSOLE(E, "Failed to send decryption keys!");
@@ -534,39 +568,32 @@ void app_main(void)
                                 XPLR_CI_CONSOLE(1308, "OK");
                             }
                         }
-                        if (strcmp(mqttMessage.topic, topicArray[1]) == 0) {
-                            if (!isPlanLband) {
-                                espRet = xplrGnssSendCorrectionData(gnssDvcPrfId, mqttMessage.data, mqttMessage.dataLength);
-                                if (espRet != ESP_OK) {
-                                    APP_CONSOLE(E, "Failed to send correction data!");
-                                } else {
-                                    if (sentCorrectionDataInitial) {
-                                        XPLR_CI_CONSOLE(11, "OK");
-                                        sentCorrectionDataInitial = false;
-                                    }
-                                }
+                        if (topicFound[1] && !enableLband) {
+                            espRet = xplrGnssSendCorrectionData(gnssDvcPrfId, mqttMessage.data, mqttMessage.dataLength);
+                            if (espRet != ESP_OK) {
+                                APP_CONSOLE(E, "Failed to send correction data!");
                             } else {
-                                // Correction data source is LBAND no need to send IP correction data
-                                XPLR_CI_CONSOLE(11, "ERROR");
+                                if (sentCorrectionDataInitial) {
+                                    XPLR_CI_CONSOLE(11, "OK");
+                                    sentCorrectionDataInitial = false;
+                                }
                             }
                         }
-                        if (strcmp(mqttMessage.topic, topicArray[2]) == 0) {
-                            if (isPlanLband) {
-                                espRet = xplrLbandSetFrequencyFromMqtt(lbandDvcPrfId,
-                                                                       mqttMessage.data,
-                                                                       dvcLbandConfig.corrDataConf.region);
-                                if (espRet != ESP_OK) {
-                                    APP_CONSOLE(E, "Failed to set frequency!");
+                        if (topicFound[2] && enableLband) {
+                            espRet = xplrLbandSetFrequencyFromMqtt(lbandDvcPrfId,
+                                                                   mqttMessage.data,
+                                                                   dvcLbandConfig.corrDataConf.region);
+                            if (espRet != ESP_OK) {
+                                APP_CONSOLE(E, "Failed to set frequency!");
+                                XPLR_CI_CONSOLE(1309, "ERROR");
+                                appHaltExecution();
+                            } else {
+                                frequency = xplrLbandGetFrequency(lbandDvcPrfId);
+                                if (frequency == 0) {
+                                    APP_CONSOLE(I, "No LBAND frequency is set");
                                     XPLR_CI_CONSOLE(1309, "ERROR");
-                                    appHaltExecution();
-                                } else {
-                                    frequency = xplrLbandGetFrequency(lbandDvcPrfId);
-                                    if (frequency == 0) {
-                                        APP_CONSOLE(I, "No LBAND frequency is set");
-                                        XPLR_CI_CONSOLE(1309, "ERROR");
-                                    }
-                                    APP_CONSOLE(I, "Frequency %d Hz read from device successfully!", frequency);
                                 }
+                                APP_CONSOLE(I, "Frequency %d Hz read from device successfully!", frequency);
                             }
                         }
                     } else {
@@ -587,6 +614,14 @@ void app_main(void)
                 break;
         }
 
+        /**
+         * Check if application has reached the max runtime.
+         * If yes, raise the device off flag
+        */
+        if (MICROTOSEC(esp_timer_get_time()) >= appRunTime) {
+            APP_CONSOLE(W, "Reached maximum runtime. Terminating...");
+            deviceOffRequested = true;
+        }
         /**
          * Check if any LBAND messages have been forwarded to the GNSS module
          * and if there are feed the MQTT module's watchdog.
@@ -616,15 +651,23 @@ void app_main(void)
             if (mqttClient.handler != NULL) {
                 if (mqttClient.handler != NULL) {
                     xplrMqttWifiHardDisconnect(&mqttClient);
+                    memset(&thingstreamSettings, 0x00, sizeof(xplr_thingstream_t));
                 }
                 requestDc = true;
             }
         }
 
         if (deviceOffRequested) {
-            xplrMqttWifiUnsubscribeFromTopicArray(&mqttClient, topicArray, ELEMENTCNT(topicArray));
+            xplrMqttWifiUnsubscribeFromTopicArrayZtp(&mqttClient, &thingstreamSettings.pointPerfect);
             xplrMqttWifiHardDisconnect(&mqttClient);
-            xplrLbandStopDevice(lbandDvcPrfId);
+            if ((dvcLbandConfig.destHandler != NULL) && enableLband) {
+                espRet = xplrLbandStopDevice(lbandDvcPrfId);
+                if (espRet != ESP_OK) {
+                    APP_CONSOLE(E, "Failed to stop Lband device!");
+                } else {
+                    dvcLbandConfig.destHandler = NULL;
+                }
+            }
             appGnssSaveConfig();
 #if (APP_SD_LOGGING_ENABLED == 1)
             appDeInitLogging();
@@ -647,85 +690,144 @@ void app_main(void)
 static esp_err_t appInitLogging(void)
 {
     esp_err_t ret;
-    xplrSd_error_t sdErr;
+    xplr_cfg_logInstance_t *instance = NULL;
 
-    /* Configure the SD card */
-    sdErr = xplrSdConfigDefaults();
-    if (sdErr != XPLR_SD_OK) {
-        APP_CONSOLE(E, "Failed to configure the SD card");
-        ret = ESP_FAIL;
+    /* Initialize the SD card */
+    if (!xplrSdIsCardInit()) {
+        ret = appInitSd();
     } else {
-        /* Create the card detect task */
-        sdErr = xplrSdStartCardDetectTask();
-        /* A time window so that the card gets detected*/
-        vTaskDelay(pdMS_TO_TICKS(50));
-        if (sdErr != XPLR_SD_OK) {
-            APP_CONSOLE(E, "Failed to start the card detect task");
-            ret = ESP_FAIL;
-        } else {
-            /* Initialize the SD card */
-            sdErr = xplrSdInit();
-            if (sdErr != XPLR_SD_OK) {
-                APP_CONSOLE(E, "Failed to initialize the SD card");
-                ret = ESP_FAIL;
-            } else {
-                APP_CONSOLE(D, "SD card initialized");
-                ret = ESP_OK;
-            }
-        }
+        ret = ESP_OK;
     }
 
     if (ret == ESP_OK) {
         /* Start logging for each module (if selected in configuration) */
         if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
-            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
-                                                "main_app.log",
-                                                XPLRLOG_FILE_SIZE_INTERVAL,
-                                                XPLRLOG_NEW_FILE_ON_BOOT);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.appLogIndex];
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    instance->filename,
+                                                    instance->sizeInterval,
+                                                    instance->erasePrev);
+                instance = NULL;
+            } else {
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    "main_app.log",
+                                                    XPLRLOG_FILE_SIZE_INTERVAL,
+                                                    XPLRLOG_NEW_FILE_ON_BOOT);
+            }
+
             if (appLogCfg.appLogIndex >= 0) {
                 APP_CONSOLE(D, "Application logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.nvsLog == 1) {
-            appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
-            if (appLogCfg.nvsLogIndex >= 0) {
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.nvsLogIndex];
+                appLogCfg.nvsLogIndex = xplrNvsInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
+            }
+
+            if (appLogCfg.nvsLogIndex > 0) {
                 APP_CONSOLE(D, "NVS logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.mqttLog == 1) {
-            appLogCfg.mqttLogIndex = xplrMqttWifiInitLogModule(NULL);
-            if (appLogCfg.mqttLogIndex >= 0) {
-                APP_CONSOLE(D, "MQTT WiFi logging instance initialized");
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.mqttLogIndex];
+                appLogCfg.mqttLogIndex = xplrMqttWifiInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.mqttLogIndex = xplrMqttWifiInitLogModule(NULL);
+            }
+
+            if (appLogCfg.mqttLogIndex > 0) {
+                APP_CONSOLE(D, "MQTT logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.gnssLog == 1) {
-            appLogCfg.gnssLogIndex = xplrGnssInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.gnssLogIndex];
+                appLogCfg.gnssLogIndex = xplrGnssInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.gnssLogIndex = xplrGnssInitLogModule(NULL);
+            }
+
             if (appLogCfg.gnssLogIndex >= 0) {
                 APP_CONSOLE(D, "GNSS logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.gnssAsyncLog == 1) {
-            appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.gnssAsyncLogIndex];
+                appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(NULL);
+            }
+
             if (appLogCfg.gnssAsyncLogIndex >= 0) {
                 APP_CONSOLE(D, "GNSS Async logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.lbandLog == 1) {
-            appLogCfg.lbandLogIndex = xplrLbandInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.lbandLogIndex];
+                appLogCfg.lbandLogIndex = xplrLbandInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.lbandLogIndex = xplrLbandInitLogModule(NULL);
+            }
+
             if (appLogCfg.lbandLogIndex >= 0) {
                 APP_CONSOLE(D, "LBAND service logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.locHelperLog == 1) {
-            appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.locHelperLogIndex];
+                appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(NULL);
+            }
+
             if (appLogCfg.locHelperLogIndex >= 0) {
                 APP_CONSOLE(D, "Location Helper Service logging instance initialized");
             }
         }
+        if (appLogCfg.logOptions.singleLogOpts.thingstreamLog == 1) {
+            appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(NULL);
+            if (appLogCfg.thingstreamLogIndex >= 0) {
+                APP_CONSOLE(D, "Thingstream logging instance initialized");
+            }
+        }
         if (appLogCfg.logOptions.singleLogOpts.wifistarterLog == 1) {
-            appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.wifiStarterLogIndex];
+                appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.wifiStarterLogIndex = xplrWifiStarterInitLogModule(NULL);
+            }
+
             if (appLogCfg.wifiStarterLogIndex >= 0) {
                 APP_CONSOLE(D, "WiFi Starter logging instance initialized");
+            }
+        }
+        if (appLogCfg.logOptions.singleLogOpts.thingstreamLog == 1) {
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.thingstreamLogIndex];
+                appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(NULL);
+            }
+
+            if (appLogCfg.thingstreamLogIndex >= 0) {
+                APP_CONSOLE(D, "Thingstream module logging instance initialized");
             }
         }
     }
@@ -815,20 +917,190 @@ static esp_err_t appInitBoard(void)
             espRet = ESP_FAIL;
         }
     }
-#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
-    if (xTaskCreate(appCardDetectTask,
-                    "hotPlugTask",
-                    4 * 1024,
-                    NULL,
-                    20,
-                    &cardDetectTaskHandler) == pdPASS) {
-        APP_CONSOLE(D, "Hot plug for SD card OK");
-    } else {
-        APP_CONSOLE(W, "Hot plug for SD card failed");
-    }
-#endif
 
     return espRet;
+}
+
+/**
+ * Fetch configuration options from SD card (if existent),
+ * otherwise, keep Kconfig values
+*/
+static esp_err_t appFetchConfigFromFile(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+    xplr_board_error_t boardErr = xplrBoardDetectSd();
+
+    if (boardErr == XPLR_BOARD_ERROR_OK) {
+        ret = appInitSd();
+        if (ret == ESP_OK) {
+            memset(configData, 0, APP_JSON_PAYLOAD_BUF_SIZE);
+            sdErr = xplrSdReadFileString(configFilename, configData, APP_JSON_PAYLOAD_BUF_SIZE);
+            if (sdErr == XPLR_SD_OK) {
+                ret = xplrParseConfigSettings(configData, &appOptions);
+                if (ret == ESP_OK) {
+                    APP_CONSOLE(I, "Successfully parsed application and module configuration");
+                } else {
+                    APP_CONSOLE(E, "Failed to parse application and module configuration from <%s>", configFilename);
+                }
+            } else {
+                APP_CONSOLE(E, "Unable to get configuration from the SD card");
+                ret = ESP_FAIL;
+            }
+        } else {
+            // Do nothing
+        }
+    } else {
+        APP_CONSOLE(D, "SD is not mounted. Keeping Kconfig configuration");
+        ret = ESP_FAIL;
+    }
+
+    return ret;
+}
+
+/**
+ * Apply configuration from file
+*/
+static void appApplyConfigFromFile(void)
+{
+    xplr_cfg_logInstance_t *instance = NULL;
+    /* Applying the options that are relevant to the example */
+    /* Application settings */
+    appRunTime = (uint64_t)appOptions.appCfg.runTime;
+    locPrintInterval = appOptions.appCfg.locInterval;
+#if (1 == APP_PRINT_IMU_DATA)
+    imuPrintInterval = appOptions.drCfg.printInterval;
+#endif
+    /* Wi-Fi Settings */
+    wifiOptions.ssid = appOptions.wifiCfg.ssid;
+    wifiOptions.password = appOptions.wifiCfg.pwd;
+    /* Thingstream Settings */
+    if (strcmp(appOptions.tsCfg.region, "EU") == 0) {
+        ppRegion = XPLR_THINGSTREAM_PP_REGION_EU;
+    } else if (strcmp(appOptions.tsCfg.region, "US") == 0) {
+        ppRegion = XPLR_THINGSTREAM_PP_REGION_US;
+    } else if (strcmp(appOptions.tsCfg.region, "KR") == 0) {
+        ppRegion = XPLR_THINGSTREAM_PP_REGION_KR;
+    } else if (strcmp(appOptions.tsCfg.region, "AU") == 0) {
+        ppRegion = XPLR_THINGSTREAM_PP_REGION_AU;
+    } else if (strcmp(appOptions.tsCfg.region, "JP") == 0) {
+        ppRegion = XPLR_THINGSTREAM_PP_REGION_JP;
+    } else {
+        ppRegion = XPLR_THINGSTREAM_PP_REGION_INVALID;
+    }
+    /* Logging Settings */
+    appLogCfg.logOptions.allLogOpts = 0;
+    for (uint8_t i = 0; i < appOptions.logCfg.numOfInstances; i++) {
+        instance = &appOptions.logCfg.instance[i];
+        if (strstr(instance->description, "Application") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.appLog = 1;
+                appLogCfg.appLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "NVS") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.nvsLog = 1;
+                appLogCfg.nvsLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "Wifi Starter") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.wifistarterLog = 1;
+                appLogCfg.wifiStarterLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "MQTT Wifi") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.mqttLog = 1;
+                appLogCfg.mqttLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "GNSS Info") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.gnssLog = 1;
+                appLogCfg.gnssLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "GNSS Async") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.gnssAsyncLog = 1;
+                appLogCfg.gnssAsyncLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "Lband") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.lbandLog = 1;
+                appLogCfg.lbandLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "Location") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.locHelperLog = 1;
+                appLogCfg.locHelperLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "Thingstream") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.thingstreamLog = 1;
+                appLogCfg.thingstreamLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else {
+            // Do nothing module not used in example
+        }
+    }
+    /* GNSS and DR settings */
+    gnssDvcType = (xplrLocDeviceType_t)appOptions.gnssCfg.module;
+    gnssCorrSrc = (xplrGnssCorrDataSrc_t)appOptions.gnssCfg.corrDataSrc;
+    gnssDrEnable = appOptions.drCfg.enable;
+    /* Options from SD config file applied */
+    isConfiguredFromFile = true;
+}
+
+/**
+ * Initialize SD card
+*/
+static esp_err_t appInitSd(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = ESP_FAIL;
+    } else {
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        /* A time window so that the card gets detected*/
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
+            ret = ESP_FAIL;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = ESP_FAIL;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = ESP_OK;
+            }
+        }
+    }
+
+    return ret;
 }
 
 /*
@@ -861,7 +1133,7 @@ static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
     * module connected via I2C
     */
     gnssCfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
-    gnssCfg->hw.dvcType = (xplrLocDeviceType_t)CONFIG_GNSS_MODULE;
+    gnssCfg->hw.dvcType = gnssDvcType;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
@@ -877,12 +1149,12 @@ static void appConfigGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
     gnssCfg->hw.dvcNetwork.devicePinPwr = -1;
     gnssCfg->hw.dvcNetwork.devicePinDataReady = -1;
 
-    gnssCfg->dr.enable = CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE;
+    gnssCfg->dr.enable = gnssDrEnable;
     gnssCfg->dr.mode = XPLR_GNSS_IMU_CALIBRATION_AUTO;
     gnssCfg->dr.vehicleDynMode = XPLR_GNSS_DYNMODE_AUTOMOTIVE;
 
     gnssCfg->corrData.keys.size = 0;
-    gnssCfg->corrData.source = (xplrGnssCorrDataSrc_t)CONFIG_XPLR_CORRECTION_DATA_SOURCE;
+    gnssCfg->corrData.source = gnssCorrSrc;
 }
 
 /**
@@ -917,6 +1189,19 @@ static void appConfigLbandSettings(xplrLbandDeviceCfg_t *lbandCfg)
     lbandCfg->destHandler = NULL;
 
     lbandCfg->corrDataConf.freq = 0;
+
+    /* Set frequency region */
+    switch (APP_THINGSTREAM_REGION) {
+        case XPLR_THINGSTREAM_PP_REGION_EU:
+            lbandCfg->corrDataConf.region = XPLR_LBAND_FREQUENCY_EU;
+            break;
+        case XPLR_THINGSTREAM_PP_REGION_US:
+            lbandCfg->corrDataConf.region = XPLR_LBAND_FREQUENCY_US;
+            break;
+        default:
+            lbandCfg->corrDataConf.region = XPLR_LBAND_FREQUENCY_INVALID;
+            break;
+    }
 }
 
 /**
@@ -977,7 +1262,11 @@ static void appMqttInit(void)
 {
     esp_err_t ret;
 
-    mqttClient.ucd.enableWatchdog = (bool) APP_ENABLE_CORR_MSG_WDG;
+    if (isConfiguredFromFile) {
+        mqttClient.ucd.enableWatchdog = appOptions.appCfg.mqttWdgEnable;
+    } else {
+        mqttClient.ucd.enableWatchdog = (bool) APP_ENABLE_CORR_MSG_WDG;
+    }
 
     /**
      * We declare how many slots a ring buffer should have.
@@ -995,10 +1284,17 @@ static void appMqttInit(void)
      * Settings for mqtt client
      */
     mqttClientConfig.uri = mqttHost;
-    mqttClientConfig.client_id = mqttClientId;
-    mqttClientConfig.client_cert_pem = (const char *)client_crt_start;
-    mqttClientConfig.client_key_pem = (const char *)client_key_start;
-    mqttClientConfig.cert_pem = (const char *)server_root_crt_start;
+    if (isConfiguredFromFile) {
+        mqttClientConfig.client_id = thingstreamSettings.pointPerfect.deviceId;
+        mqttClientConfig.client_cert_pem = (const char *)thingstreamSettings.pointPerfect.clientCert;
+        mqttClientConfig.client_key_pem = (const char *)thingstreamSettings.pointPerfect.clientKey;
+        mqttClientConfig.cert_pem = (const char *)thingstreamSettings.server.rootCa;
+    } else {
+        mqttClientConfig.client_id = mqttClientId;
+        mqttClientConfig.client_cert_pem = (const char *)client_crt_start;
+        mqttClientConfig.client_key_pem = (const char *)client_key_start;
+        mqttClientConfig.cert_pem = (const char *)server_root_crt_start;
+    }
 
     mqttClientConfig.user_context = &mqttClient.ucd;
 
@@ -1100,9 +1396,18 @@ static void appPrintDeadReckoning(uint8_t periodSecs)
 static void appTerminate(void)
 {
     APP_CONSOLE(E, "Unrecoverable error in application. Terminating and restarting...");
-    xplrMqttWifiUnsubscribeFromTopicArray(&mqttClient, topicArray, ELEMENTCNT(topicArray));
+    xplrMqttWifiUnsubscribeFromTopicArrayZtp(&mqttClient, &thingstreamSettings.pointPerfect);
     xplrMqttWifiHardDisconnect(&mqttClient);
-    xplrLbandStopDevice(lbandDvcPrfId);
+    if ((dvcLbandConfig.destHandler != NULL) && enableLband) {
+        espRet = xplrLbandStopDevice(lbandDvcPrfId);
+        if (espRet != ESP_OK) {
+            APP_CONSOLE(E, "Failed to stop Lband device!");
+        } else {
+            // do nothing
+        }
+    } else {
+        // do nothing
+    }
     appGnssSaveConfig();
 #if (APP_SD_LOGGING_ENABLED == 1)
     appDeInitLogging();
@@ -1146,12 +1451,14 @@ static void appDeviceOffTask(void *arg)
             btnPressDuration = currTime - prevTime;
 
             if (btnPressDuration >= APP_DEVICE_OFF_MODE_TRIGGER) {
-                APP_CONSOLE(W, "Device OFF triggered");
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                xplrBoardSetPower(XPLR_PERIPHERAL_LTE_ID, false);
-                btnPressDuration = 0;
-                deviceOffRequested = true;
-                appHaltExecution();
+                if (!deviceOffRequested) {
+                    APP_CONSOLE(W, "Device OFF triggered");
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    btnPressDuration = 0;
+                    deviceOffRequested = true;
+                } else {
+                    APP_CONSOLE(D, "Device is powered down, nothing to do...");
+                }
             }
         }
 
@@ -1159,7 +1466,100 @@ static void appDeviceOffTask(void *arg)
     }
 }
 
+static esp_err_t thingstreamInit(const char *token, xplr_thingstream_t *instance)
+{
+    const char *ztpToken = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
+    esp_err_t ret;
+    xplr_thingstream_error_t err;
+    xplrSd_error_t sdErr;
+
+    /* initialize thingstream instance with dummy token */
+    instance->connType = XPLR_THINGSTREAM_PP_CONN_WIFI;
+    err = xplrThingstreamInit(ztpToken, instance);
+
+    if (err != XPLR_THINGSTREAM_OK) {
+        ret = ESP_FAIL;
+    } else {
+        if (isConfiguredFromFile) {
+            /* Setup thingstream module from config file */
+            memset(configData, 0x00, APP_JSON_PAYLOAD_BUF_SIZE);
+            sdErr = xplrSdReadFileString(appOptions.tsCfg.uCenterConfigFilename,
+                                         configData,
+                                         APP_JSON_PAYLOAD_BUF_SIZE);
+            if (sdErr == XPLR_SD_OK) {
+                err = xplrThingstreamPpConfigFromFile(configData,
+                                                      ppRegion,
+                                                      (bool)appOptions.gnssCfg.corrDataSrc,
+                                                      instance);
+                if (err == XPLR_THINGSTREAM_OK) {
+                    ret = ESP_OK;
+                    if (instance->pointPerfect.lbandSupported) {
+                        ppPlan = XPLR_THINGSTREAM_PP_PLAN_LBAND;
+                        if (instance->pointPerfect.mqttSupported) {
+                            ppPlan = XPLR_THINGSTREAM_PP_PLAN_IPLBAND;
+                        }
+                    } else {
+                        ppPlan = XPLR_THINGSTREAM_PP_PLAN_IP;
+                    }
+                    enableLband = (bool)appOptions.gnssCfg.corrDataSrc;
+                } else {
+                    APP_CONSOLE(E, "Error parsing thingstream credentials");
+                    ret = ESP_FAIL;
+                }
+            } else {
+                APP_CONSOLE(E, "Could not fetch file <%s> from SD card. Thingstream module configuration failed",
+                            appOptions.tsCfg.uCenterConfigFilename);
+                ret = ESP_FAIL;
+            }
+        } else {
+            /* Config thingstream topics according to region and subscription plan*/
+            err = xplrThingstreamPpConfigTopics(APP_THINGSTREAM_REGION,
+                                                APP_THINGSTREAM_PLAN,
+                                                (bool)CONFIG_XPLR_CORRECTION_DATA_SOURCE,
+                                                instance);
+            if (err == XPLR_THINGSTREAM_OK) {
+                ret = ESP_OK;
+                if (instance->pointPerfect.lbandSupported) {
+                    enableLband = (bool) CONFIG_XPLR_CORRECTION_DATA_SOURCE;
+                }
+            } else {
+                ret = ESP_FAIL;
+            }
+        }
+    }
+
+    if (ppPlan == XPLR_THINGSTREAM_PP_PLAN_LBAND && gnssCorrSrc == 0) {
+        APP_CONSOLE(E, "Invalid configuration, LBAND plan works only with correction module being LBAND!");
+        appHaltExecution();
+    } else if (ppPlan == XPLR_THINGSTREAM_PP_PLAN_IP && gnssCorrSrc == 1) {
+        APP_CONSOLE(E, "Invalid configuration, IP plan works only with correction module being IP!");
+        appHaltExecution();
+    } else {
+        //do nothing
+    }
+
+    return ret;
+}
+
 #if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appInitHotPlugTask(void)
+{
+    if (!isConfiguredFromFile || appOptions.logCfg.hotPlugEnable) {
+        if (xTaskCreate(appCardDetectTask,
+                        "hotPlugTask",
+                        4 * 1024,
+                        NULL,
+                        20,
+                        &cardDetectTaskHandler) == pdPASS) {
+            APP_CONSOLE(D, "Hot plug for SD card OK");
+        } else {
+            APP_CONSOLE(W, "Hot plug for SD card failed");
+        }
+    } else {
+        // Do nothing Hot plug task disabled
+    }
+}
+
 static void appCardDetectTask(void *arg)
 {
     bool prvState = xplrSdIsCardOn();
@@ -1205,106 +1605,6 @@ static void appCardDetectTask(void *arg)
     }
 }
 #endif
-
-
-static esp_err_t appConfigTopics(char **subTopics,
-                                 const char *region,
-                                 const char *corrType)
-{
-    esp_err_t ret = ESP_OK;
-
-    memset(subTopics[0], 0x00, APP_MAX_TOPICLEN);
-    memset(subTopics[1], 0x00, APP_MAX_TOPICLEN);
-    memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-
-    if (strcmp(corrType, "IP") == 0) {
-        isPlanLband = false;
-        strcpy(subTopics[0], "/pp/ubx/0236/ip");
-        strcpy(subTopics[1], "/pp/ip/");
-    } else if ((strcmp(corrType, "IPLBAND") == 0)) {
-        isPlanLband = (bool)CONFIG_XPLR_CORRECTION_DATA_SOURCE;
-        strcpy(subTopics[0], "/pp/ubx/0236/Lb");
-        strcpy(subTopics[1], "/pp/Lb/");
-        strcpy(subTopics[2], "/pp/frequencies/Lb");
-    } else if ((strcmp(corrType, "LBAND") == 0)) {
-        isPlanLband = (bool)CONFIG_XPLR_CORRECTION_DATA_SOURCE;
-        strcpy(subTopics[0], "/pp/ubx/0236/Lb");
-        strcpy(subTopics[2], "/pp/frequencies/Lb");
-    } else {
-        APP_CONSOLE(E, "Invalid Thingstream plan!");
-        ret = ESP_FAIL;
-    }
-
-    if (ret == ESP_OK) {
-        if (strcmp(region, "EU") == 0) {
-            if ((strcmp(corrType, "LBAND") == 0)) {
-                // Plan is LBAND do nothing
-            } else {
-                strcat(subTopics[1], "eu");
-            }
-            if (isPlanLband) {
-                dvcLbandConfig.corrDataConf.region = XPLR_LBAND_FREQUENCY_EU;
-            }
-        } else if (strcmp(region, "US") == 0) {
-            if ((strcmp(corrType, "LBAND") == 0)) {
-                // Plan is LBAND do nothing
-            } else {
-                strcat(subTopics[1], "us");
-            }
-            if (isPlanLband) {
-                dvcLbandConfig.corrDataConf.region = XPLR_LBAND_FREQUENCY_US;
-            }
-        } else if (strcmp(region, "KR") == 0) {
-            if (strcmp(corrType, "IPLBAND") == 0) {
-                isPlanLband = false;
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "IP+LBAND plan is not supported in Korea region");
-                ret = ESP_FAIL;
-            } else if ((strcmp(corrType, "LBAND") == 0)) {
-                isPlanLband = false;
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "LBAND plan is not supported in Korea region");
-                dvcLbandConfig.corrDataConf.region = XPLR_LBAND_FREQUENCY_INVALID;
-                ret = ESP_FAIL;
-            } else {
-                strcat(subTopics[1], "kr");
-            }
-        } else if (strcmp(region, "AU") == 0) {
-            if ((strcmp(corrType, "LBAND") == 0)) {
-                isPlanLband = false;
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "LBAND plan is not supported in Australia region");
-                dvcLbandConfig.corrDataConf.region = XPLR_LBAND_FREQUENCY_INVALID;
-                ret = ESP_FAIL;
-            } else {
-                isPlanLband = false;
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                strcat(subTopics[1], "au");
-            }
-        } else if (strcmp(region, "JP") == 0) {
-            if ((strcmp(corrType, "LBAND") == 0)) {
-                isPlanLband = false;
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "LBAND plan is not supported in Japan region");
-                dvcLbandConfig.corrDataConf.region = XPLR_LBAND_FREQUENCY_INVALID;
-                ret = ESP_FAIL;
-            } else {
-                isPlanLband = false;
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                strcat(subTopics[1], "jp");
-            }
-        } else {
-            APP_CONSOLE(E, "Invalid region!");
-            ret = ESP_FAIL;
-        }
-    }
-
-    if ((dvcLbandConfig.destHandler == NULL) && isPlanLband) {
-        appInitLbandDevice();
-    }
-
-    return ret;
-}
 
 static esp_err_t appGnssSaveConfig(void)
 {

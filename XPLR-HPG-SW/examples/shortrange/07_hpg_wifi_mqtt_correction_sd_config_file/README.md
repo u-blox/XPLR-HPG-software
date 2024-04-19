@@ -317,7 +317,7 @@ Please follow the steps described below:
 12. Go to `XPLR HPG Options -> Wi-Fi Settings -> Access Point Password` and configure you **Access Point's Password** as needed.
 13. Download the required configuration file from **Thingstream** by following this **[guide](./../../../docs/README_thingstream_ucenter_config.md)**, then copy the downloaded file in your SD card and insert it in the SD card slot of your board.
 14. Go to `XPLR HPG Options -> u-center Config -> u-center Config Filename` and paste the name of your configuration file in your SD card.
-15. Change **APP_REGION** macro ,according to your **[Thingstream](https://developer.thingstream.io/home)** service location.
+15. Change **APP_THINGSTREAM_REGION** macro ,according to your **[Thingstream](https://developer.thingstream.io/home)** service location.
 16. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
 
@@ -362,7 +362,7 @@ Name | Description
 **`APP_DEAD_RECKONING_PRINT_PERIOD`** | Interval, in seconds, of how often we want the location to be printed.
 **`APP_GNSS_I2C_ADDR `** | I2C address for **[ZED-F9R](https://www.u-blox.com/en/product/zed-f9r-module)** module.
 **`APP_LBAND_I2C_ADDR`** | I2C address for **[NEO-D9S](https://www.u-blox.com/en/product/neo-d9s-series)**  module.
-**`APP_REGION`** | Thingstream service region.
+**`APP_THINGSTREAM_REGION`** | Thingstream service region.
 **`APP_ENABLE_CORR_MSG_WDG`** | Option to enable the correction message watchdog mechanism.
 **`APP_INACTIVITY_TIMEOUT`** | Time in seconds to trigger an inactivity timeout and cause a restart.
 **`APP_RESTART_ON_ERROR`** | Trigger soft reset if device in error state.

@@ -76,13 +76,16 @@ xplr_thingstream_error_t xplrThingstreamApiMsgCreate(xplr_thingstream_api_t cmd,
  * @brief Configure thingstream PointPerfect settings.
  *        Data provided must include the ztp response payload.
  *
- * @param  data         configuration payload from thingstream.
- * @param  region       thingstream location service region type
- * @param  settings     thingstream location settings to configure.
+ * @param  data                  configuration payload from thingstream.
+ * @param  region                thingstream location service region type
+ * @param lbandOverIpPreference  used on IPLBAND plan, when true the topic
+ *                               list is configured for LBAND
+ * @param  settings              thingstream location settings to configure.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
 xplr_thingstream_error_t xplrThingstreamPpConfig(const char *data,
                                                  xplr_thingstream_pp_region_t region,
+                                                 bool lbandOverIpPreference,
                                                  xplr_thingstream_t *settings);
 
 /**
@@ -264,16 +267,18 @@ bool xplrThingstreamPpMsgIsFrequency(const char *name, const xplr_thingstream_t 
  *        authentication to the broker, not needed when using ZTP
  *        (in that case use xplrThingstreamPpConfig instead)
  *
- * @param region    thingstream location service region (right now only EU and US are
- *                  supported by hpglib and thus are the only accepted values)
- * @param plan      subscription plan (possible plans : IPLBAND, IP, LBAND).
- *                  LBAND plan does NOT support correction data via MQTT, only fetches
- *                  decryption keys for the NEO module.
- * @param instance  thingstream instance.
+ * @param region                 thingstream location service region (right now only EU and US are
+ *                               supported by hpglib and thus are the only accepted values)
+ * @param plan                   subscription plan (possible plans : IPLBAND, IP, LBAND).
+ *                               LBAND plan does NOT support correction data via MQTT, only fetches
+ *                               decryption keys for the NEO module.
+ * @param lbandOverIpPreference  used on IPLBAND plan, when true the topic list is configured for LBAND.
+ * @param instance               thingstream instance.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
 */
 xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_region_t region,
                                                        xplr_thingstream_pp_plan_t plan,
+                                                       bool lbandOverIpPreference,
                                                        xplr_thingstream_t *instance);
 
 /**
@@ -281,13 +286,16 @@ xplr_thingstream_error_t xplrThingstreamPpConfigTopics(xplr_thingstream_pp_regio
  *        Data provided must include the payload read
  *        from the configuration file of the SD card.
  *
- * @param  data         configuration payload from SD card.
- * @param  region       thingstream location service region type
- * @param  instance     thingstream instance to be configured.
+ * @param  data                   configuration payload from SD card.
+ * @param  region                 thingstream location service region type
+ * @param  lbandOverIpPreference  used on IPLBAND plan, when true the topic
+ *                                list is configured for LBAND.
+ * @param  instance               thingstream instance to be configured.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
 xplr_thingstream_error_t xplrThingstreamPpConfigFromFile(char *data,
                                                          xplr_thingstream_pp_region_t region,
+                                                         bool lbandOverIpPreference,
                                                          xplr_thingstream_t *instance);
 
 /**
@@ -295,8 +303,10 @@ xplr_thingstream_error_t xplrThingstreamPpConfigFromFile(char *data,
  *        Data provided must include the payload read
  *        from the configuration file of the SD card.
  *
- * @param  data         configuration payload from SD card.
- * @param  instance     thingstream communication thing instance to be configured.
+ * @param  data                  configuration payload from SD card.
+ * @param lbandOverIpPreference  used on IPLBAND plan, when true the topic
+ *                               list is configured for LBAND.
+ * @param  instance              thingstream communication thing instance to be configured.
  * @return XPLR_THINGSTREAM_OK on success, XPLR_THINGSTREAM_ERROR otherwise.
  */
 xplr_thingstream_error_t xplrThingstreamCommConfigFromFile(char *data,
@@ -318,6 +328,23 @@ int8_t xplrThingstreamInitLogModule(xplr_cfg_logInstance_t *logCfg);
  * @return  XPLR_CELL_HTTP_OK on success, XPLR_CELL_HTTP_ERROR otherwise.
 */
 esp_err_t xplrThingstreamStopLogModule(void);
+
+/**
+ * @brief Function that returns xplr_thingstream_pp_region_t enum type from string.
+ *
+ * @param regionStr    Pointer to the region string.
+ * @return             xplr_thingstream_pp_region_t formatted region.
+*/
+xplr_thingstream_pp_region_t xplrThingstreamRegionFromStr(const char *regionStr);
+
+/**
+ * @brief Function that returns xplr_thingstream_pp_plan_t enum type from string.
+ *
+ * @param regionStr    Pointer to the region plan.
+ * @return             xplr_thingstream_pp_plan_t formatted plan.
+*/
+xplr_thingstream_pp_plan_t xplrThingstreamPlanFromStr(const char *planStr);
+
 
 #ifdef __cplusplus
 }

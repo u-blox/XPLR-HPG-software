@@ -639,16 +639,16 @@ esp_err_t appCloseAllDevices(void)
 {
     esp_err_t ret;
 
-    espRet = xplrLbandStopDevice(lbandDvcPrfId);
+    espRet = xplrLbandPowerOffDevice(lbandDvcPrfId);
     if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "Failed to close LBAND device!");
+        APP_CONSOLE(E, "Failed to power off LBAND device!");
         ret = ESP_FAIL;
     }
 
     if (ret == ESP_OK) {
-        espRet = xplrGnssStopDevice(gnssDvcPrfId);
+        espRet = xplrGnssPowerOffDevice(gnssDvcPrfId);
         if (espRet != ESP_OK) {
-            APP_CONSOLE(E, "Failed to close GNSS device!");
+            APP_CONSOLE(E, "Failed to power off GNSS device!");
             return ESP_FAIL;
         }
 

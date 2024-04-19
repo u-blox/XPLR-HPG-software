@@ -564,8 +564,8 @@ Please follow the steps described bellow:
 16. **Copy and Paste** the contents of **Client Key**, named **device-\[client_id\]-pp-key.pem**, into **client.key** located inside the main folder of the project. Replace everything inside the file.
 17. **Copy and Paste** the contents of **Client Certificate**, named **device-\[client_id\]-pp-cert.crt**, into **client.crt** located inside the main folder of the project. Replace everything inside the file.
 18. **Root Certificate** is already provided as a file **root.crt**. Check if the contents have changed and if yes then copy and Paste the contents of **Root Certificate** into **root.crt** located inside the main folder of the project. Replace everything inside the file.
-19. In **[hpg_gnss_save_on_shutdown](./main/hpg_gnss_save_on_shutdown.c)** file change **APP_ORIGIN_COUNTRY** macro according to your correction data region. Possible values are "EU", "US", "KR", "AU" and "JP".
-20. In **[hpg_gnss_save_on_shutdown](./main/hpg_gnss_save_on_shutdown.c)** file change **APP_CORRECTION_TYPE** macro according to your Thingstream subscription plan. Possible values are "IP" and "IPLBAND" as the plans that offer correction data via IP.
+19. In **[hpg_gnss_save_on_shutdown](./main/hpg_gnss_save_on_shutdown.c)** file change **APP_THINGSTREAM_REGION** macro according to your correction data region. Possible values are "EU", "US", "KR", "AU" and "JP".
+20. In **[hpg_gnss_save_on_shutdown](./main/hpg_gnss_save_on_shutdown.c)** file change **APP_THINGSTREAM_PLAN** macro according to your Thingstream subscription plan. Possible values are "IP" and "IPLBAND" as the plans that offer correction data via IP.
 21. Click `Save` and then `Build, Flash and Monitor` the project to the MCU using the "flame" icon.
 <br>
 
@@ -618,8 +618,8 @@ Name | Description
 **`APP_LBAND_I2C_ADDR`** | I2C address for **[NEO-D9S](https://www.u-blox.com/en/product/neo-d9s-series)**  module.
 **`APP_DEVICE_OFF_MODE_BTN`** | Device off button for triggering the graceful shutdown.
 **`APP_DEVICE_OFF_MODE_TRIGGER`** | Device off button press duration in seconds in order to trigger graceful shutdown.
-**`APP_ORIGIN_COUNTRY`** | Correction data region.
-**`APP_CORRECTION_TYPE`** | Thingstream subscription plan.
+**`APP_THINGSTREAM_REGION`** | Correction data region.
+**`APP_THINGSTREAM_PLAN`** | Thingstream subscription plan.
 **`APP_MAX_TOPICLEN`** | Maximum topic buffer size.
 **`APP_SD_HOT_PLUG_FUNCTIONALITY`** | Option to enable the hot plug functionality of the SD card driver (being able to insert and remove the card in runtime).
 **`APP_INACTIVITY_TIMEOUT`** | Time in seconds to trigger an inactivity timeout and cause a restart.

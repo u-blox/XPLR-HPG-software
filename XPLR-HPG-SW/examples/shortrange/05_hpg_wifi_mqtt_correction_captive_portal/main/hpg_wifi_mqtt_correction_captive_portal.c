@@ -152,18 +152,6 @@ typedef struct appHpg_type {
  * -------------------------------------------------------------- */
 
 static const char mqttHost[] = "mqtts://pp.services.u-blox.com";
-static const char mqttTopicKeysIp[] = "/pp/ubx/0236/ip";
-static const char mqttTopicCorrectionDataEuIp[] = "/pp/ip/eu";
-static const char mqttTopicCorrectionDataUsIp[] = "/pp/ip/us";
-static const char mqttTopicCorrectionDataKrIp[] = "/pp/ip/kr";
-static const char mqttTopicCorrectionDataAuIp[] = "/pp/ip/au";
-static const char mqttTopicCorrectionDataJpIp[] = "/pp/ip/jp";
-static const char mqttTopicKeysLband[] = "/pp/ubx/0236/Lb";
-static const char mqttTopicCorrectionDataEuLband[] = "/pp/Lb/eu";
-static const char mqttTopicCorrectionDataUsLband[] = "/pp/Lb/us";
-static const char mqttTopicCorrectionDataAuLband[] = "/pp/Lb/au";
-static const char mqttTopicCorrectionDataJpLband[] = "/pp/Lb/jp";
-static const char mqttTopicFrequenciesLband[] = "/pp/frequencies/Lb";
 
 /*
  * Fill this struct with your desired settings and try to connect
@@ -178,6 +166,11 @@ static xplrWifiStarterOpts_t wifiOptions = {
     .mode = XPLR_WIFISTARTER_MODE_STA_AP,
     .webserver = true
 };
+
+/* thingstream platform vars */
+static xplr_thingstream_t thingstreamSettings;
+static xplr_thingstream_pp_region_t thingstreamRegion;
+static xplr_thingstream_pp_plan_t  thingstreamPlan;
 
 /*
  * A struct where we can store our received MQTT message
@@ -262,6 +255,7 @@ static void appUpdateWebserverInfo(char *sd, char *dr, char *drCalibration);
 static void appHaltExecution(void);
 static void appTerminate(void);
 static void appFactoryResetTask(void *arg);
+static esp_err_t thingstreamInit(const char *token, xplr_thingstream_t *instance);
 
 void app_main(void)
 {
@@ -270,7 +264,6 @@ void app_main(void)
 
     bool isMqttInitialized = false;
     xplrMqttWifiClientStates_t  mqttState;
-    esp_err_t mqttRes[APP_MAX_TOPIC_CNT];
     esp_err_t brokerErr = ESP_FAIL;
     char *region = NULL;
     char *plan = NULL;
@@ -281,9 +274,9 @@ void app_main(void)
 #if (APP_SD_LOGGING_ENABLED == 1)
     esp_err_t logErr;
 #endif
-
-    static bool mqttWifiConnectedInitial = true;
-    static bool mqttGetItemInitial = true;
+    bool mqttWifiConnectedInitial = true;
+    bool mqttGetItemInitial = true;
+    bool topicFound[3];
 
     int8_t tVal = -1;
     uint32_t mqttStats[1][2] = { {0, 0} }; //num of msgs and total bytes received
@@ -360,98 +353,25 @@ void app_main(void)
                     /* ok, we are connected to the broker. Lets subscribe to correction topics */
                     region = xplrWifiStarterWebserverDataGet(XPLR_WIFISTARTER_SERVERDATA_CLIENTREGION);
                     plan = xplrWifiStarterWebserverDataGet(XPLR_WIFISTARTER_SERVERDATA_CLIENTPLAN);
-                    if (memcmp(plan, "IP", strlen(plan)) == 0) {
-                        mqttRes[0] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                  (char *)mqttTopicKeysIp,
-                                                                  XPLR_MQTTWIFI_QOS_LVL_0);
-                        if (memcmp(region, "EU", strlen("EU")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataEuIp,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else if (memcmp(region, "US", strlen("US")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataUsIp,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else if (memcmp(region, "KR", strlen("KR")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataKrIp,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else if (memcmp(region, "AU", strlen("AU")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataAuIp,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else if (memcmp(region, "JP", strlen("JP")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataJpIp,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else {
-                            APP_CONSOLE(E, "Unsupported region");
-                            mqttRes[1] = ESP_FAIL;
-                        }
-                    } else if (memcmp(plan, "IP+LBAND", strlen(plan)) == 0) {
-                        mqttRes[0] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                  (char *)mqttTopicKeysLband,
-                                                                  XPLR_MQTTWIFI_QOS_LVL_0);
-                        if (memcmp(region, "EU", strlen("EU")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataEuLband,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else if (memcmp(region, "US", strlen("US")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataUsLband,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else if (memcmp(region, "AU", strlen("AU")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataAuLband,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else if (memcmp(region, "JP", strlen("JP")) == 0) {
-                            mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                      (char *)mqttTopicCorrectionDataJpLband,
-                                                                      XPLR_MQTTWIFI_QOS_LVL_0);
-                        } else {
-                            APP_CONSOLE(E, "Unsupported region");
-                            mqttRes[1] = ESP_FAIL;
-                        }
-                    } else if (memcmp(plan, "LBAND", strlen(plan)) == 0) {
-                        if (memcmp(region, "EU", strlen("EU")) == 0) {
-                            hpg.lbandRegion = XPLR_LBAND_FREQUENCY_EU;
-                        } else if (memcmp(region, "US", strlen("US")) == 0) {
-                            hpg.lbandRegion = XPLR_LBAND_FREQUENCY_US;
-                        } else {
-                            APP_CONSOLE(E, "Unsupported region for LBAND selected.");
-                            appHaltExecution();
-                        }
-
-                        mqttRes[0] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                  (char *)mqttTopicKeysLband,
-                                                                  XPLR_MQTTWIFI_QOS_LVL_0);
-                        mqttRes[1] = xplrMqttWifiSubscribeToTopic(&mqttClient,
-                                                                  (char *)mqttTopicFrequenciesLband,
-                                                                  XPLR_MQTTWIFI_QOS_LVL_0);
-                    } else {
-                        mqttRes[0] = ESP_FAIL;
-                        mqttRes[1] = ESP_FAIL;
-                        APP_CONSOLE(E, "Invalid subscription plan.");
-                    }
-
-                    for (int i = 0; i < APP_MAX_TOPIC_CNT; i++) {
-                        if (mqttRes[i] != ESP_OK) {
-                            brokerErr = ESP_FAIL;
-                            break;
-                        }
-                        brokerErr = ESP_OK;
-                    }
-
+                    thingstreamRegion = xplrThingstreamRegionFromStr(region);
+                    thingstreamPlan = xplrThingstreamPlanFromStr(plan);
+                    brokerErr = thingstreamInit(NULL, &thingstreamSettings);
                     if (brokerErr != ESP_OK) {
-                        APP_CONSOLE(E, "Subscription plan is %s.", plan);
+                        APP_CONSOLE(E, "Thingstream module initialization failed!");
+                        appHaltExecution();
+                    } else {
+                        //do nothing
+                    }
+                    brokerErr = xplrMqttWifiSubscribeToTopicArrayZtp(&mqttClient,
+                                                                     &thingstreamSettings.pointPerfect);
+                    if (brokerErr != ESP_OK) {
                         APP_CONSOLE(E, "Failed to subscribe to required topics. Correction data will not be available.");
-                        XPLR_CI_CONSOLE(509, "ERROR");
+                        appHaltExecution();
                     } else {
                         tVal = 1;
                         xplrWifiStarterWebserverDiagnosticsSet(XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED, (void *)&tVal);
                         APP_CONSOLE(D, "Subscription plan is %s.", plan);
                         APP_CONSOLE(D, "Subscribed to required topics successfully.");
-                        XPLR_CI_CONSOLE(509, "OK");
                     }
                     break;
                 case XPLR_MQTTWIFI_STATE_SUBSCRIBED:
@@ -470,6 +390,9 @@ void app_main(void)
                                                                (void *)mqttStatsStr);
                         tVal = 1;
                         xplrWifiStarterWebserverDiagnosticsSet(XPLR_WIFISTARTER_SERVERDIAG_CONFIGURED, (void *)&tVal);
+                        topicFound[0] = xplrThingstreamPpMsgIsKeyDist(mqttMessage.topic, &thingstreamSettings);
+                        topicFound[1] = xplrThingstreamPpMsgIsCorrectionData(mqttMessage.topic, &thingstreamSettings);
+                        topicFound[2] = xplrThingstreamPpMsgIsFrequency(mqttMessage.topic, &thingstreamSettings);
                         if (memcmp(plan, "IP", strlen(plan)) == 0) {
                             if (hpg.isLbandInit) {
                                 //lband module was initialized but we are in IP plan now. Lets switch correction data source
@@ -481,7 +404,7 @@ void app_main(void)
                                 hpg.isLbandInit = false;
                             }
 
-                            if (strcmp(mqttMessage.topic, mqttTopicKeysIp) == 0) {
+                            if (topicFound[0]) {
                                 gnssErr = xplrGnssSendDecryptionKeys(0, mqttMessage.data, mqttMessage.dataLength);
                                 if (gnssErr != ESP_OK) {
                                     APP_CONSOLE(E, "Failed to send decryption keys!");
@@ -490,11 +413,7 @@ void app_main(void)
                                     // Do nothing
                                 }
                             } else { //should be correction data
-                                if ((strcmp(region, "EU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataEuIp) == 0) ||
-                                    (strcmp(region, "US") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataUsIp) == 0) ||
-                                    (strcmp(region, "KR") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataKrIp) == 0) ||
-                                    (strcmp(region, "AU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataAuIp) == 0) ||
-                                    (strcmp(region, "JP") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataJpIp) == 0)) {
+                                if (topicFound[1]) {
                                     isCorrData = true;
                                 } else {
                                     APP_CONSOLE(E, "Region selected not supported...");
@@ -525,7 +444,7 @@ void app_main(void)
                                 }
                             }
                         } else if (memcmp(plan, "IP+LBAND", strlen(plan)) == 0) {
-                            if (strcmp(mqttMessage.topic, mqttTopicKeysLband) == 0) {
+                            if (topicFound[0]) {
                                 hpg.gnssState = xplrGnssGetCurrentState(0);
                                 if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
                                     hpg.gnssLastAction = esp_timer_get_time();
@@ -540,39 +459,28 @@ void app_main(void)
                                     }
                                     APP_CONSOLE(W, "GNSS not READY or in ERROR");
                                 }
-                            } else { //should be correction data
-                                if ((strcmp(region, "EU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataEuLband) == 0) ||
-                                    (strcmp(region, "US") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataUsLband) == 0) ||
-                                    (strcmp(region, "AU") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataAuLband) == 0) ||
-                                    (strcmp(region, "JP") == 0 && strcmp(mqttMessage.topic, mqttTopicCorrectionDataJpLband) == 0)) {
-                                    isCorrData = true;
-                                } else {
-                                    APP_CONSOLE(E, "Region selected not supported...");
-                                }
-
-                                if (isCorrData) {
-                                    hpg.gnssState = xplrGnssGetCurrentState(0);
-                                    if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
-                                        hpg.gnssLastAction = esp_timer_get_time();
-                                        gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
-                                        if (gnssErr != ESP_OK) {
-                                            APP_CONSOLE(E, "Failed to send correction data!");
-                                            XPLR_CI_CONSOLE(511, "ERROR");
-                                        } else {
-                                            if (receivedMqttData == false) {
-                                                XPLR_CI_CONSOLE(511, "OK");
-                                                receivedMqttData = true;
-                                            }
-                                        }
+                            } else if (topicFound[1]) { //should be correction data
+                                hpg.gnssState = xplrGnssGetCurrentState(0);
+                                if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
+                                    hpg.gnssLastAction = esp_timer_get_time();
+                                    gnssErr = xplrGnssSendCorrectionData(0, mqttMessage.data, mqttMessage.dataLength);
+                                    if (gnssErr != ESP_OK) {
+                                        APP_CONSOLE(E, "Failed to send correction data!");
+                                        XPLR_CI_CONSOLE(511, "ERROR");
                                     } else {
-                                        APP_CONSOLE(W, "GNSS not READY or in ERROR");
-                                        if (appCheckGnssInactivity()) {
-                                            appTerminate();
+                                        if (receivedMqttData == false) {
+                                            XPLR_CI_CONSOLE(511, "OK");
+                                            receivedMqttData = true;
                                         }
                                     }
                                 } else {
-                                    // Do nothing
+                                    APP_CONSOLE(W, "GNSS not READY or in ERROR");
+                                    if (appCheckGnssInactivity()) {
+                                        appTerminate();
+                                    }
                                 }
+                            } else if (topicFound[2]) {
+                                // frequency topic, do nothing
                             }
                         } else if (memcmp(plan, "LBAND", strlen(plan)) == 0) {
                             //initialize lband module
@@ -580,7 +488,7 @@ void app_main(void)
                                 appInitLbandDevice();
                                 hpg.isLbandInit = true;
                             }
-                            if (strcmp(mqttMessage.topic, mqttTopicKeysLband) == 0) {
+                            if (topicFound[0]) {
                                 hpg.gnssState = xplrGnssGetCurrentState(0);
                                 if (hpg.gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
                                     hpg.gnssLastAction = esp_timer_get_time();
@@ -596,8 +504,8 @@ void app_main(void)
                                     APP_CONSOLE(W, "GNSS not READY or in ERROR");
                                 }
                             } else { //should be lband frequency data
-                                if (strcmp(mqttMessage.topic, mqttTopicFrequenciesLband) == 0) {
-                                    lbandErr = xplrLbandSetFrequencyFromMqtt(0, mqttMessage.data, hpg.lbandRegion);
+                                if (topicFound[2]) {
+                                    lbandErr = xplrLbandSetFrequencyFromMqtt(0, mqttMessage.data, hpg.lbandConfig.corrDataConf.region);
                                     if (lbandErr != ESP_OK) {
                                         APP_CONSOLE(E, "Failed to set frequency to LBAND module");
                                         appHaltExecution();
@@ -886,7 +794,17 @@ static void appConfigLbandSettings(xplrLbandDeviceCfg_t *cfg)
     cfg->destHandler = NULL;
 
     cfg->corrDataConf.freq = 0;
-    cfg->corrDataConf.region = hpg.lbandRegion;
+    switch (thingstreamRegion) {
+        case XPLR_THINGSTREAM_PP_REGION_EU:
+            cfg->corrDataConf.region = XPLR_LBAND_FREQUENCY_EU;
+            break;
+        case XPLR_THINGSTREAM_PP_REGION_US:
+            cfg->corrDataConf.region = XPLR_LBAND_FREQUENCY_US;
+            break;
+        default:
+            cfg->corrDataConf.region = XPLR_LBAND_FREQUENCY_INVALID;
+            break;
+    }
 }
 
 /*
@@ -1599,4 +1517,29 @@ static void appFactoryResetTask(void *arg)
 
         vTaskDelay(pdMS_TO_TICKS(100)); //wait for btn release.
     }
+}
+
+static esp_err_t thingstreamInit(const char *token, xplr_thingstream_t *instance)
+{
+    const char *ztpToken = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
+    esp_err_t ret;
+    xplr_thingstream_error_t err;
+
+    /* initialize thingstream instance with dummy token */
+    instance->connType = XPLR_THINGSTREAM_PP_CONN_WIFI;
+    err = xplrThingstreamInit(ztpToken, instance);
+
+    if (err != XPLR_THINGSTREAM_OK) {
+        ret = ESP_FAIL;
+    } else {
+        /* Config thingstream topics according to region and subscription plan*/
+        err = xplrThingstreamPpConfigTopics(thingstreamRegion, thingstreamPlan, false, instance);
+        if (err == XPLR_THINGSTREAM_OK) {
+            ret = ESP_OK;
+        } else {
+            ret = ESP_FAIL;
+        }
+    }
+
+    return ret;
 }

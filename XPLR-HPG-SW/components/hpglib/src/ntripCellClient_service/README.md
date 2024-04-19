@@ -35,11 +35,11 @@ Macro/definitions section which are not inherited from other modules/components 
 
 Name | Value | Description
 --- | --- | ---
-**`XPLRCELL_NTRIP_RECEIVE_DATA_SIZE`** | **`2 kB`** | Default NTRIP message size.
-**`XPLRCELL_NTRIP_GGA_INTERVAL_S`** | **`20 S`** | Default GGA message interval (send GGA to caster).
+**`XPLRNTRIP_RECEIVE_DATA_SIZE`** | **`2 kB`** | Default NTRIP message size.
+**`XPLRNTRIP_GGA_INTERVAL_S`** | **`20 S`** | Default GGA message interval (send GGA to caster).
 
 
-**Note:** You have to change `XPLRCELL_NTRIP_RECEIVE_DATA_SIZE` according to the RTCM messages that are being broadcasted by your NTRIP caster of choice.
+**Note:** You have to change `XPLRNTRIP_RECEIVE_DATA_SIZE` according to the RTCM messages that are being broadcasted by your NTRIP caster of choice.
 <br>
 
 ## Modules-Components dependencies
