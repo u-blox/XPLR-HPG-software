@@ -91,6 +91,9 @@ static xplr_ntrip_error_t ntripHandleResponse(xplrCell_ntrip_client_t *client,
                                               bool icy,
                                               bool sourcetable);
 static xplr_ntrip_error_t ntripCasterHandshake(xplrCell_ntrip_client_t *client);
+static void ntripUpdateState(xplrCell_ntrip_client_t *client, xplr_ntrip_state_t state);
+static void ntripUpdateError(xplrCell_ntrip_client_t *client, xplr_ntrip_error_t error);
+static void ntripUpdateSocketValidity(xplrCell_ntrip_client_t *client, bool valid);
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
@@ -175,8 +178,8 @@ xplr_ntrip_error_t xplrCellNtripSendGGA(xplrCell_ntrip_client_t *client,
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore");
         ret = XPLR_NTRIP_ERROR;
-        client->state = XPLR_NTRIP_STATE_ERROR;
-        client->error = XPLR_NTRIP_SEMAPHORE_ERROR;
+        ntripUpdateState(client, XPLR_NTRIP_STATE_ERROR);
+        ntripUpdateError(client, XPLR_NTRIP_SEMAPHORE_ERROR);
     }
 
     return ret;
@@ -192,13 +195,13 @@ xplr_ntrip_error_t xplrCellNtripGetCorrectionData(xplrCell_ntrip_client_t *clien
 
     semaphoreRet = xSemaphoreTake(ntripSemaphore, pdMS_TO_TICKS(XPLRCELL_NTRIP_SEMAPHORE_WAIT_MS));
     if (semaphoreRet == pdTRUE) {
-        if (bufferSize < XPLRCELL_NTRIP_RECEIVE_DATA_SIZE) {
+        if (bufferSize < XPLRNTRIP_RECEIVE_DATA_SIZE) {
             XPLRCELL_NTRIP_CONSOLE(I, "Buffer provided is too small");
             ret = XPLR_NTRIP_ERROR;
             client->state = XPLR_NTRIP_STATE_ERROR;
             client->error = XPLR_NTRIP_BUFFER_TOO_SMALL_ERROR;
         } else {
-            memcpy(buffer, client->config->transfer.corrData, XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
+            memcpy(buffer, client->config->transfer.corrData, XPLRNTRIP_RECEIVE_DATA_SIZE);
             *corrDataSize = client->config->transfer.corrDataSize;
             ret = XPLR_NTRIP_OK;
             client->state = XPLR_NTRIP_STATE_READY;
@@ -207,8 +210,8 @@ xplr_ntrip_error_t xplrCellNtripGetCorrectionData(xplrCell_ntrip_client_t *clien
     } else {
         XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore");
         ret = XPLR_NTRIP_ERROR;
-        client->state = XPLR_NTRIP_STATE_ERROR;
-        client->error = XPLR_NTRIP_SEMAPHORE_ERROR;
+        ntripUpdateState(client, XPLR_NTRIP_STATE_ERROR);
+        ntripUpdateError(client, XPLR_NTRIP_SEMAPHORE_ERROR);
     }
 
     return ret;
@@ -497,18 +500,18 @@ void ntripLoop(xplrCell_ntrip_client_t *client)
             switch (client->state) {
                 case XPLR_NTRIP_STATE_READY:
                     client->error = XPLR_NTRIP_NO_ERROR;
-                    if ((MICROTOSEC(esp_timer_get_time()) - client->ggaInterval) > XPLRCELL_NTRIP_GGA_INTERVAL_S
-                        &&
+                    if ((MICROTOSEC(esp_timer_get_time()) - client->ggaInterval) >
+                        XPLRNTRIP_GGA_INTERVAL_S &&
                         client->config->server.ggaNecessary) {
                         // Signal APP to give GGA to NTRIP client
                         client->state = XPLR_NTRIP_STATE_REQUEST_GGA;
                         client->timeout = MICROTOSEC(esp_timer_get_time());
                     } else {
-                        memset(client->config->transfer.corrData, 0x00, XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
+                        memset(client->config->transfer.corrData, 0x00, XPLRNTRIP_RECEIVE_DATA_SIZE);
                         // Read from the socket the data sent by the caster
                         size = uSockRead(client->socket,
                                          client->config->transfer.corrData,
-                                         XPLRCELL_NTRIP_RECEIVE_DATA_SIZE);
+                                         XPLRNTRIP_RECEIVE_DATA_SIZE);
                         if (size > 0) {
                             // Signal APP to read correction data from buffer
                             client->state = XPLR_NTRIP_STATE_CORRECTION_DATA_AVAILABLE;
@@ -532,16 +535,16 @@ void ntripLoop(xplrCell_ntrip_client_t *client)
                     break;
                 case XPLR_NTRIP_STATE_REQUEST_GGA:
                     // APP hasn't provided GGA yet
-                    if (MICROTOSEC(esp_timer_get_time()) - client->timeout >= pdMS_TO_TICKS(
-                            XPLRCELL_NTRIP_FSM_TIMEOUT_S)) {
+                    if (MICROTOSEC(esp_timer_get_time()) - client->timeout >=
+                        pdMS_TO_TICKS(XPLRCELL_NTRIP_FSM_TIMEOUT_S)) {
                         client->state = XPLR_NTRIP_STATE_ERROR;
                         client->error = XPLR_NTRIP_NO_GGA_TIMEOUT_ERROR;
                     }
                     break;
                 case XPLR_NTRIP_STATE_CORRECTION_DATA_AVAILABLE:
                     // APP hasn't read correction data yet
-                    if (MICROTOSEC(esp_timer_get_time()) - client->timeout >= pdMS_TO_TICKS(
-                            XPLRCELL_NTRIP_FSM_TIMEOUT_S)) {
+                    if (MICROTOSEC(esp_timer_get_time()) - client->timeout >=
+                        pdMS_TO_TICKS(XPLRCELL_NTRIP_FSM_TIMEOUT_S)) {
                         client->state = XPLR_NTRIP_STATE_ERROR;
                         client->error = XPLR_NTRIP_CORR_DATA_TIMEOUT_ERROR;
                     }
@@ -555,9 +558,7 @@ void ntripLoop(xplrCell_ntrip_client_t *client)
         } else {
             XPLRCELL_NTRIP_CONSOLE(E, "Failed to get semaphore, %s has it",
                                    pcTaskGetName(xSemaphoreGetMutexHolder(ntripSemaphore)));
-            client->state = XPLR_NTRIP_STATE_BUSY;
         }
-
     }
 }
 
@@ -678,11 +679,11 @@ xplr_ntrip_error_t ntripCreateTask(xplrCell_ntrip_client_t *client)
             XPLRCELL_NTRIP_CONSOLE(I, "NTRIP task created");
         }
     } else {
-        client->state = XPLR_NTRIP_STATE_ERROR;
-        client-> error = XPLR_NTRIP_SEMAPHORE_ERROR;
-        client->socketIsValid = false;
+        ntripUpdateState(client, XPLR_NTRIP_STATE_ERROR);
+        ntripUpdateError(client, XPLR_NTRIP_SEMAPHORE_ERROR);
+        ntripUpdateSocketValidity(client, false);
         ret = XPLR_NTRIP_ERROR;
-        XPLRCELL_NTRIP_CONSOLE(I, "failed to create NTRIP task");
+        XPLRCELL_NTRIP_CONSOLE(E, "failed to create NTRIP task");
     }
 
     return ret;
@@ -801,6 +802,51 @@ xplr_ntrip_error_t ntripCasterHandshake(xplrCell_ntrip_client_t *client)
     }
 
     return ret;
+}
+
+/* Function to update state of the client when semaphore could not be taken */
+static void ntripUpdateState(xplrCell_ntrip_client_t *client, xplr_ntrip_state_t state)
+{
+    BaseType_t semaphoreRet;
+
+    /* Will block here so that the state is updated */
+    semaphoreRet = xSemaphoreTake(ntripSemaphore, portMAX_DELAY);
+    if (semaphoreRet == pdTRUE) {
+        client->state = state;
+        xSemaphoreGive(ntripSemaphore);
+    } else {
+        // portMAX_DELAY makes it impossible to reach this point
+    }
+
+}
+
+/* Function to update error of the client when semaphore could not be taken */
+static void ntripUpdateError(xplrCell_ntrip_client_t *client, xplr_ntrip_error_t error)
+{
+    BaseType_t semaphoreRet;
+
+    /* Will block here so that the state is updated */
+    semaphoreRet = xSemaphoreTake(ntripSemaphore, portMAX_DELAY);
+    if (semaphoreRet == pdTRUE) {
+        client->error = error;
+        xSemaphoreGive(ntripSemaphore);
+    } else {
+        // portMAX_DELAY makes it impossible to reach this point
+    }
+}
+
+static void ntripUpdateSocketValidity(xplrCell_ntrip_client_t *client, bool valid)
+{
+    BaseType_t semaphoreRet;
+
+    /* Will block here so that the state is updated */
+    semaphoreRet = xSemaphoreTake(ntripSemaphore, portMAX_DELAY);
+    if (semaphoreRet == pdTRUE) {
+        client->socketIsValid = valid;
+        xSemaphoreGive(ntripSemaphore);
+    } else {
+        // portMAX_DELAY makes it impossible to reach this point
+    }
 }
 
 /* -------------------------------------------------------------

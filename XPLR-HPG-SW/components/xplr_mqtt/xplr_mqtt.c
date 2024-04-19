@@ -990,7 +990,7 @@ static bool mqttCheckWatchdog(xplrMqttWifiClient_t *client)
         if (client->ucd.enableWatchdog) {
             if (MICROTOSEC(esp_timer_get_time() - client->ucd.lastMsgTime) >= MQTT_MESSAGE_TIMEOUT) {
                 ret = true;
-                XPLRMQTTWIFI_CONSOLE(E, "Watchdog triggered! No MQTT messages for [%d] seconds",
+                XPLRMQTTWIFI_CONSOLE(E, "Watchdog triggered! No MQTT/LBAND correction messages for [%d] seconds",
                                      MQTT_MESSAGE_TIMEOUT);
             } else {
                 ret = false;

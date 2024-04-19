@@ -169,7 +169,7 @@ xplrSd_error_t xplrSdInit(void)
     esp_err_t err;
     xplrSd_card_t *card = &locSd.card;
 
-    if (!locSd.isDetected) {
+    if (!xplrSdIsCardOn()) {
         ret = XPLR_SD_NOT_FOUND;
     } else {
         if (!locSd.isInit) {

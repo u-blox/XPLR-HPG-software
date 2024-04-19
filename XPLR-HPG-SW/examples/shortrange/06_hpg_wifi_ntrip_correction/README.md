@@ -15,12 +15,12 @@ The example provided demonstrates how to connect to an NTRIP caster in order to 
 
 **NOTE**: In the current version **Dead Reckoning** does not support **Wheel Tick**. This will be added in a future release.
 
-Depending on the interval on which the NTRIP caster sends correction data and your connection you may need to change `XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE` and `XPLRWIFI_NTRIP_MSG_RECEIVE_DATA_SIZE` in **[xplr_ntrip_client.c](../../../components/hpglib/src/ntripWifiClient_service/xplr_wifi_ntrip_client.c)**. 
+Depending on the interval on which the NTRIP caster sends correction data and your connection you may need to change `XPLRNTRIP_RECEIVE_DATA_SIZE` and `XPLRWIFI_NTRIP_MSG_RECEIVE_DATA_SIZE` in **[xplr_ntrip_client.c](../../../components/hpglib/src/ntripWifiClient_service/xplr_wifi_ntrip_client.c)**. 
 
-- `XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE` sets the total size of correction to receive on each call of the `xplrWifiNtripTask` function (can be multiple RTCM messages).
+- `XPLRNTRIP_RECEIVE_DATA_SIZE` sets the total size of correction to receive on each call of the `xplrWifiNtripTask` function (can be multiple RTCM messages).
 - `XPLRWIFI_NTRIP_MSG_RECEIVE_DATA_SIZE` sets the max size of a single RTCM message.
 
-Also depending on the requirements of your NTRIP caster, you can change the interval on which the GGA message is sent by changing `XPLRWIFI_NTRIP_GGA_INTERVAL_S` in **[xplr_ntrip_client.c](../../../components/hpglib/src/ntripWifiClient_service/xplr_wifi_ntrip_client.c)**
+Also depending on the requirements of your NTRIP caster, you can change the interval on which the GGA message is sent by changing `XPLRNTRIP_GGA_INTERVAL_S` in **[xplr_ntrip_client.c](../../../components/hpglib/src/ntripWifiClient_service/xplr_wifi_ntrip_client.c)**
 
 When running the code, depending on the debug settings configured, messages are printed to the debug UART providing useful information to the user. Upon successful connection the NTRIP client and adequate GNSS signal, diagnostic messages are printed similar to the ones below:
 

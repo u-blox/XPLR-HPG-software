@@ -72,6 +72,12 @@
 #define APP_CONSOLE(message, ...) do{} while(0)
 #endif
 
+/*
+ * Simple macros used to set buffer size in bytes
+ */
+#define KIB                         (1024U)
+#define APP_JSON_PAYLOAD_BUF_SIZE   ((6U) * (KIB))
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -113,6 +119,14 @@ static appLog_t appLogCfg = {
     .comLogIndex = -1
 };
 
+static char configData[APP_JSON_PAYLOAD_BUF_SIZE];
+/* The name of the configuration file */
+static char configFilename[] = "xplr_config.json";
+/* Application configuration options */
+xplr_cfg_t appOptions;
+/* Flag indicating the board is setup by the SD config file */
+static bool isConfiguredFromFile = false;
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTION PROTOTYPES
  * -------------------------------------------------------------- */
@@ -123,6 +137,9 @@ static void configCellSettings(xplrCom_cell_config_t *cfg);
 static esp_err_t appInitLogging(void);
 static void appDeInitLogging(void);
 #endif
+static esp_err_t appFetchConfigFromFile(void);
+static void appApplyConfigFromFile(void);
+static esp_err_t appInitSd(void);
 static void appHaltExecution(void);
 
 /* ----------------------------------------------------------------
@@ -130,20 +147,28 @@ static void appHaltExecution(void);
  * -------------------------------------------------------------- */
 void app_main(void)
 {
-#if (APP_SD_LOGGING_ENABLED == 1)
-    esp_err_t espRet;
-    espRet = appInitLogging();
-    if (espRet != ESP_OK) {
-        APP_CONSOLE(E, "Logging failed to initialize");
-    } else {
-        APP_CONSOLE(I, "Logging initialized!");
-    }
-#endif
+    esp_err_t espErr;
 
     APP_CONSOLE(I, "XPLR-HPG kit Demo: CELL Register\n");
 
     /* Initialize XPLR-HPG kit using its board file */
     xplrBoardInit();
+
+    espErr = appFetchConfigFromFile();
+    if (espErr == ESP_OK) {
+        appApplyConfigFromFile();
+    } else {
+        APP_CONSOLE(D, "No configuration file found, running on Kconfig configuration");
+    }
+
+#if (APP_SD_LOGGING_ENABLED == 1)
+    espErr = appInitLogging();
+    if (espErr != ESP_OK) {
+        APP_CONSOLE(E, "Logging failed to initialize");
+    } else {
+        APP_CONSOLE(I, "Logging initialized!");
+    }
+#endif
 
     bool appFinished = false;
 
@@ -215,47 +240,45 @@ void app_main(void)
 static esp_err_t appInitLogging(void)
 {
     esp_err_t ret;
-    xplrSd_error_t sdErr;
+    xplr_cfg_logInstance_t *instance = NULL;
 
-    /* Configure the SD card */
-    sdErr = xplrSdConfigDefaults();
-    if (sdErr != XPLR_SD_OK) {
-        APP_CONSOLE(E, "Failed to configure the SD card");
-        ret = ESP_FAIL;
+    /* Initialize the SD card */
+    if (!xplrSdIsCardInit()) {
+        ret = appInitSd();
     } else {
-        /* Create the card detect task */
-        sdErr = xplrSdStartCardDetectTask();
-        /* A time window so that the card gets detected*/
-        vTaskDelay(pdMS_TO_TICKS(50));
-        if (sdErr != XPLR_SD_OK) {
-            APP_CONSOLE(E, "Failed to start the card detect task");
-            ret = ESP_FAIL;
-        } else {
-            /* Initialize the SD card */
-            sdErr = xplrSdInit();
-            if (sdErr != XPLR_SD_OK) {
-                APP_CONSOLE(E, "Failed to initialize the SD card");
-                ret = ESP_FAIL;
-            } else {
-                APP_CONSOLE(D, "SD card initialized");
-                ret = ESP_OK;
-            }
-        }
+        ret = ESP_OK;
     }
 
     if (ret == ESP_OK) {
         /* Start logging for each module (if selected in configuration) */
         if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
-            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
-                                                "main_app.log",
-                                                XPLRLOG_FILE_SIZE_INTERVAL,
-                                                XPLRLOG_NEW_FILE_ON_BOOT);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.appLogIndex];
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    instance->filename,
+                                                    instance->sizeInterval,
+                                                    instance->erasePrev);
+                instance = NULL;
+            } else {
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    "main_app.log",
+                                                    XPLRLOG_FILE_SIZE_INTERVAL,
+                                                    XPLRLOG_NEW_FILE_ON_BOOT);
+            }
+
             if (appLogCfg.appLogIndex >= 0) {
                 APP_CONSOLE(D, "Application logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.comLog == 1) {
-            appLogCfg.comLogIndex = xplrComCellInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.comLogIndex];
+                appLogCfg.comLogIndex = xplrComCellInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.comLogIndex = xplrComCellInitLogModule(NULL);
+            }
+
             if (appLogCfg.comLogIndex >= 0) {
                 APP_CONSOLE(D, "COM Cell logging instance initialized");
             }
@@ -304,6 +327,112 @@ static void appDeInitLogging(void)
 }
 #endif
 
+/**
+ * Fetch configuration options from SD card (if existent),
+ * otherwise, keep Kconfig values
+*/
+static esp_err_t appFetchConfigFromFile(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+    xplr_board_error_t boardErr = xplrBoardDetectSd();
+
+    if (boardErr == XPLR_BOARD_ERROR_OK) {
+        ret = appInitSd();
+        if (ret == ESP_OK) {
+            memset(configData, 0, APP_JSON_PAYLOAD_BUF_SIZE);
+            sdErr = xplrSdReadFileString(configFilename, configData, APP_JSON_PAYLOAD_BUF_SIZE);
+            if (sdErr == XPLR_SD_OK) {
+                ret = xplrParseConfigSettings(configData, &appOptions);
+                if (ret == ESP_OK) {
+                    APP_CONSOLE(I, "Successfully parsed application and module configuration");
+                } else {
+                    APP_CONSOLE(E, "Failed to parse application and module configuration from <%s>", configFilename);
+                }
+            } else {
+                APP_CONSOLE(E, "Unable to get configuration from the SD card");
+                ret = ESP_FAIL;
+            }
+        } else {
+            // Do nothing
+        }
+    } else {
+        APP_CONSOLE(D, "SD is not mounted. Keeping Kconfig configuration");
+        ret = ESP_FAIL;
+    }
+
+    return ret;
+}
+
+/**
+ * Apply configuration from file
+*/
+static void appApplyConfigFromFile(void)
+{
+    xplr_cfg_logInstance_t *instance = NULL;
+    /* Applying the options that are relevant to the example */
+    /* Logging Settings */
+    appLogCfg.logOptions.allLogOpts = 0;
+    for (uint8_t i = 0; i < appOptions.logCfg.numOfInstances; i++) {
+        instance = &appOptions.logCfg.instance[i];
+        if (strstr(instance->description, "Application") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.appLog = 1;
+                appLogCfg.appLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "COM Cell") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.comLog = 1;
+                appLogCfg.comLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else {
+            // Do nothing module not used in example
+        }
+    }
+    /* Options from SD config file applied */
+    isConfiguredFromFile = true;
+}
+
+/**
+ * Initialize SD card
+*/
+static esp_err_t appInitSd(void)
+{
+    esp_err_t ret;
+    xplrSd_error_t sdErr;
+
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = ESP_FAIL;
+    } else {
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        /* A time window so that the card gets detected*/
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
+            ret = ESP_FAIL;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = ESP_FAIL;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = ESP_OK;
+            }
+        }
+    }
+
+    return ret;
+}
+
 static void configCellSettings(xplrCom_cell_config_t *cfg)
 {
     /* Config hardware pins connected to cellular module */
@@ -336,7 +465,12 @@ static void configCellSettings(xplrCom_cell_config_t *cfg)
     cfg->comSettings->pinRts = BOARD_IO_UART_LTE_RTS;
 
     cfg->netSettings->type = U_NETWORK_TYPE_CELL;
-    cfg->netSettings->pApn = CONFIG_XPLR_CELL_APN; /* configured using kconfig */
+    if (isConfiguredFromFile) {
+        cfg->netSettings->pApn = appOptions.cellCfg.apn;
+
+    } else {
+        cfg->netSettings->pApn = CONFIG_XPLR_CELL_APN; /* configured using kconfig */
+    }
     cfg->netSettings->timeoutSeconds = 240; /* Connection timeout in seconds */
     cfg->mno = 100;
 

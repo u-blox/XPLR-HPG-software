@@ -188,6 +188,9 @@ xplrLog_error_t xplrLogDeInitAll(void)
 {
     xplrLog_error_t ret = XPLR_LOG_ERROR;
 
+    if (logDvcs == 0) {
+        ret = XPLR_LOG_OK;
+    }
     for (uint8_t index = 0; index < logDvcs; index++) {
         ret = xplrLogDeInit(index);
         if (ret != XPLR_LOG_OK) {

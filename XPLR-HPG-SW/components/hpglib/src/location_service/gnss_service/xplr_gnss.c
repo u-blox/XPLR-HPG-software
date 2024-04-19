@@ -140,6 +140,7 @@ typedef union __attribute__((__packed__)) xplrGnssStatus_type {
         uint8_t gnssIsDrEnabled     : 1;    /**< flags FSM that DR enable was run */
         uint8_t gnssComingFromConf  : 1;    /**< shows if the previous state (before wait) was CONFIG */
         uint8_t gnssRequestStop     : 1;    /**< flags FSM to stop device*/
+        uint8_t gnssRequestPowerOff : 1;    /**< flags FSM to power off*/
         uint8_t gnssRequestRestart  : 1;    /**< flags FSM to restart device*/
         uint8_t drExecManualCalib   : 1;    /**< flags FSM to switch to/execute manual calibration */
         uint8_t drUpdateNvs         : 2;    /**< flags FSM to save calibration data to NVS
@@ -152,7 +153,7 @@ typedef union __attribute__((__packed__)) xplrGnssStatus_type {
         uint8_t clearBackupConf     : 1;    /**< flags FSM to clear the backup configuration */
         uint8_t reserved            : 2;    /**< reserved/padding */
     } status;
-    uint16_t value;
+    uint32_t value;
 } xplrGnssStatus_t;
 
 /**
@@ -483,8 +484,10 @@ static xplrGnss_t dvc[XPLRGNSS_NUMOF_DEVICES] = {{
 
 static const char *gLocationUrlPart = "https://maps.google.com/?q=";
 
+#if (1 == XPLR_HPGLIB_LOG_ENABLED) && (1 == XPLRGNSS_LOG_ACTIVE)
 // Semaphore to guarantee atomic access to the async log task struct
 static SemaphoreHandle_t xSemaphore = NULL;
+#endif
 /* Logging indexes */
 int8_t infoLogIndex = -1;
 int8_t asyncLogIndex = -1;
@@ -498,8 +501,8 @@ TaskHandle_t        gnssLogTaskHandle;  /**< Handler of the async logging task *
 
 static esp_err_t gnssDeviceOpen(uint8_t dvcProfile);
 static esp_err_t gnssDeviceRestart(uint8_t dvcProfile, uint8_t *message);
-static esp_err_t gnssDeviceStop(uint8_t dvcProfile);
-static esp_err_t gnssDeviceClose(uint8_t dvcProfile);
+static esp_err_t gnssDeviceStop(uint8_t dvcProfile, bool powerOff);
+static esp_err_t gnssDeviceClose(uint8_t dvcProfile, bool powerOff);
 static esp_err_t gnssSaveOnShutdown(uint8_t dvcProfile);
 static esp_err_t gnssCreateBackup(uint8_t dvcProfile);
 static esp_err_t gnssBackupCreationAck(uint8_t dvcProfile);
@@ -931,7 +934,7 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                 if (espRet == ESP_OK) {
                     XPLRGNSS_CONSOLE(D, "Save on Shutdown complete. Turning off device");
                     locDvc->options.flags.status.saveOnShutdown = 0;
-                    locDvc->options.flags.status.gnssRequestStop = 1;
+                    locDvc->options.flags.status.gnssRequestPowerOff = 1;
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_READY);
                 } else if (espRet == ESP_ERR_NOT_FINISHED) {
                     XPLRGNSS_CONSOLE(D, "Waiting for Save on Shutdown routine to finish");
@@ -946,6 +949,8 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
                 } else if (locDvc->options.flags.status.gnssRequestStop) {
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_STOP);
+                } else if (locDvc->options.flags.status.gnssRequestPowerOff) {
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_POWEROFF);
                 } else if (locDvc->options.flags.status.gnssRequestRestart ||
                            gnssCheckWatchdog(dvcProfile)) {
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_RESTART);
@@ -991,7 +996,7 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
 
             case XPLR_GNSS_STATE_DEVICE_STOP:
                 XPLRGNSS_CONSOLE(D, "Trying to stop GNSS device.");
-                espRet = gnssDeviceStop(dvcProfile);
+                espRet = gnssDeviceStop(dvcProfile, false);
                 if (espRet == ESP_OK) {
                     XPLRGNSS_CONSOLE(D, "Device stopped.");
                     locDvc->options.state[0] = XPLR_GNSS_STATE_UNCONFIGURED;
@@ -999,6 +1004,20 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
                     ret = XPLR_GNSS_STOPPED;
                 } else {
                     XPLRGNSS_CONSOLE(E, "Failed to stop device!");
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
+                    ret = XPLR_GNSS_ERROR;
+                }
+                break;
+            case XPLR_GNSS_STATE_DEVICE_POWEROFF:
+                XPLRGNSS_CONSOLE(D, "Trying to power off GNSS device.");
+                espRet = gnssDeviceStop(dvcProfile, true);
+                if (espRet == ESP_OK) {
+                    XPLRGNSS_CONSOLE(D, "Device powered off.");
+                    locDvc->options.state[0] = XPLR_GNSS_STATE_UNCONFIGURED;
+                    locDvc->options.state[1] = locDvc->options.state[0];
+                    ret = XPLR_GNSS_STOPPED;
+                } else {
+                    XPLRGNSS_CONSOLE(E, "Failed to power off device!");
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_ERROR);
                     ret = XPLR_GNSS_ERROR;
                 }
@@ -1034,6 +1053,8 @@ xplrGnssError_t xplrGnssFsm(uint8_t dvcProfile)
             case XPLR_GNSS_STATE_ERROR:
                 if (locDvc->options.flags.status.gnssRequestStop == 1) {
                     gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_STOP);
+                } else if (locDvc->options.flags.status.gnssRequestPowerOff == 1) {
+                    gnssUpdateNextState(dvcProfile, XPLR_GNSS_STATE_DEVICE_POWEROFF);
                 } else {
                     // do nothing
                 }
@@ -1073,6 +1094,35 @@ esp_err_t xplrGnssStopDevice(uint8_t dvcProfile)
             currentState == XPLR_GNSS_STATE_TIMEOUT) {
             locDvc->options.flags.status.gnssRequestStop = 1;
             XPLRGNSS_CONSOLE(W, "Requested Stop");
+            ret = ESP_OK;
+        } else {
+            XPLRGNSS_CONSOLE(W,
+                             "Gnss device is not in a valid state: Ready, Error or Timeout. Nothing to execute.");
+            ret = ESP_OK;
+        }
+    }
+
+    return ret;
+}
+
+esp_err_t xplrGnssPowerOffDevice(uint8_t dvcProfile)
+{
+    xplrGnss_t *locDvc = NULL;
+    esp_err_t ret;
+    xplrGnssStates_t currentState;
+    bool boolRet = gnssIsDvcProfileValid(dvcProfile);
+
+    if (!boolRet) {
+        ret = ESP_ERR_INVALID_ARG;
+        XPLRGNSS_CONSOLE(E, "Invalid argument!");
+    } else {
+        locDvc = &dvc[dvcProfile];
+        currentState = xplrGnssGetCurrentState(dvcProfile);
+        if (currentState == XPLR_GNSS_STATE_DEVICE_READY ||
+            currentState == XPLR_GNSS_STATE_ERROR ||
+            currentState == XPLR_GNSS_STATE_TIMEOUT) {
+            locDvc->options.flags.status.gnssRequestPowerOff = 1;
+            XPLRGNSS_CONSOLE(W, "Requested Power off");
             ret = ESP_OK;
         } else {
             XPLRGNSS_CONSOLE(W,
@@ -2273,26 +2323,30 @@ esp_err_t xplrGnssAsyncLogDeInit(void)
     esp_err_t ret = ESP_FAIL;
     xplrLog_error_t err;
 
-    if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
-        /* De init logging*/
-        err = xplrLogDeInit(asyncLogIndex);
-        if (err == XPLR_LOG_OK) {
-            /* Delete the task*/
-            vTaskDelete(gnssLogTaskHandle);
-            /* Free the ring buffer*/
-            vRingbufferDelete(xRingBuffer);
-            XPLRGNSS_CONSOLE(I, "Async logging task disabled");
-            asyncLogIndex = -1;
-            ret = ESP_OK;
+    if (xSemaphore != NULL) {
+        if (xSemaphoreTake(xSemaphore, XPLR_GNSS_LOG_RING_BUF_TIMEOUT) == pdTRUE) {
+            /* De init logging*/
+            err = xplrLogDeInit(asyncLogIndex);
+            if (err == XPLR_LOG_OK) {
+                /* Delete the task*/
+                vTaskDelete(gnssLogTaskHandle);
+                /* Free the ring buffer*/
+                vRingbufferDelete(xRingBuffer);
+                XPLRGNSS_CONSOLE(I, "Async logging task disabled");
+                asyncLogIndex = -1;
+                ret = ESP_OK;
+            } else {
+                XPLRGNSS_CONSOLE(E, "Could not terminate logging");
+                ret = ESP_FAIL;
+            }
+            /* Free the semaphore*/
+            xSemaphoreGive(xSemaphore);
         } else {
-            XPLRGNSS_CONSOLE(E, "Could not terminate logging");
+            XPLRGNSS_CONSOLE(E, "Could not take the semaphore to terminate async logging");
             ret = ESP_FAIL;
         }
-        /* Free the semaphore*/
-        xSemaphoreGive(xSemaphore);
     } else {
-        XPLRGNSS_CONSOLE(E, "Could not take the semaphore to terminate async logging");
-        ret = ESP_FAIL;
+        ret = ESP_OK;
     }
 
     return ret;
@@ -2405,7 +2459,7 @@ static esp_err_t gnssDeviceRestart(uint8_t dvcProfile, uint8_t *message)
             ret = xplrGnssSendFormattedCommand(dvcProfile, (const char *) buffer, length);
             if (ret == ESP_OK) {
                 XPLRGNSS_CONSOLE(D, "Reset command issued successfully");
-                ret = gnssDeviceStop(dvcProfile);
+                ret = gnssDeviceStop(dvcProfile, false);
                 if (ret == ESP_OK) {
                     XPLRGNSS_CONSOLE(D, "Device stop command issued successfully");
                     XPLRGNSS_CONSOLE(D, "Restart routine executed successfully.");
@@ -2431,7 +2485,7 @@ static esp_err_t gnssDeviceRestart(uint8_t dvcProfile, uint8_t *message)
     return ret;
 }
 
-static esp_err_t gnssDeviceStop(uint8_t dvcProfile)
+static esp_err_t gnssDeviceStop(uint8_t dvcProfile, bool powerOff)
 {
     esp_err_t ret;
 
@@ -2439,7 +2493,7 @@ static esp_err_t gnssDeviceStop(uint8_t dvcProfile)
     gnssResetoptionsTimers(dvcProfile);
     gnssResetoptionsFlags(dvcProfile);
     if (ret == ESP_OK) {
-        ret = gnssDeviceClose(dvcProfile);
+        ret = gnssDeviceClose(dvcProfile, powerOff);
         if (ret == ESP_OK) {
             XPLRGNSS_CONSOLE(D, "Sucessfully stoped GNSS device.");
         } else {
@@ -2455,11 +2509,15 @@ static esp_err_t gnssDeviceStop(uint8_t dvcProfile)
 /**
  * Closes communication with a device
  */
-static esp_err_t gnssDeviceClose(uint8_t dvcProfile)
+static esp_err_t gnssDeviceClose(uint8_t dvcProfile, bool powerOff)
 {
     xplrGnss_t *locDvc = &dvc[dvcProfile];
     esp_err_t ret;
-    ret = xplrHlprLocSrvcDeviceClose(&locDvc->options.dvcHandler);
+    if (powerOff) {
+        ret = xplrHlprLocSrvcDevicePowerOff(&locDvc->options.dvcHandler);
+    } else {
+        ret = xplrHlprLocSrvcDeviceClose(&locDvc->options.dvcHandler);
+    }
     return ret;
 }
 

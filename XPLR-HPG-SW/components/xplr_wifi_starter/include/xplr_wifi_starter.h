@@ -154,7 +154,7 @@ typedef struct xplrWifiStarterNvs_type {
     bool        sdLog;                                                /**< SD log option set */
     bool        gnssDR;                                                /**< GNSS Dead Reckoning option set */
 } xplrWifiStarterNvs_t;
-// *INDENT-OΝ*
+// *INDENT-ON*
 
 /**
  * Wi-Fi operation parameters.
@@ -178,7 +178,7 @@ typedef struct xplrWifiStarterScanList_type {
     uint16_t    found;                                                                      /**< Total number of discovered SSIDs. */
     int8_t      rssi[XPLR_WIFISTARTER_SSID_SCAN_MAX];                                       /**< RSSI list of discovered SSIDs. */
 } xplrWifiStarterScanList_t;
-// *INDENT-OΝ*
+// *INDENT-ON*
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS

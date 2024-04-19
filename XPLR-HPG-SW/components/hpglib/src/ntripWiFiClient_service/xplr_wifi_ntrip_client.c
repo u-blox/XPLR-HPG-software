@@ -90,6 +90,9 @@ static xplr_ntrip_error_t ntripHandleResponse(xplrWifi_ntrip_client_t *client,
                                               bool icy,
                                               bool sourcetable);
 static xplr_ntrip_error_t ntripCasterHandshake(xplrWifi_ntrip_client_t *client);
+static void ntripUpdateState(xplrWifi_ntrip_client_t *client, xplr_ntrip_state_t state);
+static void ntripUpdateError(xplrWifi_ntrip_client_t *client, xplr_ntrip_error_t error);
+static void ntripUpdateSocketValidity(xplrWifi_ntrip_client_t *client, bool valid);
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
@@ -173,8 +176,8 @@ xplr_ntrip_error_t xplrWifiNtripSendGGA(xplrWifi_ntrip_client_t *client,
     } else {
         XPLRWIFI_NTRIP_CONSOLE(E, "Failed to get semaphore");
         ret = XPLR_NTRIP_ERROR;
-        client->state = XPLR_NTRIP_STATE_ERROR;
-        client->error = XPLR_NTRIP_SEMAPHORE_ERROR;
+        ntripUpdateState(client, XPLR_NTRIP_STATE_ERROR);
+        ntripUpdateError(client, XPLR_NTRIP_SEMAPHORE_ERROR);
     }
 
     return ret;
@@ -190,13 +193,13 @@ xplr_ntrip_error_t xplrWifiNtripGetCorrectionData(xplrWifi_ntrip_client_t *clien
 
     semaphoreRet = xSemaphoreTake(ntripSemaphore, pdMS_TO_TICKS(XPLRWIFI_NTRIP_SEMAPHORE_WAIT_MS));
     if (semaphoreRet == pdTRUE) {
-        if (bufferSize < XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE) {
+        if (bufferSize < XPLRNTRIP_RECEIVE_DATA_SIZE) {
             XPLRWIFI_NTRIP_CONSOLE(I, "Buffer provided is too small");
             ret = XPLR_NTRIP_ERROR;
             client->state = XPLR_NTRIP_STATE_ERROR;
             client->error = XPLR_NTRIP_BUFFER_TOO_SMALL_ERROR;
         } else {
-            memcpy(buffer, client->config->transfer.corrData, XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE);
+            memcpy(buffer, client->config->transfer.corrData, XPLRNTRIP_RECEIVE_DATA_SIZE);
             *corrDataSize = client->config->transfer.corrDataSize;
             ret = XPLR_NTRIP_OK;
             client->state = XPLR_NTRIP_STATE_READY;
@@ -205,8 +208,8 @@ xplr_ntrip_error_t xplrWifiNtripGetCorrectionData(xplrWifi_ntrip_client_t *clien
     } else {
         XPLRWIFI_NTRIP_CONSOLE(E, "Failed to get semaphore");
         ret = XPLR_NTRIP_ERROR;
-        client->state = XPLR_NTRIP_STATE_ERROR;
-        client->error = XPLR_NTRIP_SEMAPHORE_ERROR;
+        ntripUpdateState(client, XPLR_NTRIP_STATE_ERROR);
+        ntripUpdateError(client, XPLR_NTRIP_SEMAPHORE_ERROR);
     }
 
     return ret;
@@ -487,16 +490,16 @@ void ntripLoop(xplrWifi_ntrip_client_t *client)
             switch (client->state) {
                 case XPLR_NTRIP_STATE_READY:
                     client->error = XPLR_NTRIP_NO_ERROR;
-                    if ((MICROTOSEC(esp_timer_get_time()) - client->ggaInterval) > XPLRWIFI_NTRIP_GGA_INTERVAL_S
+                    if ((MICROTOSEC(esp_timer_get_time()) - client->ggaInterval) > XPLRNTRIP_GGA_INTERVAL_S
                         &&
                         client->config->server.ggaNecessary) {
                         // Signal APP to give GGA to NTRIP client
                         client->state = XPLR_NTRIP_STATE_REQUEST_GGA;
                         client->timeout = MICROTOSEC(esp_timer_get_time());
                     } else {
-                        memset(client->config->transfer.corrData, 0x00, XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE);
+                        memset(client->config->transfer.corrData, 0x00, XPLRNTRIP_RECEIVE_DATA_SIZE);
                         // Read from the socket the data sent by the caster
-                        size = read(client->socket, client->config->transfer.corrData, XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE);
+                        size = read(client->socket, client->config->transfer.corrData, XPLRNTRIP_RECEIVE_DATA_SIZE);
                         if (size > 0) {
                             // Signal APP to read correction data from buffer
                             client->state = XPLR_NTRIP_STATE_CORRECTION_DATA_AVAILABLE;
@@ -544,7 +547,6 @@ void ntripLoop(xplrWifi_ntrip_client_t *client)
             vTaskDelay(pdMS_TO_TICKS(25));
         } else {
             XPLRWIFI_NTRIP_CONSOLE(E, "Failed to get semaphore");
-            client->state = XPLR_NTRIP_STATE_BUSY;
         }
 
     }
@@ -660,9 +662,9 @@ xplr_ntrip_error_t ntripCreateTask(xplrWifi_ntrip_client_t *client)
             XPLRWIFI_NTRIP_CONSOLE(I, "NTRIP task created");
         }
     } else {
-        client->state = XPLR_NTRIP_STATE_ERROR;
-        client-> error = XPLR_NTRIP_SEMAPHORE_ERROR;
-        client->socketIsValid = false;
+        ntripUpdateState(client, XPLR_NTRIP_STATE_ERROR);
+        ntripUpdateError(client, XPLR_NTRIP_SEMAPHORE_ERROR);
+        ntripUpdateSocketValidity(client, false);
         ret = XPLR_NTRIP_ERROR;
         XPLRWIFI_NTRIP_CONSOLE(I, "failed to create NTRIP task");
     }
@@ -783,6 +785,54 @@ xplr_ntrip_error_t ntripCasterHandshake(xplrWifi_ntrip_client_t *client)
     }
 
     return ret;
+}
+
+/* Function to update state of the client when semaphore could not be taken */
+static void ntripUpdateState(xplrWifi_ntrip_client_t *client, xplr_ntrip_state_t state)
+{
+    BaseType_t semaphoreRet;
+
+    /* Will block here so that the state is updated */
+    semaphoreRet = xSemaphoreTake(ntripSemaphore, portMAX_DELAY);
+    if (semaphoreRet == pdTRUE) {
+        client->state = state;
+        xSemaphoreGive(ntripSemaphore);
+    } else {
+        // portMAX_DELAY makes it impossible to reach this point
+    }
+}
+
+/* Function to update error of the client when semaphore could not be taken */
+static void ntripUpdateError(xplrWifi_ntrip_client_t *client, xplr_ntrip_error_t error)
+{
+    BaseType_t semaphoreRet;
+
+    /* Will block here so that the state is updated */
+    semaphoreRet = xSemaphoreTake(ntripSemaphore, portMAX_DELAY);
+    if (semaphoreRet == pdTRUE) {
+        client->error = error;
+        xSemaphoreGive(ntripSemaphore);
+    } else {
+        // portMAX_DELAY makes it impossible to reach this point
+    }
+}
+
+static void ntripUpdateSocketValidity(xplrWifi_ntrip_client_t *client, bool valid)
+{
+    BaseType_t semaphoreRet;
+
+    /* Will block here so that the state is updated */
+    while (1) {
+        semaphoreRet = xSemaphoreTake(ntripSemaphore, pdMS_TO_TICKS(10));
+        if (semaphoreRet == pdTRUE) {
+            client->socketIsValid = valid;
+            xSemaphoreGive(ntripSemaphore);
+            break;
+        } else {
+            // Yield the task
+            taskYIELD();
+        }
+    }
 }
 
 /* -------------------------------------------------------------

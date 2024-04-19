@@ -87,7 +87,19 @@ typedef struct xplr_cfg_wifi_type {
 typedef struct xplr_cfg_thingstream_type {
     char region[32];
     char uCenterConfigFilename[64];
+    char ztpToken[64];
 } xplr_cfg_thingstream_t;
+
+typedef struct xplr_cfg_ntrip_type {
+    char     host[64];
+    uint16_t port;
+    char     mountpoint[64];
+    char     userAgent[64];
+    bool     sendGGA;
+    bool     useAuth;
+    char     username[64];
+    char     password[64];
+} xplr_cfg_ntrip_t;
 
 typedef struct xplr_cfg_logInstance_type {
     char description[64];
@@ -120,6 +132,7 @@ typedef struct xplr_cfg_type {
     xplr_cfg_cell_t cellCfg;
     xplr_cfg_wifi_t wifiCfg;
     xplr_cfg_thingstream_t tsCfg;
+    xplr_cfg_ntrip_t ntripCfg;
     xplr_cfg_log_t logCfg;
     xplr_cfg_dr_t drCfg;
     xplr_cfg_gnss_t gnssCfg;

@@ -27,4 +27,7 @@ Name | Description
 **[ntripWifiClient_service](./src/ntripWifiClient_service//)** | Library implementing typical NTRIP client using integrated WiFi connectivity.
 **[sd_service](./src/sd_service/)** | Library implementing functionality for logging data to an SD card via SPI.
 **[nvs_service](./src/nvs_service/)** | Library implementing API to interface with NVS filesystem.
+**[bluetooth_service](./src/bluetooth_service/)** | Library implementing API to interface with bt classic and ble devices.
+**[at_server_service](./src/at_server_service/)** | Library based on ubxlib at-client component implementing an AT server-client service.
+**[at_parser_service](./src/at_parser_service/)** | Library based on [at_server_service](./src/at_server_service/), implementing the API of AT commands for the [HPG-AT](./../../examples/shortrange/10_hpg_at_app/) example.
 <br>

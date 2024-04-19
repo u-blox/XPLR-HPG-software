@@ -82,6 +82,8 @@
             "correctionModuleGet": "AT+CORMOD=?",
             "autoStartSet": "AT+STARTONBOOT=",
             "autoStartGet": "AT+STARTONBOOT=?",
+            "nvsConfigSet": "AT+NVSCONFIG=",
+            "nvsConfigGet": "AT+NVSCONFIG=?",
             "baudrateSet": "AT+BAUD=",
             "baudrateGet": "AT+BAUD=?",
             "dvcModeSet": "AT+HPGMODE=",

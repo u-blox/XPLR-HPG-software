@@ -484,6 +484,26 @@ class at_api:
         cmd = self.api['misc'][0]['autoStartGet']
         return cmd
     
+    def api_cmd_misc_set_nvs_config(self, mode: str):
+        """
+        Set device mode.
+        mode param: "MANUAL", "AUTO", "SAVE"
+        """
+        cmd = self.api['misc'][0]['nvsConfigSet']
+        if (mode == 'MANUAL' or mode == 'AUTO' or mode == 'SAVE'):
+            cmd += mode
+            return cmd
+        else:
+            print('Error in mode param. Accepted values are "MANUAL", "AUTO" or "SAVE')
+            pass
+    
+    def api_cmd_misc_get_nvs_config(self):
+        """
+        Get device mode.
+        """
+        cmd = self.api['misc'][0]['nvsConfigGet']
+        return cmd
+    
     def api_cmd_misc_set_baudrate(self, baudrate: str):
         """
         Set uart baudrate.

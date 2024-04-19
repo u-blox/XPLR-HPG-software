@@ -72,7 +72,7 @@ Please follow the steps described bellow:
 8. Run `idf.py monitor -p COMX` to monitor the debug UART output.
 
 ### Flashing pre-built binaries
-Firmware binaries with serial console messages disabled are provided in the [release folder](./../../../bin/releases/). You can flash the binary using the esptool.exe utility located in the [misc](./../../../misc/) folder, with the following commands, where **COMX** is the `COM Port` that the XPLR-HPGx has enumerated on:
+Firmware binaries with serial console messages disabled are provided in the [release folder](./../../../bin/releases/). You can flash the binary using the esptool.exe utility located in the [misc](./../../../misc/) folder, with the following commands, where **[COM_PORT]** is the `COM Port` that the XPLR-HPGx has enumerated on:
 
 - Open a cmd line/terminal window.
 - Navigate to `xplr-hpg-sw\XPLR-HPG-SW` folder.
@@ -80,15 +80,18 @@ Firmware binaries with serial console messages disabled are provided in the [rel
 
    - For XPLR-HPG-1:
    ```
-   misc\esptool.exe -p COMX erase_flash && misc\esptool.exe -p COMX -b 460800 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_size 8MB --flash_freq 80m 0x0 bin/releases/C213/hpg_at_app/bootloader/bootloader.bin 0x10000 bin/releases/C213/hpg_at_app/hpg_at_app.bin 0x8000 bin/releases/C213/hpg_at_app/bootloader/partition_table/partition-table.bin
+   misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 bin\releases\C213-hpg_at_app.bin
+
    ```
    - For XPLR-HPG-2
    ```
-   misc\esptool.exe -p COMX erase_flash && misc\esptool.exe -p COMX -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_size 8MB --flash_freq 40m 0x1000 /bin/releases/C214/hpg_at_app/bootloader/bootloader.bin 0x10000 bin/releases/C214/hpg_at_app/hpg_at_app.bin 0x8000 bin/releases/C214/hpg_at_app/bootloader/partition_table/partition-table.bin
+   misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_freq 40m --flash_size 8MB 0x0 bin\releases\C214-hpg_at_app.bin
+
    ```
    - For MAZGCH HPG Solution
    ```
-   misc\esptool.exe -p COMX erase_flash && misc\esptool.exe -p COMX -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_size 8MB --flash_freq 40m 0x1000 bin/releases/MAZGCH/hpg_at_app/bootloader/bootloader.bin 0x10000 bin/releases/MAZGCH/hpg_at_app/hpg_at_app.bin 0x8000 bin/releases/MAZGCH/hpg_at_app/bootloader/partition_table/partition-table.bin
+   misc\esptool.exe -p [COM_PORT] erase_flash && misc\esptool.exe -p [COM_PORT] -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_freq 40m --flash_size 8MB 0x0 bin\releases\MAZGCH-hpg_at_app.bin
+
    ```
 
 ## Usage instructions
@@ -275,6 +278,9 @@ The device can also be configured using the **[console based UI](./atHpgApp-pyth
 1. The comma `,` character isn't supported in wi-fi credentials, ntrip credentials and thingstream MQTT broker url, as it is used as a delimiter character on their corresponding AT configuration commands.
 2. `AT+BRDNFO=?` AT command, used for obtaining information about the device's modules, won't return cellular device information unless the device was used after the last reset.
 3. The `AT+STARTONBOOT=<OPTION>` AT command can be used to toggle weither the device will wait for user input before connecting to the MQTT/NTRIP server or attempt to connect with the already stored configuration without user intervention.
+4. When automatic NVS saving is disabled with `AT+NVSCONFIG=MANUAL`, changes to the configuration should be saved manually using `AT+NVSCONFIG=SAVE` before starting the application.
+5. When using `AT+NVSCONFIG=MANUAL`, the minimum interval between sending successive AT commands is 0.5 seconds. This interval can be configured in the atHPG python script using the variable `sleepInterval` in [AtInterface.py](./atHpgApp-python/AtApi.py) file. The `ERROR:BUSY` message is returned when the AT application can't keep up parsing and executing all received commands.
+6. The `AT+LOC=?` command can be used to retrieve updated GNSS location information with a frequency of at least once a second.
 
 ## Local Definitions-Macros
 This is a description of definitions and macros found in the sample which are only present in main files.\

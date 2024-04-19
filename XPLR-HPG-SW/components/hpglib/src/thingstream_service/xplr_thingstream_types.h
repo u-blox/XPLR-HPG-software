@@ -98,7 +98,6 @@ typedef enum {
 typedef enum {
     XPLR_THINGSTREAM_PP_TOPIC_INVALID = -1,    /**< invalid or not supported supported. */
     XPLR_THINGSTREAM_PP_TOPIC_KEYS_DIST,       /**< keys distribution topic. */
-    XPLR_THINGSTREAM_PP_TOPIC_ASSIST_NOW,      /**< assist now topic. */
     XPLR_THINGSTREAM_PP_TOPIC_CORRECTION_DATA, /**< correction data topic. */
     XPLR_THINGSTREAM_PP_TOPIC_GAD,             /**< geographic area definition topic. */
     XPLR_THINGSTREAM_PP_TOPIC_HPAC,            /**< atmospheric correction topic. */

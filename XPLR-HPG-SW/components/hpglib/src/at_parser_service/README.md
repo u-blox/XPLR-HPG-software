@@ -88,9 +88,13 @@ Get interface | AT+IF=? | +IF:\<INTERFACE> | wi-fi / cell
 Set correction source | AT+CORSRC=\<SOURCE> | OK | ts / ntrip
 Get correction source | AT+CORSRC=? | +CORSRC:\<SOURCE> | ts / ntrip
 Set correction module | AT+CORMOD=<MODULE> | OK | ip / lband
-Get correction module | AT+CORMOD=? | +CORMOD:\<MODULE | ip / lband
+Get correction module | AT+CORMOD=? | +CORMOD:\<MODULE> | ip / lband
 Set device mode | AT+HPGMODE=\<MODE> | OK | config / start / stop / error
 Get device mode | AT+HPGMODE=? | +HPGMODE:\<MODE> | config / start / stop / error
+Enable automatic NVS saving | AT+NVSCONFIG=AUTO | OK
+Disable automatic NVS saving | AT+NVSCONFIG=MANUAL | OK
+Store current configuration to NVS manually | AT+NVSCONFIG=SAVE | OK
+Get NVS config | AT+NVSCONFIG=? | +NVSCONFIG:\<MODE> | AUTO/MANUAL
 Factory Reset | AT+ERASE=ALL | OK | 
 Get automatic start on boot | AT+STARTONBOOT=? | +STARTONBOOT=\<OPTION> | 0 / 1 (ascii)
 Set automatic start on boot | AT+STARTONBOOT=\<OPTION> | OK |  0 / 1 (ascii)

@@ -105,6 +105,15 @@ esp_err_t xplrHlprLocSrvcDeviceOpenNonBlocking(xplrLocationDevConf_t *dvcConf,
 
 /**
  * @brief Do not use this function directly.
+ * Power off open device.
+ *
+ * @param dvcHandler  device handler.
+ * @return            ESP_OK on success otherwise ESP_FAIL on failure.
+ */
+esp_err_t xplrHlprLocSrvcDevicePowerOff(uDeviceHandle_t *dvcHandler);
+
+/**
+ * @brief Do not use this function directly.
  * Closes open device.
  *
  * @param dvcHandler  device handler.

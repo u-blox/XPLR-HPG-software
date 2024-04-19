@@ -1186,7 +1186,10 @@ static app_error_t thingstreamInit(const char *token, xplr_thingstream_t *instan
         ret = APP_ERROR_THINGSTREAM;
     } else {
         /* Config thingstream topics according to region and subscription plan*/
-        err = xplrThingstreamPpConfigTopics(APP_THINGSTREAM_REGION, APP_THINGSTREAM_PLAN, instance);
+        err = xplrThingstreamPpConfigTopics(APP_THINGSTREAM_REGION,
+                                            APP_THINGSTREAM_PLAN,
+                                            (bool) CONFIG_XPLR_CORRECTION_DATA_SOURCE,
+                                            instance);
         if (err == XPLR_THINGSTREAM_OK) {
             for (uint8_t i = 0; i < instance->pointPerfect.numOfTopics; i++) {
                 topics[i].index = i;
@@ -1494,12 +1497,12 @@ static app_error_t appTerminate(void)
             ret = APP_ERROR_MQTT_CLIENT;
         } else {
             if (enableLband) {
-                espErr = xplrLbandStopDevice(lbandDvcPrfId);
+                espErr = xplrLbandPowerOffDevice(lbandDvcPrfId);
             } else {
                 espErr = ESP_OK;
             }
             if (espErr == ESP_OK) {
-                espErr = xplrGnssStopDevice(gnssDvcPrfId);
+                espErr = xplrGnssPowerOffDevice(gnssDvcPrfId);
                 startTime = esp_timer_get_time();
                 do {
                     gnssErr = xplrGnssFsm(gnssDvcPrfId);

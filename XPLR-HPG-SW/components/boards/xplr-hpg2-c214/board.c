@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "driver/gpio.h"
+#include "driver/periph_ctrl.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -90,6 +91,7 @@ board_details_t board_info = {
 
 static xplr_board_error_t board_config_default_gpios(board_gpio_config_t gpio_id);
 static xplr_board_error_t board_deconfig_default_gpios(board_gpio_config_t gpio_id);
+static void board_recover_I2c_bus(void);
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTION DEFINITIONS
@@ -104,6 +106,7 @@ xplr_board_error_t xplrBoardInit(void)
     err[1] = board_config_default_gpios(BOARD_GPIO_CONFIG_LTE);
     err[2] = board_config_default_gpios(BOARD_GPIO_CONFIG_SD);
     err[3] = xplrSetDeviceMacToUblox();
+    board_recover_I2c_bus();
     for (int i = 0; i < 4; i++) {
         if (err[i] != ESP_OK) {
             ret = XPLR_BOARD_ERROR;
@@ -436,4 +439,15 @@ static xplr_board_error_t board_deconfig_default_gpios(board_gpio_config_t gpio_
     }
 
     return ret;
+}
+
+static void board_recover_I2c_bus(void)
+{
+    /* disable and enable peripheral to make sure bus is not blocked */
+    for (uint8_t i = 0; i < BOARD_I2C_BUS_RECOVERY_RETRIES; i++) {
+        periph_module_disable(PERIPH_I2C0_MODULE);
+        vTaskDelay(pdMS_TO_TICKS(5));
+        periph_module_enable(PERIPH_I2C0_MODULE);
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
 }

@@ -52,10 +52,6 @@ extern "C" {
 #define XPLR_AT_PARSER_TSPLAN_LENGTH (9U)
 
 /* NTRIP user configuration length */
-#define XPLR_AT_PARSER_NTRIP_HOST_LENGTH (64U)
-#define XPLR_AT_PARSER_NTRIP_USERAGENT_LENGTH (64U)
-#define XPLR_AT_PARSER_NTRIP_MOUNTPOINT_LENGTH (128U)
-#define XPLR_AT_PARSER_NTRIP_CREDENTIALS_LENGTH (32U)
 #define XPLR_AT_PARSER_PORT_LENGTH (5U+1U)
 
 #define XPLR_AT_PARSER_BOOL_OPTION_LENGTH (2U)
@@ -231,6 +227,7 @@ typedef struct xplr_at_parser_data_type {
     xplr_at_parser_cell_info_t               cellInfo;
     bool                                     restartSignal;
     bool                                     startOnBoot;   /**< If true attempt to connect with NVS saved configuration without waiting for user AT+HPGMODE*/
+    bool                                     autoSaveNvs;   /**< If true save nvs configuration changes automatically*/
 } xplr_at_parser_data_t;
 
 // *INDENT-ON*
@@ -296,6 +293,14 @@ xplr_at_parser_error_t xplrAtParserLoadNvsTsCerts(void);
  *                      XPLR_AT_PARSER_ERROR on failure.
  */
 xplr_at_parser_error_t xplrAtParserLoadNvsConfig(void);
+
+/**
+ * @brief Save configuration to NVS
+ *
+ * @return              XPLR_AT_PARSER_OK on success,
+ *                      XPLR_AT_PARSER_ERROR on failure.
+ */
+xplr_at_parser_error_t xplrAtParserSaveNvsConfig(void);
 
 /**
  * @brief Check readiness of WiFi subsystem/configuration

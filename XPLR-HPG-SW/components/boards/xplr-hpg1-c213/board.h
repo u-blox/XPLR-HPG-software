@@ -154,6 +154,9 @@
 #define BOARD_UART_LTE_SPEED CONFIG_BOARD_UART_LTE_SPEED
 #define BOARD_UART_FLOW_CONTROL CONFIG_BOARD_UART_FLOW_CONTROL
 
+/*Number of retries to recover potentially stuck I2C bus*/
+#define BOARD_I2C_BUS_RECOVERY_RETRIES  5U
+
 /* ----------------------------------------------------------------
  * PUBLIC TYPES
  * -------------------------------------------------------------- */

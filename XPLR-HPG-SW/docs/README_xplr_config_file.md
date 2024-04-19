@@ -5,7 +5,7 @@
 
 # Configuring the HPG board via the SD card
 
-To configure your HPG board via the SD card you need to create a file named `xplr_config.json`, based on **[this template file](./../examples/cellular/05_hpg_cell_mqtt_correction_certs_sd_autonomous/xplr_config_template.json)**
+To configure your HPG board via the SD card you need to create a file named `xplr_config.json`, based on **[this template file](./../bin/xplr_config_template.json)**
 
 Then, you need to populate the fields according to your desired configuration:
 
@@ -22,6 +22,16 @@ Then, you need to populate the fields according to your desired configuration:
 4. **ThingstreamSettings**: These are options regarding the configuration of the thingstream module 
     - `Region` : This field contains the Thingstream region to fetch correction data for. Possible values are `"EU"` and `"US"`, as the only supported regions, as of now. Even if your application does not make use of the thingstream module this field **must** exist, even empty. Otherwise, the configuration parse will result to error.
     - `ConfigFilename` : This field contains the filename of the ucenter-config file containing the credentials of the connection to Thingstream. Filename must not exceed 64 characters. Even if your application does not make use of the thingstream module, or does not use the file to fetch the credentials, this field **must** exist, even empty. Otherwise, the configuration parse will result to error.
+    - `ZTPToken` : This field contains the token for the Zero Touch Provisioning (ZTP) to Thingstream. Even if your application does not perform ZTP this field **must** exist, even empty. Otherwise, the configuration parse will result to error.
+5. **NTRIPSettings**: These are options regarding the configuration of the NTRIP client service of hpglib. Even if your application does not include the NTRIP client service these fields **must** exist, even empty. Otherwise, the configuration parse will result to error. 
+    - `Host` : This field contains the URL/IP address of your NTRIP caster (without the port).
+    - `Port` : This field contains the port t use in order to access the NTRIP caster. Default value is 2101.
+    - `MountPoint` : This field contains the NTRIP caster mountpoint to use.
+    - `UserAgent` :  This field contains the User Agent to identify the device.
+    - `SendGGA` : This field should be true (default value) if your NTRIP caster requires to send periodic GGA message. If not, set value to false.
+    - `UseAuthentication` : This field should be true if your NTRIP caster requires authentication, If not, set value to false (default value).
+    - `Username` : This field contains the client's username. Will be used only if `UseAuthentication` is set to true.
+    - `Password` : This field contains the client's password. Will be used only if `UseAuthentication` is set to true.
 5. **LogSettings**: These are options regarding the logging module of the application and the individual modules
     - `Instances` : This is an array containing the different logging instance options and configuration. The size of the array can be from 0 (empty array), up to `XPLR_LOG_MAX_INSTANCES` instances (macro defined in **[xplr_hpglib_cfg.h](./../components/hpglib/xplr_hpglib_cfg.h)**). The individual instance must have the following fields populated:
         - `Description` : A string describing the instance's relation to an individual module of the application (should be left to default values).

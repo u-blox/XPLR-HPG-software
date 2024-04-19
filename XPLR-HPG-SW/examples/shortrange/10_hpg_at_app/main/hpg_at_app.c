@@ -92,6 +92,15 @@
 #define APP_LBAND_I2C_ADDR       (0x43)
 
 /**
+ * Option to enable the correction message watchdog mechanism.
+ * When set to 1, if no correction data are forwarded to the GNSS
+ * module (either via IP or SPARTN) for a defined amount of time
+ * (MQTT_MESSAGE_TIMEOUT macro defined in hpglib/xplr_mqtt/include/xplr_mqtt.h)
+ * an error event will be triggered
+*/
+#define APP_ENABLE_CORR_MSG_WDG (1U)
+
+/**
  * Trigger soft reset if device in error state
  */
 #define APP_RESTART_ON_ERROR     (1U)
@@ -100,7 +109,7 @@
  * Simple macros used to set buffer size in bytes
  */
 #define KIB (1024U)
-#define APP_MQTT_PAYLOAD_BUF_SIZE ((10U) * (KIB))
+#define APP_MQTT_BUFFER_SIZE ((10U) * (KIB))
 
 #define APP_MAX_TOPICLEN 64
 /* ----------------------------------------------------------------
@@ -116,6 +125,7 @@ typedef union appLog_Opt_type {
         uint8_t gnssAsyncLog   : 1;
         uint8_t lbandLog       : 1;
         uint8_t locHelperLog   : 1;
+        uint8_t thingstreamLog : 1;
         uint8_t wifiStarterLog : 1;
         uint8_t comLog         : 1;
         uint8_t ntripLog       : 1;
@@ -134,6 +144,7 @@ typedef struct appLog_type {
     int8_t          gnssAsyncLogIndex;
     int8_t          lbandLogIndex;
     int8_t          locHelperLogIndex;
+    int8_t          thingstreamLogIndex;
     int8_t          wifiStarterLogIndex;
     int8_t          comLogIndex;
     int8_t          ntripLogIndex;
@@ -186,14 +197,10 @@ static xplrWifiStarterError_t wifistarterErr;
 static esp_mqtt_client_config_t mqttClientConfig;
 static xplrMqttWifiClient_t mqttClientWifi;
 static xplrCell_mqtt_client_t mqttClientCell;
-static char appKeysTopic[APP_MAX_TOPICLEN];
-static char appCorrectionDataTopic[APP_MAX_TOPICLEN];
-static char appFrequencyTopic[APP_MAX_TOPICLEN];
-static char *topicArray[] = {appKeysTopic, appCorrectionDataTopic, appFrequencyTopic};
 static char topic[XPLR_MQTTWIFI_PAYLOAD_TOPIC_LEN];
 static xplr_thingstream_t *thingstreamSettings;
 static xplrCell_mqtt_topic_t topics[3];
-char rxBuff[2][APP_MQTT_PAYLOAD_BUF_SIZE];
+char rxBuff[2][APP_MQTT_BUFFER_SIZE];
 static app_cell_fsm_t appCellState[2];
 
 static bool isWifiInit = false;
@@ -267,7 +274,7 @@ static xplrMqttWifiPayload_t mqttMessage = {
     .data = rxBuff[0],
     .topic = topic,
     .dataLength = 0,
-    .maxDataLength = APP_MQTT_PAYLOAD_BUF_SIZE
+    .maxDataLength = APP_MQTT_BUFFER_SIZE
 };
 
 xplrWifi_ntrip_client_t ntripWifiClient;
@@ -289,6 +296,7 @@ static appLog_t appLogCfg = {
     .gnssAsyncLogIndex = -1,
     .lbandLogIndex = -1,
     .locHelperLogIndex = -1,
+    .thingstreamLogIndex = -1,
     .wifiStarterLogIndex = -1,
     .comLogIndex = -1,
     .ntripLogIndex = -1,
@@ -308,7 +316,6 @@ static void appInitAtParser(void);
 static void appDeInitAtParser(void);
 static void appWaitGnssReady(void);
 static void appInitWiFi(void);
-static esp_err_t appConfigTopics(char **subTopics);
 static void appMqttInit(void);
 static void appWifiStarterFsm(void);
 static esp_err_t appInitBoard(void);
@@ -325,7 +332,7 @@ static app_cell_error_t cellNetworkRegister(void);
 static app_cell_error_t cellSetGreeting(void);
 static void cellGreetingCallback(uDeviceHandle_t handler, void *callbackParam);
 static void appCellFsm(void);
-static app_cell_error_t appCellThingstreamInit(const char *token, xplr_thingstream_t *instance);
+static app_cell_error_t thingstreamInit(const char *token, xplr_thingstream_t *instance);
 static app_cell_error_t appCellMqttClientInit(void);
 static app_cell_error_t appCellMqttClientMsgUpdate(void);
 static void appCellgnssFwdPpData(void);
@@ -342,6 +349,7 @@ static void appNtripCellFsm(void);
 static app_cell_error_t appNtripCellInit(void);
 static app_cell_error_t appNtripCellDeInit(void);
 static void configureCorrectionSource();
+static void initializeTsConfig();
 
 void app_main(void)
 {
@@ -767,16 +775,20 @@ static void appWifiStarterFsm(void)
 {
     xplrMqttWifiError_t mqttErr;
     esp_err_t espRet;
-    xplr_thingstream_pp_plan_t plan = profile->data.correctionData.thingstreamCfg.tsPlan;
+    app_cell_error_t tsError;
+    bool topicFound[3];
 
     wifistarterErr = xplrWifiStarterFsm();
 
     if (xplrWifiStarterGetCurrentFsmState() == XPLR_WIFISTARTER_STATE_CONNECT_OK) {
         if (xplrMqttWifiGetCurrentState(&mqttClientWifi) == XPLR_MQTTWIFI_STATE_UNINIT ||
             xplrMqttWifiGetCurrentState(&mqttClientWifi) == XPLR_MQTTWIFI_STATE_DISCONNECTED_OK) {
-            if (appConfigTopics(topicArray) != ESP_OK) {
-                APP_CONSOLE(E, "appConfigTopics failed!");
+            tsError = thingstreamInit(NULL, thingstreamSettings);
+            if (tsError != APP_ERROR_OK) {
+                APP_CONSOLE(E, "Thingstream module initialization failed!");
                 appHaltExecution();
+            } else {
+                // do nothing
             }
             appMqttInit();
             xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_WIFI, XPLR_ATPARSER_STATUS_CONNECTING);
@@ -804,30 +816,10 @@ static void appWifiStarterFsm(void)
             xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_WIFI, XPLR_ATPARSER_STATUS_CONNECTED);
             if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
                 gnssLastAction = esp_timer_get_time();
-                if (plan == XPLR_THINGSTREAM_PP_PLAN_IP) {
-                    espRet = xplrMqttWifiSubscribeToTopic(&mqttClientWifi,
-                                                          topicArray[0],
-                                                          XPLR_MQTTWIFI_QOS_LVL_0);
-                    espRet |= xplrMqttWifiSubscribeToTopic(&mqttClientWifi,
-                                                           topicArray[1],
-                                                           XPLR_MQTTWIFI_QOS_LVL_0);
-                } else if (plan == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
-                    espRet = xplrMqttWifiSubscribeToTopicArray(&mqttClientWifi,
-                                                               topicArray,
-                                                               ELEMENTCNT(topicArray),
-                                                               XPLR_MQTTWIFI_QOS_LVL_0);
-                } else if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-                    espRet = xplrMqttWifiSubscribeToTopic(&mqttClientWifi,
-                                                          topicArray[0],
-                                                          XPLR_MQTTWIFI_QOS_LVL_0);
-                    espRet |= xplrMqttWifiSubscribeToTopic(&mqttClientWifi,
-                                                           topicArray[2],
-                                                           XPLR_MQTTWIFI_QOS_LVL_0);
-                } else {
-                    espRet = ESP_FAIL;
-                }
+                espRet = xplrMqttWifiSubscribeToTopicArrayZtp(&mqttClientWifi,
+                                                              &thingstreamSettings->pointPerfect);
                 if (espRet != ESP_OK) {
-                    APP_CONSOLE(E, "Subscribing to %s failed!", appCorrectionDataTopic);
+                    APP_CONSOLE(E, "Subscribing to topics failed!");
                     xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_ERROR);
                     appHaltExecution();
                 } else {
@@ -850,6 +842,9 @@ static void appWifiStarterFsm(void)
              * If the user does not use it it will be discarded.
              */
             if (xplrMqttWifiReceiveItem(&mqttClientWifi, &mqttMessage) == XPLR_MQTTWIFI_ITEM_OK) {
+                topicFound[0] = xplrThingstreamPpMsgIsKeyDist(mqttMessage.topic, thingstreamSettings);
+                topicFound[1] = xplrThingstreamPpMsgIsCorrectionData(mqttMessage.topic, thingstreamSettings);
+                topicFound[2] = xplrThingstreamPpMsgIsFrequency(mqttMessage.topic, thingstreamSettings);
                 /**
                  * Do not send data if GNSS is not in ready state.
                  * The device might not be initialized and the device handler
@@ -858,7 +853,7 @@ static void appWifiStarterFsm(void)
                 if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
                     gnssLastAction = esp_timer_get_time();
                     currentStatus = XPLR_ATPARSER_STATHPG_TS_CONNECTED;
-                    if (strcmp(mqttMessage.topic, topicArray[0]) == 0) {
+                    if (topicFound[0]) {
                         espRet = xplrGnssSendDecryptionKeys(gnssDvcPrfId, mqttMessage.data, mqttMessage.dataLength);
                         if (espRet != ESP_OK) {
                             APP_CONSOLE(E, "Failed to send decryption keys!");
@@ -866,36 +861,28 @@ static void appWifiStarterFsm(void)
                             appHaltExecution();
                         }
                     }
-                    if (strcmp(mqttMessage.topic, topicArray[1]) == 0) {
-                        if (!isLbandAsyncInit) {
-                            espRet = xplrGnssSendCorrectionData(gnssDvcPrfId, mqttMessage.data, mqttMessage.dataLength);
-                            if (espRet != ESP_OK) {
-                                APP_CONSOLE(E, "Failed to send correction data!");
-                                xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_ERROR);
-                            } else {
-                                // Correction data source is LBAND no need to send IP correction data
-                            }
+                    if (topicFound[1] && !isLbandAsyncInit) {
+                        espRet = xplrGnssSendCorrectionData(gnssDvcPrfId, mqttMessage.data, mqttMessage.dataLength);
+                        if (espRet != ESP_OK) {
+                            APP_CONSOLE(E, "Failed to send correction data!");
+                            xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_ERROR);
                         }
                     }
-                    if (strcmp(mqttMessage.topic, topicArray[2]) == 0) {
-                        if (isLbandAsyncInit) {
-                            espRet = xplrLbandSetFrequencyFromMqtt(lbandDvcPrfId,
-                                                                   mqttMessage.data,
-                                                                   dvcLbandConfig.corrDataConf.region);
-                            if (espRet != ESP_OK) {
-                                APP_CONSOLE(E, "Failed to set frequency!");
-                                xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_ERROR);
-                                appHaltExecution();
-                            } else {
-                                frequency = xplrLbandGetFrequency(lbandDvcPrfId);
-                                if (frequency == 0) {
-                                    APP_CONSOLE(I, "No LBAND frequency is set");
-                                    xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_ERROR);
-                                }
-                                APP_CONSOLE(I, "Frequency %d Hz read from device successfully!", frequency);
-                            }
+                    if (topicFound[2] && isLbandAsyncInit) {
+                        espRet = xplrLbandSetFrequencyFromMqtt(lbandDvcPrfId,
+                                                               mqttMessage.data,
+                                                               dvcLbandConfig.corrDataConf.region);
+                        if (espRet != ESP_OK) {
+                            APP_CONSOLE(E, "Failed to set frequency!");
+                            xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_ERROR);
+                            appHaltExecution();
                         } else {
-                            // Correction data source is IP no need to send LBAND correction data
+                            frequency = xplrLbandGetFrequency(lbandDvcPrfId);
+                            if (frequency == 0) {
+                                APP_CONSOLE(I, "No LBAND frequency is set");
+                                xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_ERROR);
+                            }
+                            APP_CONSOLE(I, "Frequency %d Hz read from device successfully!", frequency);
                         }
                     }
                 } else {
@@ -908,6 +895,14 @@ static void appWifiStarterFsm(void)
 
         default:
             break;
+    }
+
+    /**
+     * Check if any LBAND messages have been forwarded to the GNSS module
+     * and if there are feed the MQTT module's watchdog.
+    */
+    if (xplrLbandHasFrwdMessage()) {
+        xplrMqttWifiFeedWatchdog(&mqttClientWifi);
     }
 
     /**
@@ -932,92 +927,13 @@ static void appWifiStarterFsm(void)
         if (mqttClientWifi.handler != NULL) {
             if (mqttClientWifi.handler != NULL) {
                 xplrMqttWifiHardDisconnect(&mqttClientWifi);
+                initializeTsConfig();
             }
             requestDc = true;
             xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_RECONNECTING);
             xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_WIFI, XPLR_ATPARSER_STATUS_RECONNECTING);
         }
     }
-    /**
-     * A window so other tasks can run
-     */
-}
-
-static esp_err_t appConfigTopics(char **subTopics)
-{
-    esp_err_t ret = ESP_OK;
-    xplr_thingstream_pp_region_t region = profile->data.correctionData.thingstreamCfg.tsRegion;
-    xplr_thingstream_pp_plan_t plan = profile->data.correctionData.thingstreamCfg.tsPlan;
-
-    memset(subTopics[0], 0x00, APP_MAX_TOPICLEN);
-    memset(subTopics[1], 0x00, APP_MAX_TOPICLEN);
-    memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-
-    if (plan == XPLR_THINGSTREAM_PP_PLAN_IP) {
-        strcpy(subTopics[0], "/pp/ubx/0236/ip");
-        strcpy(subTopics[1], "/pp/ip/");
-    } else if (plan == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
-        strcpy(subTopics[0], "/pp/ubx/0236/Lb");
-        strcpy(subTopics[1], "/pp/Lb/");
-        strcpy(subTopics[2], "/pp/frequencies/Lb");
-    } else if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-        strcpy(subTopics[0], "/pp/ubx/0236/Lb");
-        strcpy(subTopics[2], "/pp/frequencies/Lb");
-    } else {
-        APP_CONSOLE(E, "Invalid Thingstream plan!");
-        ret = ESP_FAIL;
-    }
-
-    if (ret == ESP_OK) {
-        if (region == XPLR_THINGSTREAM_PP_REGION_EU) {
-            if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-                // Plan is LBAND do nothing
-            } else {
-                strcat(subTopics[1], "eu");
-            }
-        } else if (region == XPLR_THINGSTREAM_PP_REGION_US) {
-            if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-                // Plan is LBAND do nothing
-            } else {
-                strcat(subTopics[1], "us");
-            }
-        } else if (region == XPLR_THINGSTREAM_PP_REGION_KR) {
-            if (plan == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "IP+LBAND plan is not supported in Korea region");
-                ret = ESP_FAIL;
-            } else if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "LBAND plan is not supported in Korea region");
-                ret = ESP_FAIL;
-            } else {
-                strcat(subTopics[1], "kr");
-            }
-        } else if (region == XPLR_THINGSTREAM_PP_REGION_AU) {
-            if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "LBAND plan is not supported in Australia region");
-                ret = ESP_FAIL;
-            } else {
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                strcat(subTopics[1], "au");
-            }
-        } else if (region == XPLR_THINGSTREAM_PP_REGION_JP) {
-            if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                APP_CONSOLE(E, "LBAND plan is not supported in Japan region");
-                ret = ESP_FAIL;
-            } else {
-                memset(subTopics[2], 0x00, APP_MAX_TOPICLEN);
-                strcat(subTopics[1], "jp");
-            }
-        } else {
-            APP_CONSOLE(E, "Invalid region!");
-            ret = ESP_FAIL;
-        }
-    }
-
-    return ret;
 }
 
 /**
@@ -1027,6 +943,8 @@ static void appMqttInit(void)
 {
     esp_err_t ret;
     xplr_at_parser_thingstream_config_t *tsConfig = &profile->data.correctionData.thingstreamCfg;
+
+    mqttClientWifi.ucd.enableWatchdog = (bool) APP_ENABLE_CORR_MSG_WDG;
 
     /**
      * We declare how many slots a ring buffer should have.
@@ -1309,7 +1227,7 @@ static void appCellFsm(void)
         case APP_FSM_THINGSTREAM_INIT:
             appCellState[1] = appCellState[0];
             xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_TS, XPLR_ATPARSER_STATUS_INIT);
-            appCellError = appCellThingstreamInit(NULL, thingstreamSettings);
+            appCellError = thingstreamInit(NULL, thingstreamSettings);
             if (appCellError == APP_ERROR_OK) {
                 appCellState[0] = APP_FSM_INIT_MQTT_CLIENT;
             } else if (appCellError == APP_ERROR_NETWORK_OFFLINE) {
@@ -1349,23 +1267,18 @@ static void appCellFsm(void)
                         appCellState[0] = APP_FSM_MQTT_DISCONNECT;
                     }
                 }
+
+                /* If LBAND module has forwarded messages then feed MQTT watchdog (if enabled) */
+                if (xplrLbandHasFrwdMessage()) {
+                    xplrCellMqttFeedWatchdog(cellConfig.profileIndex, mqttClientCell.id);
+                }
             }
             break;
         case APP_FSM_MQTT_DISCONNECT:
             appCellState[1] = appCellState[0];
             /* De-init mqtt client */
             xplrCellMqttDeInit(cellConfig.profileIndex, mqttClientCell.id);
-            /* De-init thingstream struct-instance */
-            memset(&thingstreamSettings->server.serverUrl, 0x00, XPLR_THINGSTREAM_URL_SIZE_MAX);
-            memset(&thingstreamSettings->server.deviceId, 0x00, XPLR_THINGSTREAM_DEVICEUID_SIZE);
-            memset(&thingstreamSettings->server.ppToken, 0x00, XPLR_THINGSTREAM_PP_TOKEN_SIZE);
-            memset(&thingstreamSettings->pointPerfect.urlPath, 0x00, XPLR_THINGSTREAM_URL_SIZE_MAX);
-            thingstreamSettings->pointPerfect.mqttSupported = 0;
-            thingstreamSettings->pointPerfect.lbandSupported = 0;
-            memset(&thingstreamSettings->pointPerfect.dynamicKeys, 0x00, sizeof(xplr_thingstream_pp_dKeys_t));
-            memset(&thingstreamSettings->pointPerfect.topicList, 0x00, sizeof(xplr_thingstream_pp_topic_t));
-            thingstreamSettings->pointPerfect.numOfTopics = 0;
-            thingstreamSettings->connType = 0;
+            initializeTsConfig();
 
             /* Reboot cell */
             xplrAtParserSetSubsystemStatus(XPLR_ATPARSER_SUBSYSTEM_CELL, XPLR_ATPARSER_STATUS_RECONNECTING);
@@ -1423,12 +1336,19 @@ static void appCellFsm(void)
     }
 }
 
-static app_cell_error_t appCellThingstreamInit(const char *token, xplr_thingstream_t *instance)
+static app_cell_error_t thingstreamInit(const char *token, xplr_thingstream_t *instance)
 {
     app_cell_error_t ret;
     xplr_thingstream_error_t err;
 
     /* initialize thingstream instance with dummy token */
+    if (profile->data.net.interface == XPLR_ATPARSER_NET_INTERFACE_WIFI) {
+        instance->connType = XPLR_THINGSTREAM_PP_CONN_WIFI;
+    } else if (profile->data.net.interface == XPLR_ATPARSER_NET_INTERFACE_CELL) {
+        instance->connType = XPLR_THINGSTREAM_PP_CONN_CELL;
+    } else {
+        instance->connType = XPLR_THINGSTREAM_PP_CONN_INVALID;
+    }
     err = xplrThingstreamInit(ztpToken, instance);
 
     if (err != XPLR_THINGSTREAM_OK) {
@@ -1437,13 +1357,18 @@ static app_cell_error_t appCellThingstreamInit(const char *token, xplr_thingstre
         /* Config thingstream topics according to region and subscription plan*/
         err = xplrThingstreamPpConfigTopics(profile->data.correctionData.thingstreamCfg.tsRegion,
                                             profile->data.correctionData.thingstreamCfg.tsPlan,
+                                            isLbandAsyncInit,
                                             instance);
         if (err == XPLR_THINGSTREAM_OK) {
-            for (uint8_t i = 0; i < instance->pointPerfect.numOfTopics; i++) {
-                topics[i].index = i;
-                topics[i].name = instance->pointPerfect.topicList[i].path;
-                topics[i].rxBuffer = &rxBuff[i][0];
-                topics[i].rxBufferSize = APP_MQTT_PAYLOAD_BUF_SIZE;
+            if (profile->data.net.interface == XPLR_ATPARSER_NET_INTERFACE_CELL) {
+                for (uint8_t i = 0; i < instance->pointPerfect.numOfTopics; i++) {
+                    topics[i].index = i;
+                    topics[i].name = instance->pointPerfect.topicList[i].path;
+                    topics[i].rxBuffer = &rxBuff[i][0];
+                    topics[i].rxBufferSize = APP_MQTT_BUFFER_SIZE;
+                }
+            } else {
+                //do nothing
             }
             ret = APP_ERROR_OK;
         } else {
@@ -1454,10 +1379,31 @@ static app_cell_error_t appCellThingstreamInit(const char *token, xplr_thingstre
     return ret;
 }
 
+static void initializeTsConfig()
+{
+    if (thingstreamSettings != NULL) {
+        /* De-init thingstream struct-instance */
+        memset(&thingstreamSettings->server.serverUrl, 0x00, XPLR_THINGSTREAM_URL_SIZE_MAX);
+        memset(&thingstreamSettings->server.deviceId, 0x00, XPLR_THINGSTREAM_DEVICEUID_SIZE);
+        memset(&thingstreamSettings->server.ppToken, 0x00, XPLR_THINGSTREAM_PP_TOKEN_SIZE);
+        memset(&thingstreamSettings->pointPerfect.urlPath, 0x00, XPLR_THINGSTREAM_URL_SIZE_MAX);
+        thingstreamSettings->pointPerfect.mqttSupported = 0;
+        thingstreamSettings->pointPerfect.lbandSupported = 0;
+        memset(&thingstreamSettings->pointPerfect.dynamicKeys, 0x00, sizeof(xplr_thingstream_pp_dKeys_t));
+        memset(&thingstreamSettings->pointPerfect.topicList, 0x00, sizeof(xplr_thingstream_pp_topic_t));
+        thingstreamSettings->pointPerfect.numOfTopics = 0;
+        thingstreamSettings->connType = 0;
+    } else {
+        APP_CONSOLE(E, "NULL thingstream settings pointer!");
+    }
+}
+
 static app_cell_error_t appCellMqttClientInit(void)
 {
     app_cell_error_t ret;
     xplrCell_mqtt_error_t err;
+
+    mqttClientCell.enableWdg = (bool) APP_ENABLE_CORR_MSG_WDG;
 
     ret = appCellNetworkConnected();
 
@@ -1808,6 +1754,12 @@ static esp_err_t appInitLogging(void)
                 APP_CONSOLE(D, "Location Helper Service logging instance initialized");
             }
         }
+        if (appLogCfg.logOptions.singleLogOpts.thingstreamLog == 1) {
+            appLogCfg.thingstreamLogIndex = xplrThingstreamInitLogModule(NULL);
+            if (appLogCfg.thingstreamLogIndex >= 0) {
+                APP_CONSOLE(D, "Thingstream logging instance initialized");
+            }
+        }
         if (appLogCfg.logOptions.singleLogOpts.wifiStarterLog == 1) {
             appLogCfg.wifiStarterLogIndex = xplrHlprLocSrvcInitLogModule(NULL);
             if (appLogCfg.wifiStarterLogIndex >= 0) {
@@ -1895,28 +1847,12 @@ static void appDeInitLogging(void)
 static void appStopWifiMqtt(void)
 {
     esp_err_t espRet;
-    xplr_thingstream_pp_plan_t plan = profile->data.correctionData.thingstreamCfg.tsPlan;
 
     APP_CONSOLE(D, "Disconnecting from MQTT");
     if (mqttClientWifi.handler != NULL) {
         requestDc = true;
-        if (plan == XPLR_THINGSTREAM_PP_PLAN_IP) {
-            espRet = xplrMqttWifiUnsubscribeFromTopic(&mqttClientWifi,
-                                                      topicArray[0]);
-            espRet |= xplrMqttWifiUnsubscribeFromTopic(&mqttClientWifi,
-                                                       topicArray[1]);
-        } else if (plan == XPLR_THINGSTREAM_PP_PLAN_IPLBAND) {
-            espRet = xplrMqttWifiUnsubscribeFromTopicArray(&mqttClientWifi,
-                                                           topicArray,
-                                                           ELEMENTCNT(topicArray));
-        } else if (plan == XPLR_THINGSTREAM_PP_PLAN_LBAND) {
-            espRet = xplrMqttWifiUnsubscribeFromTopic(&mqttClientWifi,
-                                                      topicArray[0]);
-            espRet |= xplrMqttWifiUnsubscribeFromTopic(&mqttClientWifi,
-                                                       topicArray[2]);
-        } else {
-            espRet = ESP_FAIL;
-        }
+        espRet = xplrMqttWifiUnsubscribeFromTopicArrayZtp(&mqttClientWifi,
+                                                          &thingstreamSettings->pointPerfect);
         if (mqttClientWifi.handler != NULL && espRet == ESP_OK) {
             espRet = xplrMqttWifiHardDisconnect(&mqttClientWifi);
             if (espRet != ESP_OK) {
@@ -1924,6 +1860,7 @@ static void appStopWifiMqtt(void)
             } else {
                 APP_CONSOLE(D, "xplrMqttWifiHardDisconnect returned %d", espRet);
             }
+            initializeTsConfig();
         } else {
             /*Unsubscribing failed*/
             APP_CONSOLE(E, "Null mqttClientWifi handler. Can't perform hard disconnect");
@@ -2016,17 +1953,7 @@ static app_cell_error_t appStopCell(void)
     } else {
         //do nothing
     }
-    /* De-init thingstream struct-instance */
-    memset(&thingstreamSettings->server.serverUrl, 0x00, XPLR_THINGSTREAM_URL_SIZE_MAX);
-    memset(&thingstreamSettings->server.deviceId, 0x00, XPLR_THINGSTREAM_DEVICEUID_SIZE);
-    memset(&thingstreamSettings->server.ppToken, 0x00, XPLR_THINGSTREAM_PP_TOKEN_SIZE);
-    memset(&thingstreamSettings->pointPerfect.urlPath, 0x00, XPLR_THINGSTREAM_URL_SIZE_MAX);
-    thingstreamSettings->pointPerfect.mqttSupported = 0;
-    thingstreamSettings->pointPerfect.lbandSupported = 0;
-    memset(&thingstreamSettings->pointPerfect.dynamicKeys, 0x00, sizeof(xplr_thingstream_pp_dKeys_t));
-    memset(&thingstreamSettings->pointPerfect.topicList, 0x00, sizeof(xplr_thingstream_pp_topic_t));
-    thingstreamSettings->pointPerfect.numOfTopics = 0;
-    thingstreamSettings->connType = 0;
+    initializeTsConfig();
 
     comErr = xplrComCellPowerDown(cellConfig.profileIndex);
     if (comErr != XPLR_COM_OK) {
@@ -2117,7 +2044,7 @@ static void appNtripWifiFsm(void)
                     // NTRIP client has received correction data
                     xplrWifiNtripGetCorrectionData(&ntripWifiClient,
                                                    rxBuff[0],
-                                                   XPLRWIFI_NTRIP_RECEIVE_DATA_SIZE,
+                                                   XPLRNTRIP_RECEIVE_DATA_SIZE,
                                                    &ntripSize);
                     APP_CONSOLE(I, "Received correction data [%d B]", ntripSize);
                     espRet = xplrGnssSendRtcmCorrectionData(gnssDvcPrfId, rxBuff[0], ntripSize);
@@ -2288,7 +2215,7 @@ static void appNtripCellFsm(void)
                             // NTRIP client has received correction data
                             xplrCellNtripGetCorrectionData(&ntripCellClient,
                                                            rxBuff[0],
-                                                           XPLRCELL_NTRIP_RECEIVE_DATA_SIZE,
+                                                           XPLRNTRIP_RECEIVE_DATA_SIZE,
                                                            &ntripSize);
                             APP_CONSOLE(I, "Received correction data [%d B]", ntripSize);
                             espRet = xplrGnssSendRtcmCorrectionData(gnssDvcPrfId, rxBuff[0], ntripSize);

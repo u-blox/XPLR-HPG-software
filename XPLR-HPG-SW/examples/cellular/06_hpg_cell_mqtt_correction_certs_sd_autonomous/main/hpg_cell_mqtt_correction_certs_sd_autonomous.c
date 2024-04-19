@@ -78,7 +78,7 @@
 #define APP_DEVICE_OFF_MODE_BTN         (BOARD_IO_BTN1)                 /* Button for shutting down device */
 #define APP_DEVICE_OFF_MODE_TRIGGER     (3U)                            /* Device off press duration in sec */
 
-#define APP_JSON_PAYLOAD_BUF_SIZE       ((5U) * (1024U))                /*  Size of buffer to fetch the json configuration and credential data */
+#define APP_JSON_PAYLOAD_BUF_SIZE       ((6U) * (1024U))                /*  Size of buffer to fetch the json configuration and credential data */
 #define APP_INACTIVITY_TIMEOUT          30                              /*  Time in seconds to trigger an inactivity timeout and cause a restart */
 
 /* ----------------------------------------------------------------
@@ -1134,7 +1134,10 @@ static app_error_t thingstreamInit(xplr_thingstream_t *instance)
         /* Set up thingstream module's connection type */
         instance->connType = XPLR_THINGSTREAM_PP_CONN_CELL;
         xplrThingstreamInit(ztpToken, instance);
-        err = xplrThingstreamPpConfigFromFile(configData, region, instance);
+        err = xplrThingstreamPpConfigFromFile(configData,
+                                              region,
+                                              (bool)app.options.gnssCfg.corrDataSrc,
+                                              instance);
         if (err != XPLR_THINGSTREAM_OK) {
             APP_CONSOLE(E, "Error in thingstream module configuration");
             ret = APP_ERROR_THINGSTREAM;
@@ -1471,13 +1474,13 @@ static app_error_t appTerminate(void)
     xplrCellMqttDeInit(cellConfig.profileIndex, mqttClient.id);
 
     if (enableLband) {
-        espErr = xplrLbandStopDevice(lbandDvcPrfId);
+        espErr = xplrLbandPowerOffDevice(lbandDvcPrfId);
     } else {
         espErr = ESP_OK;
     }
 
     if (espErr == ESP_OK) {
-        espErr = xplrGnssStopDevice(gnssDvcPrfId);
+        espErr = xplrGnssPowerOffDevice(gnssDvcPrfId);
         startTime = esp_timer_get_time();
         do {
             gnssErr = xplrGnssFsm(gnssDvcPrfId);

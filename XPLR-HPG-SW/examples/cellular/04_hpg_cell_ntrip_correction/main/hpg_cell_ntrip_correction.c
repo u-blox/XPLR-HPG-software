@@ -73,9 +73,9 @@
 #define APP_RUN_TIME                    (120)                           /* period of app (in seconds) before exiting */
 #define APP_DEVICE_OFF_MODE_BTN         (BOARD_IO_BTN1)                 /* Button for shutting down device */
 #define APP_DEVICE_OFF_MODE_TRIGGER     (3U)                            /* Device off press duration in sec */
-#define APP_RESTART_ON_ERROR            (1U)            /* Trigger soft reset if device in error state*/
-#define APP_INACTIVITY_TIMEOUT          (30)            /* Time in seconds to trigger an inactivity timeout and cause a restart */
-
+#define APP_RESTART_ON_ERROR            (1U)                            /* Trigger soft reset if device in error state*/
+#define APP_INACTIVITY_TIMEOUT          (30)                            /* Time in seconds to trigger an inactivity timeout and cause a restart */
+#define APP_JSON_PAYLOAD_BUF_SIZE       (6 * 1024)                      /* size of the configuration file payload in the SD card */
 #define APP_GNSS_I2C_ADDR 0x42
 #define APP_SD_HOT_PLUG_FUNCTIONALITY   (1U) & APP_SD_LOGGING_ENABLED   /* Option to enable/disable the hot plug functionality for the SD card */
 #define APP_RESTART_ON_ERROR            (1U)                            /* Trigger soft reset if device in error state*/
@@ -86,7 +86,10 @@
 
 /* application errors */
 typedef enum {
-    APP_ERROR_UNKNOWN = -6,
+    APP_ERROR_UNKNOWN = -9,
+    APP_ERROR_LOGGING,
+    APP_ERROR_SD_INIT,
+    APP_ERROR_SD_CONFIG_NOT_FOUND,
     APP_ERROR_CELL_INIT,
     APP_ERROR_GNSS_INIT,
     APP_ERROR_NTRIP_INIT,
@@ -100,6 +103,9 @@ typedef enum {
     APP_FSM_INACTIVE = -2,
     APP_FSM_ERROR,
     APP_FSM_INIT_HW = 0,
+    APP_FSM_CHECK_SD_CONFIG,
+    APP_FSM_APPLY_CONFIG,
+    APP_FSM_INIT_LOGGING,
     APP_FSM_INIT_PERIPHERALS,
     APP_FSM_CONFIG_GNSS,
     APP_FSM_CHECK_NETWORK,
@@ -110,13 +116,20 @@ typedef enum {
     APP_FSM_TERMINATE,
 } app_fsm_t;
 
+/* application options */
+typedef struct app_options_type {
+    uint32_t locPrintInterval;
+    uint32_t imuPrintInterval;
+    uint64_t runtime;
+} app_options_t;
+
 typedef struct app_type {
     app_error_t error;
     app_fsm_t state[2];
+    app_options_t options;
     uint64_t time;
     uint64_t timeOut;
 } app_t;
-
 
 typedef union __attribute__((packed))
 {
@@ -164,6 +177,8 @@ const uint8_t gnssDvcPrfId = 0;
 /* location modules */
 xplrGnssStates_t gnssState;
 xplrLocDvcInfo_t gnssDvcInfo;
+static xplrLocDeviceType_t gnssDvcType = (xplrLocDeviceType_t)CONFIG_GNSS_MODULE;
+static bool gnssDrEnable = CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE;
 xplrGnssLocation_t gnssLocation;
 #if 1 == APP_PRINT_IMU_DATA
 xplrGnssImuAlignmentInfo_t imuAlignmentInfo;
@@ -180,29 +195,29 @@ static uint64_t timePrevLoc;
 static uint64_t timePrevDr;
 #endif
 
-char ntripBuffer[XPLRCELL_NTRIP_RECEIVE_DATA_SIZE];
+char ntripBuffer[XPLRNTRIP_RECEIVE_DATA_SIZE];
 uint32_t ntripSize;
 SemaphoreHandle_t ntripSemaphore;
 
 /**
  * You can use KConfig to set up these values.
  */
-static const char ntripHost[] = CONFIG_XPLR_NTRIP_HOST;
-static const int ntripPort = CONFIG_XPLR_NTRIP_PORT;
-static const char ntripMountpoint[] = CONFIG_XPLR_NTRIP_MOUNTPOINT;
-static const char ntripUserAgent[] = CONFIG_XPLR_NTRIP_USERAGENT;
+static char *ntripHost = CONFIG_XPLR_NTRIP_HOST;
+static int ntripPort = CONFIG_XPLR_NTRIP_PORT;
+static char *ntripMountpoint = CONFIG_XPLR_NTRIP_MOUNTPOINT;
+static char *ntripUserAgent = CONFIG_XPLR_NTRIP_USERAGENT;
 #ifdef CONFIG_XPLR_NTRIP_GGA_MSG
-static const bool ntripSendGga = true;
+static bool ntripSendGga = true;
 #else
-static const bool ntripSendGga = false;
+static bool ntripSendGga = false;
 #endif
 #ifdef CONFIG_XPLR_NTRIP_USE_AUTH
-static const bool ntripUseAuth = true;
+static bool ntripUseAuth = true;
 #else
-static const bool ntripUseAuth = false;
+static bool ntripUseAuth = false;
 #endif
-static const char ntripUser[] = CONFIG_XPLR_NTRIP_USERNAME;
-static const char ntripPass[] = CONFIG_XPLR_NTRIP_PASSWORD;
+static char *ntripUser = CONFIG_XPLR_NTRIP_USERNAME;
+static char *ntripPass = CONFIG_XPLR_NTRIP_PASSWORD;
 
 int64_t gnssLastAction = 0;
 
@@ -242,6 +257,14 @@ int32_t len;
 bool cellHasRebooted = false;
 static bool deviceOffRequested = false;
 
+static char configData[APP_JSON_PAYLOAD_BUF_SIZE];
+/* The name of the configuration file */
+static char configFilename[] = "xplr_config.json";
+/* Application configuration options */
+xplr_cfg_t appOptions;
+/* Flag indicating the board is setup by the SD config file */
+static bool isConfiguredFromFile = false;
+
 xplr_ntrip_error_t xplrNtripErr;
 esp_err_t esp_err;
 
@@ -277,8 +300,14 @@ static void appPrintLocation(uint8_t periodSecs);
 /* print dead reckoning info to console */
 static void appPrintDeadReckoning(uint8_t periodSecs);
 #endif
+/* initialize SD card */
+static app_error_t sdInit(void);
 /* initialize app */
 static void appInit(void);
+/* fetch configuration from SD file */
+static app_error_t appFetchConfigFromFile(void);
+/* apply configuration from file */
+static void appApplyConfigFromFile(void);
 /* initialize ntrip client */
 static app_error_t ntripInit(void);
 #if (APP_SD_LOGGING_ENABLED == 1)
@@ -295,6 +324,7 @@ static void appDeviceOffTask(void *arg);
 static void appHaltExecution(void);
 /* card detect task */
 #if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appInitHotPlugTask(void);
 static void appCardDetectTask(void *arg);
 #endif
 
@@ -339,6 +369,35 @@ void app_main(void)
                 appInitBoard();
                 appInit();
                 app.timeOut = MICROTOSEC(esp_timer_get_time());
+                app.state[0] = APP_FSM_CHECK_SD_CONFIG;
+                break;
+            case APP_FSM_CHECK_SD_CONFIG:
+                app.state[1] = app.state[0];
+                app.error = appFetchConfigFromFile();
+                if (app.error == APP_ERROR_OK) {
+                    app.state[0] = APP_FSM_APPLY_CONFIG;
+                } else {
+                    app.state[0] = APP_FSM_INIT_LOGGING;
+                }
+                break;
+            case APP_FSM_APPLY_CONFIG:
+                app.state[1] = app.state[0];
+                appApplyConfigFromFile();
+                app.state[0] = APP_FSM_INIT_LOGGING;
+                break;
+            case APP_FSM_INIT_LOGGING:
+                app.state[1] = app.state[0];
+#if (1 == APP_SD_LOGGING_ENABLED)
+                espErr = appInitLogging();
+                if (espErr == ESP_OK) {
+#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+                    appInitHotPlugTask();
+#endif
+                    APP_CONSOLE(I, "Logging initialized");
+                } else {
+                    APP_CONSOLE(E, "Failed to initialize logging");
+                }
+#endif
                 app.state[0] = APP_FSM_INIT_PERIPHERALS;
                 break;
             case APP_FSM_INIT_PERIPHERALS:
@@ -417,9 +476,9 @@ void app_main(void)
                 if (app.error != APP_ERROR_OK) {
                     app.state[0] = APP_FSM_ERROR;
                 } else {
-                    appPrintLocation(APP_GNSS_LOC_INTERVAL);
+                    appPrintLocation(app.options.locPrintInterval);
 #if 1 == APP_PRINT_IMU_DATA
-                    appPrintDeadReckoning(APP_GNSS_DR_INTERVAL);
+                    appPrintDeadReckoning(app.options.imuPrintInterval);
 #endif
                     if (gnssState == XPLR_GNSS_STATE_DEVICE_READY) {
                         gnssLastAction = esp_timer_get_time();
@@ -431,7 +490,7 @@ void app_main(void)
                                 // NTRIP client has received correction data
                                 xplrNtripErr = xplrCellNtripGetCorrectionData(&ntripClient,
                                                                               ntripBuffer,
-                                                                              XPLRCELL_NTRIP_RECEIVE_DATA_SIZE,
+                                                                              XPLRNTRIP_RECEIVE_DATA_SIZE,
                                                                               &ntripSize);
                                 if (xplrNtripErr != XPLR_NTRIP_ERROR) {
                                     APP_CONSOLE(I, "Received correction data [%d B]", ntripSize);
@@ -481,7 +540,7 @@ void app_main(void)
 
                     vTaskDelay(pdMS_TO_TICKS(25));
                     /* Check if its time to terminate the app */
-                    if (MICROTOSEC(esp_timer_get_time()) - app.timeOut >= APP_RUN_TIME) {
+                    if (MICROTOSEC(esp_timer_get_time()) - app.timeOut >= app.options.runtime) {
                         app.state[0] = APP_FSM_TERMINATE;
                     }
                 }
@@ -570,7 +629,7 @@ static void configGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
      * module connected via UART
      */
     gnssCfg->hw.dvcConfig.deviceType = U_DEVICE_TYPE_GNSS;
-    gnssCfg->hw.dvcType = (xplrLocDeviceType_t)CONFIG_GNSS_MODULE;
+    gnssCfg->hw.dvcType = gnssDvcType;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.moduleType      =  1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinEnablePower  = -1;
     gnssCfg->hw.dvcConfig.deviceCfg.cfgGnss.pinDataReady    = -1;
@@ -586,7 +645,7 @@ static void configGnssSettings(xplrGnssDeviceCfg_t *gnssCfg)
     gnssCfg->hw.dvcNetwork.devicePinPwr = -1;
     gnssCfg->hw.dvcNetwork.devicePinDataReady = -1;
 
-    gnssCfg->dr.enable = CONFIG_XPLR_GNSS_DEADRECKONING_ENABLE;
+    gnssCfg->dr.enable = gnssDrEnable;
     gnssCfg->dr.mode = XPLR_GNSS_IMU_CALIBRATION_AUTO;
     gnssCfg->dr.vehicleDynMode = XPLR_GNSS_DYNMODE_AUTOMOTIVE;
 
@@ -624,19 +683,6 @@ static esp_err_t appInitBoard(void)
         }
     }
 
-#if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
-    if (xTaskCreate(appCardDetectTask,
-                    "hotPlugTask",
-                    4 * 1024,
-                    NULL,
-                    20,
-                    &cardDetectTaskHandler) == pdPASS) {
-        APP_CONSOLE(D, "Hot plug for SD card OK");
-    } else {
-        APP_CONSOLE(W, "Hot plug for SD card failed");
-    }
-#endif
-
     return ret;
 }
 
@@ -672,7 +718,11 @@ static void configCellSettings(xplrCom_cell_config_t *cfg)
     cfg->comSettings->pinRts = BOARD_IO_UART_LTE_RTS;
 
     cfg->netSettings->type = U_NETWORK_TYPE_CELL;
-    cfg->netSettings->pApn = CONFIG_XPLR_CELL_APN;
+    if (isConfiguredFromFile) {
+        cfg->netSettings->pApn = appOptions.cellCfg.apn;
+    } else {
+        cfg->netSettings->pApn = CONFIG_XPLR_CELL_APN;
+    }
     cfg->netSettings->timeoutSeconds = 240; /* Connection timeout in seconds */
     cfg->mno = 100;
 
@@ -994,9 +1044,162 @@ static void appPrintDeadReckoning(uint8_t periodSecs)
 
 static void appInit(void)
 {
-    app.state[0] = APP_FSM_INIT_HW;
     timerInit();
-    app.state[0] = APP_FSM_INIT_PERIPHERALS;
+    app.options.runtime = APP_RUN_TIME;
+    app.options.locPrintInterval = APP_GNSS_LOC_INTERVAL;
+#if 1 == APP_PRINT_IMU_DATA
+    app.options.imuPrintInterval = APP_GNSS_DR_INTERVAL;
+#endif
+}
+
+static app_error_t appFetchConfigFromFile(void)
+{
+    app_error_t ret;
+    esp_err_t espErr;
+    xplrSd_error_t sdErr;
+    xplr_board_error_t boardErr = xplrBoardDetectSd();
+
+    if (boardErr == XPLR_BOARD_ERROR_OK) {
+        ret = sdInit();
+        if (ret == APP_ERROR_OK) {
+            memset(configData, 0, APP_JSON_PAYLOAD_BUF_SIZE);
+            sdErr = xplrSdReadFileString(configFilename, configData, APP_JSON_PAYLOAD_BUF_SIZE);
+            if (sdErr == XPLR_SD_OK) {
+                espErr = xplrParseConfigSettings(configData, &appOptions);
+                if (espErr == ESP_OK) {
+                    APP_CONSOLE(I, "Successfully parsed application and module configuration");
+                } else {
+                    APP_CONSOLE(E, "Failed to parse application and module configuration from <%s>", configFilename);
+                }
+            } else {
+                APP_CONSOLE(E, "Unable to get configuration from the SD card");
+                ret = APP_ERROR_SD_CONFIG_NOT_FOUND;
+            }
+        } else {
+            // Do nothing
+        }
+    } else {
+        APP_CONSOLE(D, "SD is not mounted. Keeping Kconfig configuration");
+        ret = APP_ERROR_SD_CONFIG_NOT_FOUND;
+    }
+
+    return ret;
+}
+
+static void appApplyConfigFromFile(void)
+{
+    xplr_cfg_logInstance_t *instance = NULL;
+    /* Applying the options that are relevant to the example */
+    /* Application settings */
+    app.options.runtime = appOptions.appCfg.runTime;
+    app.options.locPrintInterval = appOptions.appCfg.locInterval;
+#if (1 == APP_PRINT_IMU_DATA)
+    app.options.imuPrintInterval = appOptions.drCfg.printInterval;
+#endif
+    /* NTRIP Settings */
+    ntripHost = appOptions.ntripCfg.host;
+    ntripPort = appOptions.ntripCfg.port;
+    ntripMountpoint = appOptions.ntripCfg.mountpoint;
+    ntripUserAgent = appOptions.ntripCfg.userAgent;
+    ntripSendGga = appOptions.ntripCfg.sendGGA;
+    ntripUseAuth = appOptions.ntripCfg.useAuth;
+    ntripUser = appOptions.ntripCfg.username;
+    ntripPass = appOptions.ntripCfg.password;
+    /* Logging Settings */
+    appLogCfg.logOptions.allLogOpts = 0;
+    for (uint8_t i = 0; i < appOptions.logCfg.numOfInstances; i++) {
+        instance = &appOptions.logCfg.instance[i];
+        if (strstr(instance->description, "Application") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.appLog = 1;
+                appLogCfg.appLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "NVS") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.nvsLog = 1;
+                appLogCfg.nvsLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "COM Cell") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.comLog = 1;
+                appLogCfg.comLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "NTRIP Cell") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.ntripLog = 1;
+                appLogCfg.ntripLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "GNSS Info") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.gnssLog = 1;
+                appLogCfg.gnssLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "GNSS Async") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.gnssAsyncLog = 1;
+                appLogCfg.gnssAsyncLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else if (strstr(instance->description, "Location") != NULL) {
+            if (instance->enable) {
+                appLogCfg.logOptions.singleLogOpts.locHelperLog = 1;
+                appLogCfg.locHelperLogIndex = i;
+            } else {
+                // Do nothing module not enabled
+            }
+        } else {
+            // Do nothing module not used in example
+        }
+    }
+    /* GNSS and DR settings */
+    gnssDvcType = (xplrLocDeviceType_t)appOptions.gnssCfg.module;
+    gnssDrEnable = appOptions.drCfg.enable;
+    /* Options from SD config file applied */
+    isConfiguredFromFile = true;
+}
+
+static app_error_t sdInit(void)
+{
+    app_error_t ret;
+    xplrSd_error_t sdErr;
+
+    sdErr = xplrSdConfigDefaults();
+    if (sdErr != XPLR_SD_OK) {
+        APP_CONSOLE(E, "Failed to configure the SD card");
+        ret = APP_ERROR_SD_INIT;
+    } else {
+        /* Create the card detect task */
+        sdErr = xplrSdStartCardDetectTask();
+        /* A time window so that the card gets detected*/
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (sdErr != XPLR_SD_OK) {
+            APP_CONSOLE(E, "Failed to start the card detect task");
+            ret = APP_ERROR_SD_INIT;
+        } else {
+            /* Initialize the SD card */
+            sdErr = xplrSdInit();
+            if (sdErr != XPLR_SD_OK) {
+                APP_CONSOLE(E, "Failed to initialize the SD card");
+                ret = APP_ERROR_SD_INIT;
+            } else {
+                APP_CONSOLE(D, "SD card initialized");
+                ret = APP_ERROR_OK;
+            }
+        }
+    }
+
+    return ret;
 }
 
 static app_error_t appTerminate(void)
@@ -1009,7 +1212,7 @@ static app_error_t appTerminate(void)
 
     ntripRet = xplrCellNtripDeInit(&ntripClient);
     if (ntripRet != XPLR_NTRIP_ERROR) {
-        espErr = xplrGnssStopDevice(gnssDvcPrfId);
+        espErr = xplrGnssPowerOffDevice(gnssDvcPrfId);
         startTime = esp_timer_get_time();
         do {
             gnssErr = xplrGnssFsm(gnssDvcPrfId);
@@ -1045,79 +1248,112 @@ static app_error_t appTerminate(void)
 static esp_err_t appInitLogging(void)
 {
     esp_err_t ret;
-    xplrSd_error_t sdErr;
+    xplr_cfg_logInstance_t *instance = NULL;
 
-    /* Configure the SD card */
-    sdErr = xplrSdConfigDefaults();
-    if (sdErr != XPLR_SD_OK) {
-        APP_CONSOLE(E, "Failed to configure the SD card");
-        ret = ESP_FAIL;
+    /* Initialize the SD card */
+    if (!xplrSdIsCardInit()) {
+        ret = sdInit();
     } else {
-        /* Create the card detect task */
-        sdErr = xplrSdStartCardDetectTask();
-        /* A time window so that the card gets detected*/
-        vTaskDelay(pdMS_TO_TICKS(50));
-        if (sdErr != XPLR_SD_OK) {
-            APP_CONSOLE(E, "Failed to start the card detect task");
-            ret = ESP_FAIL;
-        } else {
-            /* Initialize the SD card */
-            sdErr = xplrSdInit();
-            if (sdErr != XPLR_SD_OK) {
-                APP_CONSOLE(E, "Failed to initialize the SD card");
-                ret = ESP_FAIL;
-            } else {
-                APP_CONSOLE(D, "SD card initialized");
-                ret = ESP_OK;
-            }
-        }
+        ret = ESP_OK;
     }
 
     if (ret == ESP_OK) {
         /* Start logging for each module (if selected in configuration) */
         if (appLogCfg.logOptions.singleLogOpts.appLog == 1) {
-            appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
-                                                "main_app.log",
-                                                XPLRLOG_FILE_SIZE_INTERVAL,
-                                                XPLRLOG_NEW_FILE_ON_BOOT);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.appLogIndex];
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    instance->filename,
+                                                    instance->sizeInterval,
+                                                    instance->erasePrev);
+                instance = NULL;
+            } else {
+                appLogCfg.appLogIndex = xplrLogInit(XPLR_LOG_DEVICE_INFO,
+                                                    "main_app.log",
+                                                    XPLRLOG_FILE_SIZE_INTERVAL,
+                                                    XPLRLOG_NEW_FILE_ON_BOOT);
+            }
+
             if (appLogCfg.appLogIndex >= 0) {
                 APP_CONSOLE(D, "Application logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.nvsLog == 1) {
-            appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
-            if (appLogCfg.nvsLogIndex >= 0) {
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.nvsLogIndex];
+                appLogCfg.nvsLogIndex = xplrNvsInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.nvsLogIndex = xplrNvsInitLogModule(NULL);
+            }
+
+            if (appLogCfg.nvsLogIndex > 0) {
                 APP_CONSOLE(D, "NVS logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.ntripLog == 1) {
-            appLogCfg.ntripLogIndex = xplrCellNtripInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.ntripLogIndex];
+                appLogCfg.ntripLogIndex = xplrCellNtripInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.ntripLogIndex = xplrCellNtripInitLogModule(NULL);
+            }
+
             if (appLogCfg.ntripLogIndex >= 0) {
                 APP_CONSOLE(D, "Cell NTRIP Client logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.gnssLog == 1) {
-            appLogCfg.gnssLogIndex = xplrGnssInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.gnssLogIndex];
+                appLogCfg.gnssLogIndex = xplrGnssInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.gnssLogIndex = xplrGnssInitLogModule(NULL);
+            }
+
             if (appLogCfg.gnssLogIndex >= 0) {
                 APP_CONSOLE(D, "GNSS logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.gnssAsyncLog == 1) {
-            appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.gnssAsyncLogIndex];
+                appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.gnssAsyncLogIndex = xplrGnssAsyncLogInit(NULL);
+            }
+
             if (appLogCfg.gnssAsyncLogIndex >= 0) {
                 APP_CONSOLE(D, "GNSS Async logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.locHelperLog == 1) {
-            appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.locHelperLogIndex];
+                appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.locHelperLogIndex = xplrHlprLocSrvcInitLogModule(NULL);
+            }
+
             if (appLogCfg.locHelperLogIndex >= 0) {
                 APP_CONSOLE(D, "Location Helper Service logging instance initialized");
             }
         }
         if (appLogCfg.logOptions.singleLogOpts.comLog == 1) {
-            appLogCfg.comLogIndex = xplrComCellInitLogModule(NULL);
+            if (isConfiguredFromFile) {
+                instance = &appOptions.logCfg.instance[appLogCfg.comLogIndex];
+                appLogCfg.comLogIndex = xplrComCellInitLogModule(instance);
+                instance = NULL;
+            } else {
+                appLogCfg.comLogIndex = xplrComCellInitLogModule(NULL);
+            }
+
             if (appLogCfg.comLogIndex >= 0) {
-                APP_CONSOLE(D, "Com Cellular service logging instance initialized");
+                APP_CONSOLE(D, "Cellular module logging instance initialized");
             }
         }
     }
@@ -1226,6 +1462,24 @@ static void appDeviceOffTask(void *arg)
 }
 
 #if (APP_SD_HOT_PLUG_FUNCTIONALITY == 1)
+static void appInitHotPlugTask(void)
+{
+    if (!isConfiguredFromFile || appOptions.logCfg.hotPlugEnable) {
+        if (xTaskCreate(appCardDetectTask,
+                        "hotPlugTask",
+                        4 * 1024,
+                        NULL,
+                        20,
+                        &cardDetectTaskHandler) == pdPASS) {
+            APP_CONSOLE(D, "Hot plug for SD card OK");
+        } else {
+            APP_CONSOLE(W, "Hot plug for SD card failed");
+        }
+    } else {
+        // Do nothing Hot plug task disabled
+    }
+}
+
 static void appCardDetectTask(void *arg)
 {
     bool prvState = xplrSdIsCardOn();
