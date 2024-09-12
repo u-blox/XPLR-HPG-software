@@ -31,7 +31,7 @@ D [(4830) hpgZtp|ztpWifiSetHeaders|285|: Successfully set headers for HTTP POST
 D [(4836) hpgThingstream|tsApiMsgCreatePpZtp|1152|: Thingstream API PP ZTP POST of 124 bytes created:
 {
         "tags": ["ztp"],
-        "token":        ***REMOVED***,
+        "token":        "my-ztp-token",
         "hardwareId":   "hpg-040148",
         "givenName":    "xplrHpg"
 }
